@@ -1,0 +1,43 @@
+/**
+ * app/(app)/billing/page.tsx — billing management page.
+ *
+ * Phase 4 / Day 28: current plan, next billing date, change plan, cancel
+ * subscription (self-serve, no support ticket required). Shows the locked
+ * pricing ($29 Starter / $59 Pro) and the 14-day trial status.
+ */
+
+import { getCurrentUser } from "@/lib/auth";
+import { getStore } from "@/lib/db";
+import { PLAN_PRICES, PLAN_LIMITS, TRIAL_DAYS } from "@/lib/types";
+import BillingManager from "@/components/BillingManager";
+
+export default async function BillingPage() {
+  const user = await getCurrentUser();
+  const store = await getStore();
+  const businesses = await store.getBusinessesForUser(user!.id);
+  const business = businesses[0]!;
+  const sub = await store.getSubscription(business.id);
+  const requestsThisMonth = await store.countRequestsThisMonth(business.id);
+
+  const plan = sub?.plan ?? "starter";
+  const limit = PLAN_LIMITS[plan].monthlyReviewRequests;
+  const overage = Math.max(0, requestsThisMonth - limit);
+
+  return (
+    <BillingManager
+      businessId={business.id}
+      businessName={business.name}
+      plan={plan}
+      status={sub?.status ?? "none"}
+      currentPeriodEnd={sub?.current_period_end ?? null}
+      trialEndsAt={sub?.trial_ends_at ?? null}
+      requestsThisMonth={requestsThisMonth}
+      monthlyLimit={limit}
+      overage={overage}
+      overageRate={PLAN_PRICES.overagePerRequest}
+      starterPrice={PLAN_PRICES.starter}
+      proPrice={PLAN_PRICES.pro}
+      trialDays={TRIAL_DAYS}
+    />
+  );
+}
