@@ -29,6 +29,6 @@ export async function POST(req: NextRequest) {
   }
 
   await finalizeCheckout(business.id, plan);
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
   return NextResponse.json({ ok: true, url: `${appUrl}/billing?status=success` });
 }

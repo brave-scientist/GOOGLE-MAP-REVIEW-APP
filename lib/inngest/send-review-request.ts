@@ -59,7 +59,7 @@ export async function runSendReviewRequest(requestId: string): Promise<void> {
     return;
   }
 
-  const reviewLink = business.google_review_link ?? `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/r/${request.click_token}`;
+const reviewLink = business.google_review_link ?? `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001"}/r/${request.click_token}`;
   const messageText = renderTemplate(business.review_request_template, {
     customer_name: request.customer_name,
     business_name: business.name,

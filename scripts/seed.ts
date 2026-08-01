@@ -296,7 +296,7 @@ async function main() {
   console.log(`  - ${reviews.length} reviews (1-5★, Google + Facebook)`);
   console.log(`  - ${review_requests.length} review requests (mixed statuses)`);
   console.log(`  - ${subscriptions.length} subscriptions`);
-  console.log("  Run `pnpm dev` and visit http://localhost:3000");
+console.log("  Run `pnpm dev` and visit http://localhost:3001");
 }
 
 main().catch((err) => {
