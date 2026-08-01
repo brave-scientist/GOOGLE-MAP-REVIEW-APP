@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Landing-page fonts + base styling, ported faithfully from landing-page.html.
+   The full landing page is rendered as React components in app/(marketing);
+   these globals ensure the design tokens apply app-wide. */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ink text-cream font-sans antialiased;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display font-bold;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Awning-stripe divider (storefront motif) used across marketing + app. */
+.awning {
+  height: 14px;
+  background: repeating-linear-gradient(
+    115deg,
+    theme("colors.brass.DEFAULT") 0 22px,
+    theme("colors.ink.3") 22px 44px
+  );
+  opacity: 0.9;
+}
+
+/* Typewriter cursor + posted-check pulse (hero demo card). */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
