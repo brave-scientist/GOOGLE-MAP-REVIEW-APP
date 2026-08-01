@@ -1,0 +1,33 @@
+/**
+ * app/r/[token]/route.ts — trackable review-request click redirect.
+ *
+ * Phase 3 / Day 24: when a customer clicks the review link in their SMS/email,
+ * this route logs the click (status = clicked) and redirects to the actual
+ * Google review URL. This is the "X requests sent, Y clicked" metric.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { getStore } from "@/lib/db";
+
+export async function GET(_req: NextRequest, { params }: { params: { token: string } }) {
+  const store = await getStore();
+
+  // Find the request by click_token across all businesses.
+  const businesses = await store.listConnectedBusinesses();
+  for (const business of businesses) {
+    const requests = await store.listReviewRequests(business.id);
+    const request = requests.find((r) => r.click_token === params.token);
+    if (request) {
+      // Log the click.
+      if (request.status !== "clicked") {
+        await store.updateReviewRequest(request.id, { status: "clicked" });
+      }
+      // Redirect to the Google review link (or a fallback).
+      const reviewUrl = business.google_review_link ?? "https://google.com";
+      return NextResponse.redirect(reviewUrl, { status: 302 });
+    }
+  }
+
+  // Token not found — redirect to a generic page.
+  return NextResponse.redirect(new URL("/", _req.url), { status: 302 });
+}

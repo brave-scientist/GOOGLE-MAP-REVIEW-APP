@@ -1,0 +1,56 @@
+/**
+ * app/api/businesses/[id]/review-requests/upload/route.ts — CSV bulk upload (tertiary).
+ *
+ * Phase 3 / Day 23: accepts a CSV file, parses name + phone/email columns,
+ * returns a preview (same pattern as paste-list). The client then confirms via
+ * send-batch. Kept behind a "Have a spreadsheet instead?" link in the UI.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
+import { getStore } from "@/lib/db";
+import { parsePasteList } from "@/lib/parsing/paste-list-parser";
+
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const store = await getStore();
+  const business = await store.getBusinessById(params.id);
+  if (!business || business.owner_user_id !== user.id) {
+    return NextResponse.json({ ok: false, error: "Business not found" }, { status: 404 });
+  }
+
+  let csvText = "";
+  const contentType = req.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+    const file = formData.get("file");
+    if (file && file instanceof File) {
+      csvText = await file.text();
+    }
+  } else {
+    const body = (await req.json().catch(() => ({}))) as { text?: string };
+    csvText = body.text ?? "";
+  }
+
+  if (!csvText.trim()) {
+    return NextResponse.json({ ok: false, error: "No CSV data" }, { status: 400 });
+  }
+
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+  const hasHeader = /name|phone|email|contact/i.test(lines[0] ?? "");
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const result = parsePasteList(dataLines.join("\n"));
+
+  return NextResponse.json({
+    ok: true,
+    contacts: result.contacts,
+    unparsed: result.unparsed,
+    total: result.contacts.length,
+    entry_method: "csv_import",
+  });
+}

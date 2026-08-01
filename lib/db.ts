@@ -66,9 +66,11 @@ export interface DataStore {
   // ---- review requests -----------------------------------------------------
   listReviewRequests(businessId: string): Promise<ReviewRequest[]>;
   createReviewRequest(
-    input: Omit<ReviewRequest, "id" | "created_at" | "status" | "click_token"> & {
+    input: Omit<ReviewRequest, "id" | "created_at" | "status" | "click_token" | "message_text" | "sent_at"> & {
       status?: ReviewRequest["status"];
       click_token?: string | null;
+      message_text?: string | null;
+      sent_at?: string | null;
     }
   ): Promise<ReviewRequest>;
   updateReviewRequest(id: string, patch: Partial<ReviewRequest>): Promise<ReviewRequest>;

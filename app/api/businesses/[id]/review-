@@ -1,0 +1,77 @@
+/**
+ * app/api/businesses/[id]/review-requests/send-batch/route.ts
+ *
+ * Phase 3 / Day 24: confirm + send a batch of parsed contacts (from paste-list
+ * or CSV). Creates review_requests rows with the correct entry_method, then
+ * sends each with pacing via runSendBatch.
+ */
+
+import { NextRequest, NextResponse } from "next/server";
+import { getStore } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import { runSendBatch } from "@/lib/inngest/send-review-request";
+import type { RequestEntryMethod } from "@/lib/types";
+
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const store = await getStore();
+  const business = await store.getBusinessById(params.id);
+  if (!business || business.owner_user_id !== user.id) {
+    return NextResponse.json({ ok: false, error: "Business not found" }, { status: 404 });
+  }
+
+  const body = (await req.json().catch(() => ({}))) as {
+    contacts?: Array<{ name: string; contact: string; channel: "sms" | "email" }>;
+    entry_method?: RequestEntryMethod;
+  };
+
+  const contacts = body.contacts ?? [];
+  const entryMethod = body.entry_method ?? "paste_list";
+
+  if (contacts.length === 0) {
+    return NextResponse.json({ ok: false, error: "No contacts to send" }, { status: 400 });
+  }
+
+  // Create a batch record.
+  const batch = await store.createBatch({
+    business_id: business.id,
+    total_contacts: contacts.length,
+  });
+
+  // Create review_request rows.
+  const requestIds: string[] = [];
+  for (const c of contacts) {
+    const req = await store.createReviewRequest({
+      business_id: business.id,
+      customer_name: c.name,
+      customer_contact: c.contact,
+      channel: c.channel,
+      source: entryMethod === "csv_import" ? "csv_import" : "manual_upload",
+      entry_method: entryMethod,
+      status: "queued",
+    });
+    requestIds.push(req.id);
+  }
+
+  // Send with pacing (stagger within the batch).
+  await runSendBatch(business.id, requestIds);
+
+  // Update batch counts.
+  const requests = await store.listReviewRequests(business.id);
+  const batchReqs = requests.filter((r) => requestIds.includes(r.id));
+  const sentCount = batchReqs.filter((r) => r.status === "sent" || r.status === "clicked").length;
+  const failedCount = batchReqs.filter((r) => r.status === "failed").length;
+  await store.updateBatch(batch.id, { sent_count: sentCount, failed_count: failedCount });
+
+  return NextResponse.json({
+    ok: true,
+    batch_id: batch.id,
+    sent: sentCount,
+    failed: failedCount,
+    total: contacts.length,
+  });
+}
