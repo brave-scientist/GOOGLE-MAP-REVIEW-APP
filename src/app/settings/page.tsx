@@ -1,0 +1,261 @@
+'use client'
+
+import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Building2, User, CreditCard, Plug, Shield, Bell } from 'lucide-react'
+
+export default function SettingsPage() {
+  return (
+    <div className="flex min-h-screen">
+      <AppSidebar />
+      <main className="flex-1 min-w-0 pb-20 lg:pb-0">
+        <AppTopbar
+          title="Settings"
+          description="Manage your business profile, integrations, billing, and team"
+        />
+        <div className="p-4 sm:p-6">
+          <Tabs defaultValue="business" className="space-y-6">
+            <TabsList className="glass-card">
+              <TabsTrigger value="business" className="text-xs">
+                <Building2 className="w-3.5 h-3.5 mr-1.5" />
+                Business
+              </TabsTrigger>
+              <TabsTrigger value="integrations" className="text-xs">
+                <Plug className="w-3.5 h-3.5 mr-1.5" />
+                Integrations
+              </TabsTrigger>
+              <TabsTrigger value="billing" className="text-xs">
+                <CreditCard className="w-3.5 h-3.5 mr-1.5" />
+                Billing
+              </TabsTrigger>
+              <TabsTrigger value="team" className="text-xs">
+                <User className="w-3.5 h-3.5 mr-1.5" />
+                Team
+              </TabsTrigger>
+              <TabsTrigger value="security" className="text-xs">
+                <Shield className="w-3.5 h-3.5 mr-1.5" />
+                Security
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="business">
+              <Card className="p-6 glass-card max-w-2xl">
+                <h3 className="font-display font-bold mb-1">Business Profile</h3>
+                <p className="text-xs text-muted-foreground mb-5">This information appears on review replies and customer-facing pages.</p>
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="name">Business Name</Label>
+                    <Input id="name" defaultValue="Bamboo Garden Restaurant" className="mt-1.5 glass-card" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="industry">Industry</Label>
+                      <Input id="industry" defaultValue="restaurant" className="mt-1.5 glass-card capitalize" />
+                    </div>
+                    <div>
+                      <Label htmlFor="timezone">Timezone</Label>
+                      <Input id="timezone" defaultValue="America/Los_Angeles" className="mt-1.5 glass-card" />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="address">Address</Label>
+                    <Input id="address" defaultValue="100 Main Street, Suite 1, San Francisco, CA 94102" className="mt-1.5 glass-card" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="phone">Phone</Label>
+                      <Input id="phone" defaultValue="+1 (415) 555-1000" className="mt-1.5 glass-card" />
+                    </div>
+                    <div>
+                      <Label htmlFor="email">Reply-from Email</Label>
+                      <Input id="email" defaultValue="hello@bamboogarden.com" className="mt-1.5 glass-card" />
+                    </div>
+                  </div>
+                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">Save changes</Button>
+                </div>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="integrations">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-4xl">
+                {[
+                  { name: 'Google Business Profile', status: 'connected', desc: 'Pull reviews from Google', icon: '🔍' },
+                  { name: 'Facebook Pages', status: 'connected', desc: 'Pull reviews from Facebook', icon: '📘' },
+                  { name: 'Yelp', status: 'available', desc: 'Yelp partnership API', icon: '⭐' },
+                  { name: 'Trustpilot', status: 'available', desc: 'Trustpilot API', icon: '✓' },
+                  { name: 'Twilio (SMS)', status: 'connected', desc: 'Send SMS review requests', icon: '📱' },
+                  { name: 'Resend (Email)', status: 'connected', desc: 'Send email review requests', icon: '✉' },
+                  { name: 'Stripe', status: 'connected', desc: 'Billing & subscriptions', icon: '💳' },
+                  { name: 'Slack', status: 'available', desc: 'Real-time alerts', icon: '💬' },
+                ].map(int => (
+                  <Card key={int.name} className="p-4 glass-card hover:border-[var(--brass)]/30 transition-all">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-accent/40 flex items-center justify-center text-lg flex-shrink-0">
+                        {int.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="text-sm font-medium">{int.name}</h4>
+                          <Badge
+                            variant="outline"
+                            className={
+                              int.status === 'connected'
+                                ? 'text-[10px] bg-green-500/10 text-green-600 border-green-500/30'
+                                : 'text-[10px] text-muted-foreground'
+                            }
+                          >
+                            {int.status}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-2">{int.desc}</p>
+                        <Button variant="outline" size="sm" className="h-6 text-[10px]">
+                          {int.status === 'connected' ? 'Manage' : 'Connect'}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="billing">
+              <div className="max-w-2xl space-y-4">
+                <Card className="p-6 glass-card">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-display font-bold">Current Plan</h3>
+                      <p className="text-xs text-muted-foreground">Pro plan · $99/month</p>
+                    </div>
+                    <Badge variant="outline" className="bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
+                      Trial · 12 days left
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    {[
+                      { label: 'Businesses', value: '3 of 3' },
+                      { label: 'SMS sent', value: '142 of 500' },
+                      { label: 'AI drafts', value: '47 of ∞' },
+                    ].map(s => (
+                      <div key={s.label} className="p-3 rounded-lg bg-accent/20">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">{s.label}</div>
+                        <div className="text-sm font-bold">{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">Upgrade to Enterprise</Button>
+                    <Button variant="outline">Manage billing</Button>
+                  </div>
+                </Card>
+
+                <Card className="p-6 glass-card">
+                  <h3 className="font-display font-bold mb-3">Recent Invoices</h3>
+                  <div className="space-y-2">
+                    {[
+                      { date: 'Aug 1, 2026', amount: '$0.00', status: 'Trial' },
+                      { date: 'Jul 1, 2026', amount: '$0.00', status: 'Trial' },
+                    ].map(inv => (
+                      <div key={inv.date} className="flex items-center justify-between p-3 rounded-lg bg-accent/20">
+                        <div>
+                          <div className="text-sm font-medium">{inv.date}</div>
+                          <div className="text-[10px] text-muted-foreground">{inv.status}</div>
+                        </div>
+                        <div className="text-sm font-mono">{inv.amount}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="team">
+              <Card className="p-6 glass-card max-w-2xl">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="font-display font-bold">Team Members</h3>
+                    <p className="text-xs text-muted-foreground">3 of 5 seats used on Pro plan</p>
+                  </div>
+                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">Invite member</Button>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { name: 'Sarah Chen', email: 'owner@bamboogarden.com', role: 'Owner', avatar: 'SC' },
+                    { name: 'Marcus Webb', email: 'manager@bamboogarden.com', role: 'Admin', avatar: 'MW' },
+                    { name: 'Priya Patel', email: 'staff@bamboogarden.com', role: 'Staff', avatar: 'PP' },
+                  ].map(m => (
+                    <div key={m.email} className="flex items-center gap-3 p-3 rounded-lg bg-accent/20 hover:bg-accent/30 transition-colors">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
+                        {m.avatar}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium">{m.name}</div>
+                        <div className="text-[10px] text-muted-foreground">{m.email}</div>
+                      </div>
+                      <Badge variant="outline" className="text-[10px]">{m.role}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="security">
+              <div className="max-w-2xl space-y-4">
+                <Card className="p-6 glass-card">
+                  <h3 className="font-display font-bold mb-4 flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-[var(--brass)]" />
+                    Security
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: 'Two-factor authentication', desc: 'Add an extra layer of security', enabled: false },
+                      { label: 'Login alerts', desc: 'Get notified of new sign-ins', enabled: true },
+                      { label: 'Session timeout', desc: 'Auto-logout after 30 minutes', enabled: true },
+                      { label: 'IP allowlist', desc: 'Restrict access to specific IPs', enabled: false },
+                    ].map(s => (
+                      <div key={s.label} className="flex items-center justify-between p-3 rounded-lg bg-accent/20">
+                        <div>
+                          <div className="text-sm font-medium">{s.label}</div>
+                          <div className="text-[10px] text-muted-foreground">{s.desc}</div>
+                        </div>
+                        <Badge variant="outline" className={s.enabled ? 'bg-green-500/10 text-green-600 border-green-500/30' : ''}>
+                          {s.enabled ? 'Enabled' : 'Disabled'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                <Card className="p-6 glass-card">
+                  <h3 className="font-display font-bold mb-4 flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-[var(--brass)]" />
+                    Audit Log
+                  </h3>
+                  <div className="space-y-2">
+                    {[
+                      { action: 'reply.posted', target: 'Review from Sarah C.', time: '2m ago' },
+                      { action: 'draft.generated', target: 'Review from Marcus W.', time: '14m ago' },
+                      { action: 'campaign.sent', target: 'Post-visit follow-up', time: '1h ago' },
+                      { action: 'user.login', target: 'Sarah Chen', time: '3h ago' },
+                    ].map((log, i) => (
+                      <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/30 transition-colors text-xs">
+                        <div className="font-mono text-[10px] text-[var(--brass)] w-32 truncate">{log.action}</div>
+                        <div className="flex-1 truncate text-muted-foreground">{log.target}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono">{log.time}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </main>
+      <MobileNav />
+    </div>
+  )
+}

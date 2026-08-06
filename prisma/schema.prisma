@@ -1,0 +1,220 @@
+// ReviewReply Enterprise — Prisma schema
+// Multi-tenant: Organization → Businesses → Users
+// Core entities: Reviews, ReviewRequests, Campaigns, ReplyDrafts
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id              String       @id @default(cuid())
+  name            String
+  plan            Plan         @default(FREE)
+  stripeCustomerId String?
+  trialEndsAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  businesses      Business[]
+  members         OrgMember[]
+}
+
+model OrgMember {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      Role     @default(VIEWER)
+  createdAt DateTime @default(now())
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  avatarUrl String?
+  passwordHash String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships OrgMember[]
+  businesses Business[] // businesses they own
+}
+
+model Business {
+  id           String   @id @default(cuid())
+  orgId        String?
+  ownerId      String
+  name         String
+  industry     String?
+  address      String?
+  phone        String?
+  timezone     String   @default("America/New_York")
+  googleLocationId String?
+  facebookPageId  String?
+  avgRating    Float    @default(0)
+  reviewCount  Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  org          Organization? @relation(fields: [orgId], references: [id])
+  owner        User     @relation(fields: [ownerId], references: [id])
+  reviews      Review[]
+  reviewRequests ReviewRequest[]
+  campaigns    Campaign[]
+  replyTemplates ReplyTemplate[]
+}
+
+model Review {
+  id           String   @id @default(cuid())
+  businessId   String
+  source       ReviewSource
+  externalId   String
+  author       String
+  authorAvatar String?
+  rating       Int
+  title        String?
+  text         String
+  language     String   @default("en")
+  sentimentScore Float?  // -1.0 to 1.0
+  topics       String?   // JSON array as string (SQLite limitation)
+  replyText    String?
+  repliedAt    DateTime?
+  repliedBy    String?
+  draftText    String?
+  draftStatus  DraftStatus @default(NONE)
+  createdAt    DateTime @default(now())
+  fetchedAt    DateTime @default(now())
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([source, externalId])
+  @@index([businessId, createdAt])
+  @@index([businessId, rating])
+}
+
+model ReviewRequest {
+  id           String   @id @default(cuid())
+  businessId   String
+  customerName String
+  customerContact String // phone or email
+  channel      Channel
+  status       RequestStatus @default(PENDING)
+  message      String?
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  clickedAt    DateTime?
+  convertedAt  DateTime?
+  campaignId   String?
+  createdAt    DateTime @default(now())
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  campaign     Campaign? @relation(fields: [campaignId], references: [id])
+
+  @@index([businessId, status])
+  @@index([campaignId])
+}
+
+model Campaign {
+  id           String   @id @default(cuid())
+  businessId   String
+  name         String
+  description  String?
+  trigger      String   @default("manual") // manual | event | schedule
+  channelMix   String   @default("sms,email") // CSV of channels
+  messageTemplate String?
+  status       String   @default("draft") // draft | active | paused | completed
+  sentCount    Int      @default(0)
+  clickCount   Int      @default(0)
+  conversionCount Int   @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  requests     ReviewRequest[]
+
+  @@index([businessId, status])
+}
+
+model ReplyTemplate {
+  id           String   @id @default(cuid())
+  businessId   String
+  title        String
+  body         String
+  language     String   @default("en")
+  category     String?  // positive | negative | neutral | escalation
+  usageCount   Int      @default(0)
+  createdAt    DateTime @default(now())
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  targetType String?
+  targetId  String?
+  metadata  String?  // JSON string
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+// ── Enums ──────────────────────────────────────
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+  AGENCY
+  CUSTOM
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  STAFF
+  VIEWER
+  AGENCY_ADMIN
+  AGENCY_STAFF
+  CLIENT_ADMIN
+  CLIENT_STAFF
+}
+
+enum ReviewSource {
+  GOOGLE
+  FACEBOOK
+  YELP
+  TRUSTPILOT
+  APPLE_MAPS
+  BING_PLACES
+  INTERNAL
+}
+
+enum DraftStatus {
+  NONE
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  POSTED
+}
+
+enum Channel {
+  SMS
+  EMAIL
+  QR
+  WHATSAPP
+  APPLE_CHAT
+}
+
+enum RequestStatus {
+  PENDING
+  SENT
+  DELIVERED
+  CLICKED
+  CONVERTED
+  FAILED
+  OPTED_OUT
+}
