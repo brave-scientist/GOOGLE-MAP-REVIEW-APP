@@ -492,11 +492,11 @@ function BentoFeatures() {
               </div>
               <div>
                 <h3 className="font-display text-lg font-bold">Multi-Channel Requests</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">SMS · Email · QR · WhatsApp</p>
+                <p className="text-xs text-muted-foreground mt-0.5">SMS · Email · QR</p>
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-              Send review requests by SMS, email, QR poster, or WhatsApp. Smart send-time, A/B testing, TCPA-compliant.
+              Send review requests by SMS, email, or QR poster. Smart send-time, A/B testing, TCPA-compliant.
             </p>
             <div className="flex gap-2">
               {[Phone, Mail, QrCode, Globe].map((Icon, i) => (
@@ -871,7 +871,6 @@ function Comparison() {
     { name: 'AI Reply Draft Generation', rr: true, birdeye: true, podium: false, reputation: true },
     { name: 'Brand Voice Training', rr: true, birdeye: false, podium: false, reputation: false },
     { name: 'Multi-Channel Request (SMS + Email + QR)', rr: true, birdeye: true, podium: true, reputation: false },
-    { name: 'WhatsApp / Apple Business Chat', rr: true, birdeye: false, podium: true, reputation: false },
     { name: 'Sentiment + Topic Analytics', rr: true, birdeye: true, podium: false, reputation: true },
     { name: 'Competitor Benchmarking', rr: true, birdeye: false, podium: false, reputation: true },
     { name: 'Branded Widget & Testimonial Engine', rr: true, birdeye: false, podium: false, reputation: true },

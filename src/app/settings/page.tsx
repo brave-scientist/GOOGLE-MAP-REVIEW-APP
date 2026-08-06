@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check } from 'lucide-react'
+import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -86,10 +86,14 @@ export default function SettingsPage() {
         />
         <div className="p-4 sm:p-6">
           <Tabs defaultValue="business" className="space-y-6">
-            <TabsList className="glass-card">
+            <TabsList className="glass-card flex-wrap">
               <TabsTrigger value="business" className="text-xs">
                 <Building2 className="w-3.5 h-3.5 mr-1.5" />
                 Business
+              </TabsTrigger>
+              <TabsTrigger value="brand-voice" className="text-xs">
+                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                Brand Voice
               </TabsTrigger>
               <TabsTrigger value="integrations" className="text-xs">
                 <Plug className="w-3.5 h-3.5 mr-1.5" />
@@ -148,6 +152,10 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="brand-voice">
+              <BrandVoiceTab />
             </TabsContent>
 
             <TabsContent value="integrations">
@@ -363,6 +371,240 @@ export default function SettingsPage() {
         </div>
       </main>
       <MobileNav />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────
+// Brand Voice Training Tab
+// ─────────────────────────────────────────────────────────
+function BrandVoiceTab() {
+  const [profile, setProfile] = useState<{
+    id?: string
+    businessId?: string
+    examples: Array<{ reviewText: string; replyText: string }>
+    toneGuidelines: string
+    signature: string
+    forbiddenPhrases: string
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [businessId, setBusinessId] = useState<string>('')
+
+  // Form state
+  const [toneGuidelines, setToneGuidelines] = useState('')
+  const [signature, setSignature] = useState('')
+  const [forbiddenPhrases, setForbiddenPhrases] = useState('')
+  const [examples, setExamples] = useState<Array<{ reviewText: string; replyText: string }>>([
+    { reviewText: '', replyText: '' },
+  ])
+
+  useEffect(() => {
+    // Fetch business ID first
+    fetch('/api/dashboard')
+      .then(r => r.json())
+      .then(d => {
+        if (d.businesses?.[0]) {
+          setBusinessId(d.businesses[0].id)
+          return fetch(`/api/brand-voice?businessId=${d.businesses[0].id}`)
+        }
+      })
+      .then(r => r?.json())
+      .then(d => {
+        if (d?.profile) {
+          setProfile(d.profile)
+          setToneGuidelines(d.profile.toneGuidelines || '')
+          setSignature(d.profile.signature || '')
+          setForbiddenPhrases(d.profile.forbiddenPhrases || '')
+          setExamples(d.profile.examples?.length > 0 ? d.profile.examples : [{ reviewText: '', replyText: '' }])
+        }
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/brand-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId,
+          examples: examples.filter(e => e.reviewText && e.replyText),
+          toneGuidelines,
+          signature,
+          forbiddenPhrases,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Brand voice saved!', {
+          description: data.message,
+        })
+        setProfile(data.profile)
+      } else {
+        toast.error('Failed to save', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addExample = () => {
+    setExamples([...examples, { reviewText: '', replyText: '' }])
+  }
+
+  const removeExample = (i: number) => {
+    setExamples(examples.filter((_, idx) => idx !== i))
+  }
+
+  const updateExample = (i: number, field: 'reviewText' | 'replyText', value: string) => {
+    setExamples(examples.map((ex, idx) => idx === i ? { ...ex, [field]: value } : ex))
+  }
+
+  if (loading) {
+    return (
+      <Card className="p-6 glass-card max-w-3xl">
+        <div className="h-4 w-32 bg-muted/40 rounded mb-4 animate-pulse" />
+        <div className="h-32 bg-muted/20 rounded animate-pulse" />
+      </Card>
+    )
+  }
+
+  return (
+    <div className="max-w-3xl space-y-4">
+      <Card className="p-6 glass-card">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-lg bg-[var(--brass)]/10 flex items-center justify-center flex-shrink-0">
+            <Sparkles className="w-5 h-5 text-[var(--brass)]" />
+          </div>
+          <div>
+            <h3 className="font-display font-bold">Brand Voice Training</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Train the AI to write replies that sound like you. Paste examples of your tone, add guidelines, and the AI will match your voice on every draft.
+            </p>
+          </div>
+        </div>
+
+        {profile && (
+          <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/30 flex items-center gap-2">
+            <Check className="w-4 h-4 text-green-500" />
+            <span className="text-xs text-green-600">
+              Profile active — last updated {new Date(profile.updatedAt || Date.now()).toLocaleDateString()}
+            </span>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {/* Tone Guidelines */}
+          <div>
+            <Label htmlFor="tone">Tone & Voice Guidelines</Label>
+            <textarea
+              id="tone"
+              rows={3}
+              placeholder="e.g., We're warm and friendly but professional. We use the customer's first name. We keep replies to 2-3 sentences. We always invite them back."
+              value={toneGuidelines}
+              onChange={e => setToneGuidelines(e.target.value)}
+              className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--brass)]/30"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Describe how you want replies to sound. The AI will follow these rules.</p>
+          </div>
+
+          {/* Signature */}
+          <div>
+            <Label htmlFor="signature">Default Signature (optional)</Label>
+            <Input
+              id="signature"
+              placeholder="e.g., — The Bamboo Garden Team"
+              value={signature}
+              onChange={e => setSignature(e.target.value)}
+              className="mt-1.5 glass-card"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Appended to the end of every reply.</p>
+          </div>
+
+          {/* Forbidden Phrases */}
+          <div>
+            <Label htmlFor="forbidden">Forbidden Phrases (comma-separated)</Label>
+            <Input
+              id="forbidden"
+              placeholder="e.g., Unfortunately, We apologize for any inconvenience, To whom it may concern"
+              value={forbiddenPhrases}
+              onChange={e => setForbiddenPhrases(e.target.value)}
+              className="mt-1.5 glass-card"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">Phrases the AI will never use in replies.</p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Example Replies */}
+      <Card className="p-6 glass-card">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-bold">Example Replies</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Paste 3-5 examples of review + your reply. The AI will match this style.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addExample}>
+            <Plus className="w-3 h-3 mr-1" />
+            Add example
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          {examples.map((ex, i) => (
+            <div key={i} className="p-3 rounded-lg bg-accent/20 border border-border/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Example {i + 1}</span>
+                {examples.length > 1 && (
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeExample(i)}>
+                    <Trash2 className="w-3 h-3 text-muted-foreground" />
+                  </Button>
+                )}
+              </div>
+              <div>
+                <Label className="text-[10px]">Customer Review</Label>
+                <textarea
+                  rows={2}
+                  placeholder="Paste the customer's review here..."
+                  value={ex.reviewText}
+                  onChange={e => updateExample(i, 'reviewText', e.target.value)}
+                  className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-[var(--brass)]/30"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px]">Your Reply</Label>
+                <textarea
+                  rows={2}
+                  placeholder="Paste your reply here..."
+                  value={ex.replyText}
+                  onChange={e => updateExample(i, 'replyText', e.target.value)}
+                  className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-[var(--brass)]/30"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          {examples.filter(e => e.reviewText && e.replyText).length} valid example{examples.filter(e => e.reviewText && e.replyText).length !== 1 ? 's' : ''} ready
+        </p>
+        <Button
+          className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]"
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+          {saving ? 'Saving...' : 'Save brand voice profile'}
+        </Button>
+      </div>
     </div>
   )
 }

@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
           name,
           channelMix,
           recipientCount: recipients.length,
-          sentNow,
+          sendNow,
         }),
       },
     })

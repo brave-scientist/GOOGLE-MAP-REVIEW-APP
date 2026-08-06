@@ -34,6 +34,8 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/blog/')) return true
   // Help article dynamic routes are public
   if (pathname.startsWith('/help/')) return true
+  // Review request landing page (QR code / SMS link target)
+  if (pathname.startsWith('/r/')) return true
   // Next.js internal routes
   if (pathname.startsWith('/_next')) return true
   if (pathname.startsWith('/favicon')) return true

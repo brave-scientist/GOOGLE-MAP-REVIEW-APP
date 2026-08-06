@@ -1,13 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import QRCode from 'qrcode'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Send, Plus, Trash2, Loader2, Check, Phone, Mail, QrCode } from 'lucide-react'
+import { Send, Plus, Trash2, Loader2, Check, Phone, Mail, QrCode, Upload, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -37,6 +38,9 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
   const [messageTemplate, setMessageTemplate] = useState('')
   const [recipients, setRecipients] = useState<Recipient[]>([{ name: '', contact: '' }])
   const [businessId, setBusinessId] = useState<string>('')
+  const [qrDataUrl, setQrDataUrl] = useState<string>('')
+  const [qrLoading, setQrLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch first business on mount
   useEffect(() => {
@@ -129,6 +133,137 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
     } finally {
       setLoading(false)
     }
+  }
+
+  // CSV import handler
+  const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l)
+
+      if (lines.length === 0) {
+        toast.error('CSV is empty', { description: 'The file has no rows' })
+        return
+      }
+
+      // Parse CSV — handle both "name,contact" header and no-header
+      const imported: Recipient[] = []
+      const firstRow = lines[0].toLowerCase()
+      const hasHeader = firstRow.includes('name') && firstRow.includes('contact')
+
+      const dataLines = hasHeader ? lines.slice(1) : lines
+
+      for (const line of dataLines) {
+        // Simple CSV parse (handles "name,contact" and "name,phone" and "name,email")
+        const parts = line.split(',').map(p => p.trim().replace(/^"|"$/g, ''))
+        if (parts.length >= 2) {
+          const name = parts[0]
+          const contact = parts[1]
+          if (name && contact) {
+            // Skip duplicates
+            if (!imported.find(r => r.contact === contact)) {
+              imported.push({ name, contact })
+            }
+          }
+        }
+      }
+
+      if (imported.length === 0) {
+        toast.error('No valid rows found', { description: 'CSV must have name,contact columns' })
+        return
+      }
+
+      setRecipients(prev => {
+        // Merge with existing, skip duplicates
+        const existing = prev.filter(r => r.name || r.contact)
+        const merged = [...existing]
+        for (const imp of imported) {
+          if (!merged.find(r => r.contact === imp.contact)) {
+            merged.push(imp)
+          }
+        }
+        return merged.length > 0 ? merged : imported
+      })
+
+      toast.success('CSV imported', { description: `${imported.length} recipients added` })
+    }
+    reader.readAsText(file)
+
+    // Reset the input so the same file can be uploaded again
+    event.target.value = ''
+  }
+
+  // QR code generation
+  const generateQrCode = async () => {
+    if (!businessId) {
+      toast.error('No business found', { description: 'Cannot generate QR without a business' })
+      return
+    }
+
+    setQrLoading(true)
+    try {
+      // The QR code links to /r/[token] — we need to create a review request first
+      // For QR campaigns, we create a single "placeholder" review request that the QR points to
+      const res = await fetch('/api/campaigns/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId,
+          name: name || 'QR Code Campaign',
+          description: 'QR code review request',
+          channelMix: ['qr'],
+          messageTemplate: messageTemplate || 'Leave us a review!',
+          recipients: [{ name: 'QR Scanner', contact: 'qr-code' }],
+          sendNow: false,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create QR campaign')
+      }
+
+      // The review request ID is the token for the QR code URL
+      // In production, this would be a short token; for now we use the campaign ID
+      const qrUrl = `${window.location.origin}/r/${data.campaign.id}`
+
+      // Generate QR code as data URL
+      const dataUrl = await QRCode.toDataURL(qrUrl, {
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#1F1E1C',
+          light: '#FFFFFF',
+        },
+      })
+
+      setQrDataUrl(dataUrl)
+      toast.success('QR code generated!', {
+        description: 'Download and print it for your business',
+      })
+    } catch (error) {
+      console.error('QR generation error:', error)
+      toast.error('Failed to generate QR code', { description: String(error) })
+    } finally {
+      setQrLoading(false)
+    }
+  }
+
+  // Download QR code as PNG
+  const downloadQrCode = () => {
+    if (!qrDataUrl) return
+
+    const link = document.createElement('a')
+    link.href = qrDataUrl
+    link.download = `review-reply-qr-${name || 'campaign'}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    toast.success('QR code downloaded')
   }
 
   return (
@@ -236,11 +371,65 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label>Recipients ({validRecipients.length} valid)</Label>
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addRecipient}>
-                <Plus className="w-3 h-3 mr-1" />
-                Add
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="w-3 h-3 mr-1" />
+                  Import CSV
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleCsvUpload}
+                />
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addRecipient}>
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add
+                </Button>
+              </div>
             </div>
+
+            {/* QR Code section — shows when QR channel is selected */}
+            {selectedChannels.includes('qr') && (
+              <div className="p-4 rounded-lg bg-[var(--brass)]/5 border border-[var(--brass)]/30">
+                <div className="flex items-center gap-2 mb-3">
+                  <QrCode className="w-4 h-4 text-[var(--brass)]" />
+                  <span className="text-sm font-medium">QR Code Review Request</span>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Customers scan this QR code to leave a review. Download and print it for your counter, receipts, or table tents.
+                </p>
+                <div className="flex items-center gap-4">
+                  {qrDataUrl ? (
+                    <img src={qrDataUrl} alt="Review QR Code" className="w-32 h-32 rounded-lg bg-white p-2" />
+                  ) : (
+                    <div className="w-32 h-32 rounded-lg bg-background/40 flex items-center justify-center">
+                      <QrCode className="w-12 h-12 text-muted-foreground/40" />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <Button size="sm" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-7 text-xs" onClick={generateQrCode} disabled={!businessId || qrLoading}>
+                      {qrLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <QrCode className="w-3 h-3 mr-1" />}
+                      {qrDataUrl ? 'Regenerate QR' : 'Generate QR Code'}
+                    </Button>
+                    {qrDataUrl && (
+                      <Button variant="outline" size="sm" className="h-7 text-xs ml-2" onClick={downloadQrCode}>
+                        <FileText className="w-3 h-3 mr-1" />
+                        Download PNG
+                      </Button>
+                    )}
+                    {qrDataUrl && (
+                      <p className="text-[10px] text-green-500 mt-2 flex items-center gap-1">
+                        <Check className="w-3 h-3" />
+                        QR code generated — links to your review page
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {recipients.map((r, i) => (
               <div key={i} className="flex gap-2">
                 <Input
@@ -290,6 +479,14 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* CSV format help */}
+            <div className="p-3 rounded-lg bg-accent/20 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground mb-1">CSV format:</div>
+              <code className="text-[10px]">name,contact</code><br />
+              <code className="text-[10px]">Sarah Chen,+14155552001</code><br />
+              <code className="text-[10px]">Marcus Webb,marcus@example.com</code>
             </div>
           </div>
         )}

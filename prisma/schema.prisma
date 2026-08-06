@@ -68,6 +68,7 @@ model Business {
   reviewRequests ReviewRequest[]
   campaigns    Campaign[]
   replyTemplates ReplyTemplate[]
+  brandVoiceProfile BrandVoiceProfile?
 }
 
 model Review {
@@ -217,4 +218,16 @@ enum RequestStatus {
   CONVERTED
   FAILED
   OPTED_OUT
+}
+
+model BrandVoiceProfile {
+  id           String   @id @default(cuid())
+  businessId   String   @unique
+  examples     String   @default("[]") // JSON array of {reviewText, replyText} pairs
+  toneGuidelines String @default("") // Free-text tone/voice guidelines from user
+  signature    String   @default("") // Default sign-off
+  forbiddenPhrases String @default("") // Comma-separated phrases to avoid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }

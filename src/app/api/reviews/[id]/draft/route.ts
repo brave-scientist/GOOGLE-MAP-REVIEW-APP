@@ -33,6 +33,11 @@ export async function POST(
       })
     }
 
+    // Fetch the brand voice profile for this business (if one exists)
+    const brandVoice = await db.brandVoiceProfile.findUnique({
+      where: { businessId: review.businessId },
+    })
+
     // Generate draft using REAL LLM via z-ai-web-dev-sdk
     const { draft, model, tokensUsed } = await generateLLMDraft({
       reviewText: review.text,
@@ -40,6 +45,12 @@ export async function POST(
       reviewAuthor: review.author,
       businessName: review.business.name,
       businessIndustry: review.business.industry || 'business',
+      brandVoiceProfile: brandVoice ? {
+        toneGuidelines: brandVoice.toneGuidelines,
+        signature: brandVoice.signature,
+        forbiddenPhrases: brandVoice.forbiddenPhrases,
+        examples: JSON.parse(brandVoice.examples || '[]'),
+      } : null,
     })
 
     await db.review.update({
@@ -89,12 +100,18 @@ async function generateLLMDraft(params: {
   reviewAuthor: string
   businessName: string
   businessIndustry: string
+  brandVoiceProfile?: {
+    toneGuidelines: string
+    signature: string
+    forbiddenPhrases: string
+    examples: Array<{ reviewText: string; replyText: string }>
+  } | null
 }): Promise<{ draft: string; model: string; tokensUsed: number }> {
-  const { reviewText, reviewRating, reviewAuthor, businessName, businessIndustry } = params
+  const { reviewText, reviewRating, reviewAuthor, businessName, businessIndustry, brandVoiceProfile } = params
   const firstName = reviewAuthor.split(' ')[0]
 
-  // Build the system prompt — this encodes the "brand voice" rules
-  const systemPrompt = `You are an expert customer service representative for ${businessName}, a ${businessIndustry} business.
+  // Build the system prompt — incorporates brand voice profile if available
+  let systemPrompt = `You are an expert customer service representative for ${businessName}, a ${businessIndustry} business.
 
 Your task is to write a public reply to a customer's online review. The reply should:
 
@@ -110,9 +127,36 @@ Your task is to write a public reply to a customer's online review. The reply sh
 7. NEVER mention that this is an AI-generated response
 8. If the review mentions anything that sounds like a legal threat (lawsuit, lawyer, BBB, attorney), respond professionally and ask them to contact management directly — do NOT apologize or admit fault
 9. Do not include emojis or hashtags
-10. Do not sign off with a name — the platform will append the signature automatically
+10. Do not sign off with a name — the platform will append the signature automatically`
 
-Write ONLY the reply text, no preamble, no explanation.`
+  // If a brand voice profile exists, append it to the system prompt
+  if (brandVoiceProfile) {
+    systemPrompt += '\n\n--- BRAND VOICE PROFILE ---\n'
+    systemPrompt += 'This business has trained a brand voice profile. You MUST match their voice.\n\n'
+
+    if (brandVoiceProfile.toneGuidelines) {
+      systemPrompt += `TONE GUIDELINES:\n${brandVoiceProfile.toneGuidelines}\n\n`
+    }
+
+    if (brandVoiceProfile.signature) {
+      systemPrompt += `SIGNATURE (append at the end):\n${brandVoiceProfile.signature}\n\n`
+    }
+
+    if (brandVoiceProfile.forbiddenPhrases) {
+      systemPrompt += `FORBIDDEN PHRASES (never use these):\n${brandVoiceProfile.forbiddenPhrases}\n\n`
+    }
+
+    if (brandVoiceProfile.examples && brandVoiceProfile.examples.length > 0) {
+      systemPrompt += `EXAMPLE REPLIES (match this tone and style):\n`
+      brandVoiceProfile.examples.slice(0, 5).forEach((ex, i) => {
+        systemPrompt += `\nExample ${i + 1}:\nReview: "${ex.reviewText}"\nReply: "${ex.replyText}"\n`
+      })
+    }
+
+    systemPrompt += '\n--- END BRAND VOICE PROFILE ---\n'
+  }
+
+  systemPrompt += '\nWrite ONLY the reply text, no preamble, no explanation.'
 
   const userPrompt = `Review details:
 - Customer name: ${reviewAuthor}
