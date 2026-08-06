@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Inbox, Star, Send, BarChart3, Code2, FileText,
-  Settings, Sparkles, ChevronRight, Building2,
+  Settings, Sparkles, ChevronRight, Building2, CreditCard, Shield, Target,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -15,8 +15,10 @@ const navItems = [
   { href: '/reviews', label: 'Reviews', icon: Star },
   { href: '/campaigns', label: 'Campaigns', icon: Send },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/competitors', label: 'Competitors', icon: Target },
   { href: '/widgets', label: 'Widgets', icon: Code2 },
   { href: '/reports', label: 'Reports', icon: FileText },
+  { href: '/agency', label: 'Agency', icon: Building2 },
 ]
 
 export function AppSidebar() {
@@ -94,6 +96,30 @@ export function AppSidebar() {
         >
           <Settings className="w-4 h-4" />
           <span>Settings</span>
+        </Link>
+        <Link
+          href="/billing"
+          className={cn(
+            'flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-all',
+            pathname === '/billing'
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50'
+          )}
+        >
+          <CreditCard className="w-4 h-4" />
+          <span>Billing</span>
+        </Link>
+        <Link
+          href="/compliance"
+          className={cn(
+            'flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-all',
+            pathname === '/compliance'
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50'
+          )}
+        >
+          <Shield className="w-4 h-4" />
+          <span>Compliance</span>
         </Link>
       </nav>
 

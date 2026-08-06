@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { CommandPalette } from "@/components/app/command-palette";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -59,6 +60,7 @@ export default function RootLayout({
           {children}
           <Toaster />
           <SonnerToaster />
+          <CommandPalette />
         </ThemeProvider>
       </body>
     </html>
