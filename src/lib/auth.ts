@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Role } from '@prisma/client'
-
-// Simple session management using HTTP-only cookies
-// In production, this would use Supabase Auth or NextAuth.js
+import { SignJWT, jwtVerify } from 'jose'
 
 const SESSION_COOKIE = 'rr_session'
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+// Get secret key — in production this MUST be set via env var
+const SECRET_KEY = process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'
+const secret = new TextEncoder().encode(SECRET_KEY)
 
 export interface SessionUser {
   id: string
@@ -18,24 +20,36 @@ export interface SessionUser {
   orgPlan: string | null
 }
 
-// Simple base64 encoding for session (NOT secure for production — use proper JWT signing)
-function encodeSession(user: SessionUser): string {
-  const payload = { ...user, exp: Date.now() + SESSION_TTL }
-  return Buffer.from(JSON.stringify(payload)).toString('base64')
+// Create a signed JWT session token
+async function encodeSession(user: SessionUser): Promise<string> {
+  return await new SignJWT({ ...user })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor((Date.now() + SESSION_TTL) / 1000))
+    .setSubject(user.id)
+    .sign(secret)
 }
 
-function decodeSession(token: string): SessionUser | null {
+// Verify and decode a JWT session token
+async function decodeSession(token: string): Promise<SessionUser | null> {
   try {
-    const payload = JSON.parse(Buffer.from(token, 'base64').toString())
-    if (payload.exp && Date.now() > payload.exp) return null
-    return payload
+    const { payload } = await jwtVerify(token, secret)
+    return {
+      id: payload.id as string,
+      email: payload.email as string,
+      name: payload.name as string | null,
+      role: payload.role as Role,
+      orgId: payload.orgId as string | null,
+      orgName: payload.orgName as string | null,
+      orgPlan: payload.orgPlan as string | null,
+    }
   } catch {
     return null
   }
 }
 
 export async function createSession(response: NextResponse, user: SessionUser) {
-  const token = encodeSession(user)
+  const token = await encodeSession(user)
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -49,14 +63,14 @@ export function clearSession(response: NextResponse) {
   response.cookies.delete(SESSION_COOKIE)
 }
 
-export function getSessionFromRequest(request: NextRequest): SessionUser | null {
+export async function getSessionFromRequest(request: NextRequest): Promise<SessionUser | null> {
   const token = request.cookies.get(SESSION_COOKIE)?.value
   if (!token) return null
-  return decodeSession(token)
+  return await decodeSession(token)
 }
 
 export async function getCurrentUser(request: NextRequest): Promise<SessionUser | null> {
-  const session = getSessionFromRequest(request)
+  const session = await getSessionFromRequest(request)
   if (!session) return null
 
   // Verify user still exists in DB

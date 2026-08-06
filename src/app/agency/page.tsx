@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +11,7 @@ import {
   Settings, Eye, MoreHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 const CLIENTS = [
   {
@@ -92,6 +95,7 @@ const CLIENTS = [
 ]
 
 export default function AgencyPage() {
+  const router = useRouter()
   const totalMRR = CLIENTS.reduce((sum, c) => sum + c.mrr, 0)
   const avgHealth = Math.round(CLIENTS.reduce((sum, c) => sum + c.healthScore, 0) / CLIENTS.length)
   const atRisk = CLIENTS.filter(c => c.status === 'at-risk').length
@@ -142,7 +146,7 @@ export default function AgencyPage() {
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                   <span className="text-muted-foreground">agency.localexperts.com</span>
                 </div>
-                <Button variant="outline" size="sm" className="h-7 text-xs">Configure</Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.info('White-label config', { description: 'Custom domain, logo, and colors — coming soon' })}>Configure</Button>
               </div>
             </div>
           </Card>
@@ -154,7 +158,7 @@ export default function AgencyPage() {
                 <h3 className="font-display font-bold">Client Leaderboard</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">Ranked by health score</p>
               </div>
-              <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8 text-xs">
+              <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8 text-xs" onClick={() => toast.info('Add client', { description: 'Invite a new client business to your agency' })}>
                 <Plus className="w-3.5 h-3.5 mr-1" />
                 Add client
               </Button>
@@ -231,13 +235,14 @@ export default function AgencyPage() {
             <h3 className="font-display font-bold mb-4">Bulk Actions</h3>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
-                { label: 'Bulk assign', desc: 'Assign reviews to team', icon: Users },
-                { label: 'Bulk approve', desc: 'Approve pending drafts', icon: Star },
-                { label: 'Bulk export', desc: 'Export client reports', icon: TrendingUp },
-                { label: 'Bulk campaign', desc: 'Send across clients', icon: ChevronRight },
+                { label: 'Bulk assign', desc: 'Assign reviews to team', icon: Users, action: () => toast.info('Bulk assign', { description: 'Select reviews to assign' }) },
+                { label: 'Bulk approve', desc: 'Approve pending drafts', icon: Star, action: () => router.push('/inbox') },
+                { label: 'Bulk export', desc: 'Export client reports', icon: TrendingUp, action: () => router.push('/reviews') },
+                { label: 'Bulk campaign', desc: 'Send across clients', icon: ChevronRight, action: () => router.push('/campaigns') },
               ].map(a => (
                 <button
                   key={a.label}
+                  onClick={a.action}
                   className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group"
                 >
                   <a.icon className="w-5 h-5 mb-2 text-[var(--brass)]" />

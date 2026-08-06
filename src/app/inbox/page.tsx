@@ -216,8 +216,8 @@ function ReviewCard({ review, onSelect }: { review: Review; onSelect: () => void
           <p className="text-sm text-muted-foreground line-clamp-2 mb-2">{review.text}</p>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] text-muted-foreground">{review.business.name}</span>
-            {review.topics.slice(0, 3).map(topic => (
-              <Badge key={topic} variant="outline" className="text-[9px] py-0 px-1.5 text-muted-foreground">
+            {review.topics.slice(0, 3).map((topic, idx) => (
+              <Badge key={topic + "_idx_" + idx} variant="outline" className="text-[9px] py-0 px-1.5 text-muted-foreground">
                 {topic}
               </Badge>
             ))}
@@ -385,8 +385,8 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
             <p className="text-sm leading-relaxed">{review.text}</p>
             {review.topics.length > 0 && (
               <div className="flex gap-1.5 mt-3 pt-3 border-t border-border/30 flex-wrap">
-                {review.topics.map(t => (
-                  <Badge key={t} variant="outline" className="text-[10px] text-muted-foreground">
+                {review.topics.map((t, idx) => (
+                  <Badge key={t + "-" + idx} variant="outline" className="text-[10px] text-muted-foreground">
                     {t}
                   </Badge>
                 ))}
@@ -444,7 +444,7 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
                     <Bot className="w-2.5 h-2.5 text-white" />
                   </div>
                   <span className="text-[10px] font-mono text-[var(--brass)]">
-                    {isPosted ? 'Posted reply' : 'AI draft · Claude 3.5 Sonnet'}
+                    {isPosted ? 'Posted reply' : 'AI draft · AI (GLM-4.6)'}
                   </span>
                   {isPending && (
                     <Badge variant="outline" className="text-[9px] ml-auto py-0 bg-amber-500/10 text-amber-600 border-amber-500/30">

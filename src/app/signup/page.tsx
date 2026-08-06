@@ -233,7 +233,7 @@ export default function SignupPage() {
         <div className="absolute inset-0 aurora-bg opacity-50" />
         <div className="relative max-w-md">
           <h2 className="font-display text-4xl font-bold tracking-tight mb-6 leading-tight">
-            Join 7,200+ businesses winning local search.
+            Join growing businesses winning local search.
           </h2>
           <div className="space-y-3">
             {[

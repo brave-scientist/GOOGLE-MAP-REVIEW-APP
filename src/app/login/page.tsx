@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import {
   Star, ArrowRight, Check, Sparkles, TrendingUp, MessageSquare, Mail,
   Loader2,
@@ -18,6 +19,9 @@ type Mode = 'password' | 'otp'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectTo = searchParams.get('redirect') || '/dashboard'
+
   const [mode, setMode] = useState<Mode>('password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,6 +29,8 @@ export default function LoginPage() {
   const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  const [googleModalOpen, setGoogleModalOpen] = useState(false)
+  const [googleEmail, setGoogleEmail] = useState('')
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -38,7 +44,7 @@ export default function LoginPage() {
       const data = await res.json()
       if (res.ok) {
         toast.success('Welcome back!', { description: data.user?.name || 'Logged in successfully' })
-        router.push(data.redirectTo || '/dashboard')
+        router.push(data.redirectTo || redirectTo)
       } else {
         toast.error('Login failed', { description: data.error })
       }
@@ -65,7 +71,7 @@ export default function LoginPage() {
       if (res.ok) {
         setOtpSent(true)
         toast.success('OTP sent!', {
-          description: data.demoCode ? `Demo code: ${data.demoCode}` : 'Check your email for the 6-digit code',
+          description: 'Check the server console (terminal) for the 6-digit code in dev mode.',
         })
       } else {
         toast.error('Failed to send OTP', { description: data.error })
@@ -92,7 +98,7 @@ export default function LoginPage() {
       const data = await res.json()
       if (res.ok) {
         toast.success('Logged in!', { description: data.isNewUser ? 'Welcome to ReviewReply!' : 'Welcome back!' })
-        router.push(data.redirectTo || '/dashboard')
+        router.push(data.redirectTo || redirectTo)
       } else {
         toast.error('Verification failed', { description: data.error })
       }
@@ -103,28 +109,29 @@ export default function LoginPage() {
     }
   }
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = () => {
+    setGoogleModalOpen(true)
+  }
+
+  const handleGoogleSubmit = async () => {
+    if (!googleEmail) {
+      toast.error('Email required', { description: 'Please enter your Google email' })
+      return
+    }
     setGoogleLoading(true)
     try {
-      // In production, this would redirect to Google OAuth consent screen
-      // For demo, we simulate with a prompt
-      const email = window.prompt('Enter your Google email (demo OAuth):', 'you@gmail.com')
-      if (!email) {
-        setGoogleLoading(false)
-        return
-      }
-
-      const name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      const name = googleEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name }),
+        body: JSON.stringify({ email: googleEmail, name }),
       })
       const data = await res.json()
       if (res.ok) {
         toast.success('Logged in with Google!', { description: data.user?.name })
-        router.push(data.redirectTo || '/dashboard')
+        setGoogleModalOpen(false)
+        router.push(data.redirectTo || redirectTo)
       } else {
         toast.error('Google login failed', { description: data.error })
       }
@@ -339,7 +346,7 @@ export default function LoginPage() {
         <div className="relative max-w-md">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-card mb-8">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">7,200+ businesses trust us</span>
+            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">growing businesses trust us</span>
           </div>
 
           <h2 className="font-display text-4xl font-bold tracking-tight mb-4 leading-tight">
@@ -354,7 +361,7 @@ export default function LoginPage() {
           <div className="space-y-4">
             {[
               { icon: MessageSquare, title: 'Unified Review Inbox', desc: 'Google, Facebook, Yelp, Trustpilot — all in one place' },
-              { icon: Sparkles, title: 'AI Brand Voice', desc: 'Claude-powered drafts that sound like you' },
+              { icon: Sparkles, title: 'AI Brand Voice', desc: 'AI-powered drafts that sound like you' },
               { icon: TrendingUp, title: 'Competitor Intelligence', desc: 'Weekly benchmarks against your top 3 competitors' },
             ].map(f => (
               <div key={f.title} className="flex items-start gap-3 p-3 rounded-lg glass-card">
@@ -371,6 +378,42 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {/* Google login modal */}
+      <Dialog open={googleModalOpen} onOpenChange={setGoogleModalOpen}>
+        <DialogContent className="glass-card">
+          <DialogHeader>
+            <DialogTitle className="font-display">Continue with Google</DialogTitle>
+            <DialogDescription>
+              Enter your Google email to continue. In production, this will open Google&apos;s official OAuth consent screen.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="google-email">Google email</Label>
+              <Input
+                id="google-email"
+                type="email"
+                placeholder="you@gmail.com"
+                value={googleEmail}
+                onChange={e => setGoogleEmail(e.target.value)}
+                className="mt-1.5 glass-card"
+                onKeyDown={e => e.key === 'Enter' && handleGoogleSubmit()}
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Dev mode: Creates an account if one doesn&apos;t exist. In production, real Google OAuth token verification is used.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGoogleModalOpen(false)}>Cancel</Button>
+            <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleGoogleSubmit} disabled={googleLoading || !googleEmail}>
+              {googleLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

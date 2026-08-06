@@ -24,16 +24,31 @@ export default function ContactPage() {
       return
     }
     setLoading(true)
-    // Simulate sending
-    await new Promise(r => setTimeout(r, 1500))
-    setLoading(false)
-    setSent(true)
-    toast.success('Message sent!', { description: 'We will respond within 24 hours' })
-    setName('')
-    setEmail('')
-    setSubject('')
-    setMessage('')
-    setTimeout(() => setSent(false), 5000)
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, subject, message }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSent(true)
+        toast.success('Message sent!', {
+          description: `Ticket ${data.ticketId} — we'll respond within 24 hours`,
+        })
+        setName('')
+        setEmail('')
+        setSubject('')
+        setMessage('')
+        setTimeout(() => setSent(false), 5000)
+      } else {
+        toast.error('Failed to send', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error — please try again')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (

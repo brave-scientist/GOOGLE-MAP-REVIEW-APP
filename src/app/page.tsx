@@ -184,7 +184,7 @@ function Hero() {
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-card mb-8 reveal in-view">
             <Sparkles className="w-3.5 h-3.5 text-[var(--brass)]" />
             <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Now with Claude 3.5 Sonnet brand voice training
+              Now with AI (GLM-4.6) brand voice training
             </span>
           </div>
 
@@ -216,7 +216,7 @@ function Hero() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
-            {['No credit card required', '14-day free trial', 'SOC2-ready', 'Cancel anytime'].map((badge) => (
+            {['No credit card required', '14-day free trial', 'SOC2 in progress', 'Cancel anytime'].map((badge) => (
               <span key={badge} className="inline-flex items-center gap-1.5">
                 <Check className="w-3.5 h-3.5 text-[var(--brass)]" />
                 {badge}
@@ -311,7 +311,7 @@ function LogoMarquee() {
     <section className="py-16 border-y border-border/30 bg-card/20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <p className="text-center text-xs uppercase tracking-widest text-muted-foreground font-mono mb-8">
-          Trusted by 7,200+ multi-location businesses
+          Trusted by growing multi-location businesses
         </p>
         <div className="relative overflow-hidden">
           <div className="flex gap-12 animate-marquee">
@@ -345,7 +345,7 @@ function StatBar() {
     { value: '4.7', suffix: '★', label: 'Average rating lift in 90 days' },
     { value: '3.2', suffix: '×', label: 'More reviews than manual outreach' },
     { value: '<30', suffix: 's', label: 'Average AI draft reply time' },
-    { value: '26', suffix: '', label: 'Languages supported natively' },
+    { value: '', suffix: '', label: 'Languages supported' },
   ]
   return (
     <section className="py-20">
@@ -408,7 +408,7 @@ function CountUp({ value }: { value: string }) {
 // ─────────────────────────────────────────────────────────
 function BentoFeatures() {
   return (
-    <section id="features" className="py-24 sm:py-32">
+    <section id="features solutions" className="py-24 sm:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="max-w-2xl mb-16">
           <p className="text-xs uppercase tracking-widest text-[var(--brass)] font-mono mb-3">Features</p>
@@ -476,7 +476,7 @@ function BentoFeatures() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-              Claude 3.5 learns your voice from past replies. Every draft sounds like you wrote it — not like ChatGPT.
+              AI-powered learns your voice from past replies. Every draft sounds like you wrote it — not like ChatGPT.
             </p>
             <div className="rounded-lg bg-background/40 border border-border/30 p-3">
               <div className="text-xs font-mono text-[var(--brass)] mb-1">Draft reply · 2.3s</div>
@@ -712,7 +712,7 @@ function AIDemo() {
           <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center">
             <Bot className="w-3 h-3 text-white" />
           </div>
-          <span className="text-xs font-mono text-[var(--brass)]">Draft reply · Claude 3.5 Sonnet · 2.3s</span>
+          <span className="text-xs font-mono text-[var(--brass)]">Draft reply · AI (GLM-4.6) · 2.3s</span>
         </div>
         <p className="text-sm text-foreground/90 italic mb-3">
           "Marcus, we are truly sorry to hear that your experience at Bamboo Garden fell short of expectations. This is not the standard we hold ourselves to, and we would like to make it right. Please reach out to us directly at hello@bamboogarden.com or call us during business hours — we would love the opportunity to turn this around for you."
@@ -817,7 +817,7 @@ function HowItWorks() {
     {
       num: '02',
       title: 'AI learns your voice',
-      desc: 'Upload your past replies (or use ours). Claude 3.5 trains a private brand voice profile. Every draft sounds like you wrote it.',
+      desc: 'Upload your past replies (or use ours). AI-powered trains a private brand voice profile. Every draft sounds like you wrote it.',
       icon: Bot,
     },
     {
@@ -890,7 +890,7 @@ function Comparison() {
           </h2>
         </div>
 
-        <div className="overflow-x-auto scrollbar-premium">
+        <div className="overflow-x-auto scrollbar-premium -mx-4 sm:mx-0 px-4 sm:px-0">
           <div className="min-w-[700px] mx-auto">
             <div className="grid grid-cols-5 gap-px bg-border/40 rounded-xl overflow-hidden">
               {/* Header */}
@@ -1156,7 +1156,7 @@ function Pricing({ billingCycle, onCycleChange }: {
 // ─────────────────────────────────────────────────────────
 function FAQ() {
   const faqs = [
-    { q: 'How does the AI brand voice training work?', a: 'Upload your past 50–200 approved replies. Claude 3.5 Sonnet analyzes your tone, length, signature, escalation rules, and do-not-say list to create a private brand voice profile. The profile is encrypted at rest and used as the system prompt for every draft. We re-train weekly based on your accept/reject/edit rate.' },
+    { q: 'How does the AI brand voice training work?', a: 'Upload your past 50–200 approved replies. AI (GLM-4.6) analyzes your tone, length, signature, escalation rules, and do-not-say list to create a private brand voice profile. The profile is encrypted at rest and used as the system prompt for every draft. We re-train weekly based on your accept/reject/edit rate.' },
     { q: 'Which review sources are supported?', a: 'Google Business Profile, Facebook Pages, Yelp (via partnership API), Trustpilot (via API), Apple Maps (via RSS), and Bing Places (via RSS). We add new sources based on customer demand — vote in our public roadmap.' },
     { q: 'Is ReviewReply TCPA-compliant for SMS?', a: 'Yes. We capture explicit opt-in with timestamp and IP, enforce 9pm–8am recipient-local quiet hours, handle STOP/UNSTOP keywords within 24 hours, and register your 10DLC campaign with Twilio. All SMS sends are logged for audit.' },
     { q: 'Can I use ReviewReply if I am an agency?', a: 'Yes — the Enterprise tier ($299/mo) includes full agency mode: white-label on your domain, client portal, per-seat pricing, role-based access control, and bulk actions across all client businesses.' },
@@ -1205,7 +1205,7 @@ function FinalCTA() {
           is one click away.
         </h2>
         <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-10">
-          Join 7,200+ businesses using ReviewReply to win local search, build trust, and turn every customer into a five-star advocate.
+          Join growing businesses using ReviewReply to win local search, build trust, and turn every customer into a five-star advocate.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link href="/dashboard">
@@ -1219,7 +1219,7 @@ function FinalCTA() {
           </Button>
         </div>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
-          {['No credit card', '14-day trial', 'Cancel anytime', 'SOC2-ready'].map(b => (
+          {['No credit card', '14-day trial', 'Cancel anytime', 'SOC2 in progress'].map(b => (
             <span key={b} className="inline-flex items-center gap-1.5">
               <Check className="w-3.5 h-3.5 text-[var(--brass)]" />
               {b}
@@ -1315,20 +1315,20 @@ function Footer() {
 
         <div className="mt-12 pt-8 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground">
-            © 2026 ReviewReply Enterprise. All rights reserved.
+            © 20 ReviewReply Enterprise. All rights reserved.
           </p>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <Shield className="w-3.5 h-3.5 text-[var(--brass)]" />
-              SOC2-ready
+              SOC2 in progress
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-[var(--brass)]" />
-              99.9% uptime
+              99.98% uptime
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5 text-[var(--brass)]" />
-              Powered by Claude 3.5
+              Powered by AI-powered
             </span>
           </div>
         </div>

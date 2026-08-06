@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Inbox, Star, Send, BarChart3, Code2, FileText,
   Settings, Sparkles, ChevronRight, Building2, CreditCard, Shield, Target, Crown,
@@ -23,6 +23,7 @@ const navItems = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const router = useRouter()
 
   return (
     <aside className="hidden lg:flex w-64 flex-col bg-sidebar border-r border-sidebar-border h-screen sticky top-0">
@@ -148,7 +149,10 @@ export function AppSidebar() {
           <p className="text-[10px] text-muted-foreground mb-2 leading-relaxed">
             Upgrade to Pro for brand voice training and competitor intel.
           </p>
-          <button className="w-full text-xs bg-[var(--brass)] text-white py-1.5 rounded-md hover:bg-[var(--brass-dark)] transition-colors font-medium">
+          <button
+            onClick={() => router.push('/billing')}
+            className="w-full text-xs bg-[var(--brass)] text-white py-1.5 rounded-md hover:bg-[var(--brass-dark)] transition-colors font-medium"
+          >
             Upgrade plan
           </button>
         </div>
@@ -158,6 +162,7 @@ export function AppSidebar() {
 }
 
 export function AppTopbar({ title, description }: { title: string; description?: string }) {
+  const router = useRouter()
   return (
     <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border">
       <div className="flex items-center justify-between px-4 sm:px-6 py-4">
@@ -166,11 +171,17 @@ export function AppTopbar({ title, description }: { title: string; description?:
           {description && <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">{description}</p>}
         </div>
         <div className="flex items-center gap-2">
-          <button className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-accent transition-colors border border-border">
+          <button
+            onClick={() => router.push('/agency')}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-accent transition-colors border border-border"
+          >
             <Building2 className="w-3.5 h-3.5" />
             All businesses
           </button>
-          <button className="px-3 py-1.5 rounded-md text-xs bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] transition-colors font-medium flex items-center gap-1.5">
+          <button
+            onClick={() => router.push('/campaigns')}
+            className="px-3 py-1.5 rounded-md text-xs bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] transition-colors font-medium flex items-center gap-1.5"
+          >
             <Send className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">New campaign</span>
             <span className="sm:hidden">New</span>

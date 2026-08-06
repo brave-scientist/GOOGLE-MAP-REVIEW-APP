@@ -92,7 +92,7 @@ export default function TermsPage() {
       <section>
         <h2 className="text-xl font-bold text-foreground mb-3">7. AI-Generated Content</h2>
         <p>
-          The Service uses AI (Claude 3.5 Sonnet via z-ai-web-dev-sdk) to generate draft replies to reviews. You are responsible for reviewing, editing, and approving all AI-generated content before it is posted. We are not liable for the content of AI-generated replies.
+          The Service uses AI (GLM-4.6 via z-ai-web-dev-sdk) to generate draft replies to reviews. You are responsible for reviewing, editing, and approving all AI-generated content before it is posted. We are not liable for the content of AI-generated replies.
         </p>
         <p className="mt-2">
           AI draft quality depends on the quality of your brand voice training data and the review context. You should always review drafts for accuracy, tone, and appropriateness before posting.

@@ -1,17 +1,17 @@
 import { LegalLayout } from '@/components/app/marketing-shell'
-import Link from 'next/link'
-import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Calendar, Clock, ArrowRight, Star } from 'lucide-react'
+import { Calendar, Clock, ArrowLeft, Star } from 'lucide-react'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { notFound } from 'next/navigation'
 
 export const metadata = {
   title: 'Blog — ReviewReply Enterprise',
   description: 'Insights on review management, local SEO, and customer experience.',
 }
 
-const POSTS = [
-  {
-    slug: 'how-ai-is-transforming-review-management',
+const POSTS: Record<string, { title: string; excerpt: string; category: string; date: string; readTime: string; content: string[] }> = {
+  'how-ai-is-transforming-review-management': {
     title: 'How AI is Transforming Review Management in 2026',
     excerpt: 'Generic ChatGPT replies are dead. Brand-voice-trained AI is the new standard. Here is how it works and why it matters for your business.',
     category: 'AI',
@@ -20,13 +20,12 @@ const POSTS = [
     content: [
       'For the past two years, businesses have experimented with AI-generated review replies. The results have been underwhelming — customers can spot a ChatGPT reply from a mile away. The tone is generic, the structure is predictable, and the personalization is shallow.',
       'In 2026, a new approach is emerging: brand-voice-trained AI. Instead of using a generic prompt, the AI is fine-tuned on each business\'s historical replies — learning their tone, length, signature phrases, and escalation rules. The result is drafts that sound like the owner wrote them.',
-      'At ReviewReply, we use AI (GLM-4.6) with a per-business brand voice profile. The profile is built from your last 50–200 approved replies and is encrypted at rest. Every draft is generated using this profile as the system prompt, plus 5-shot examples from your best replies.',
+      'At ReviewReply, we use GLM-4.6 (via z-ai-web-dev-sdk) with a per-business brand voice profile. The profile is built from your last 50–200 approved replies and is encrypted at rest. Every draft is generated using this profile as the system prompt, plus 5-shot examples from your best replies.',
       'The results speak for themselves: businesses using brand-voice-trained AI see a 94% draft approval rate (vs 31% for generic AI), and customers report that replies feel "personal" and "authentic" — even when they know AI was involved.',
       'If you are still copy-pasting from ChatGPT, you are leaving time on the table and risking customer trust. Brand-voice AI is now table stakes for any serious review management workflow.',
     ],
   },
-  {
-    slug: 'local-seo-ranking-factors-2026',
+  'local-seo-ranking-factors-2026': {
     title: 'The 7 Local SEO Ranking Factors That Actually Matter in 2026',
     excerpt: 'Google\'s local algorithm keeps evolving. We analyzed 10,000 Google Business Profile listings to find what really moves the needle.',
     category: 'Local SEO',
@@ -44,8 +43,7 @@ const POSTS = [
       'The takeaway: focus on review velocity and recency first. A 4.6 rating with 8 new reviews per week will outrank a 4.9 rating with 0 new reviews. Run consistent campaigns.',
     ],
   },
-  {
-    slug: 'tcpa-compliance-for-sms-review-requests',
+  'tcpa-compliance-for-sms-review-requests': {
     title: 'TCPA Compliance for SMS Review Requests: A 2026 Guide',
     excerpt: 'One wrong text can cost you $500 per recipient. Here is how to stay compliant while running effective SMS review request campaigns.',
     category: 'Compliance',
@@ -64,8 +62,7 @@ const POSTS = [
       'ReviewReply handles all of this automatically — opt-in capture, 10DLC registration, quiet hours, opt-out processing, and consent record retention. But understanding the rules helps you design better campaigns and avoid costly mistakes.',
     ],
   },
-  {
-    slug: 'case-study-bamboo-garden',
+  'case-study-bamboo-garden': {
     title: 'Case Study: How Bamboo Garden Went from 3.2 to 4.6 Stars in 90 Days',
     excerpt: 'A 3-location restaurant group used ReviewReply to transform their online reputation. Here is the exact playbook they used.',
     category: 'Case Study',
@@ -82,8 +79,7 @@ const POSTS = [
       'The total cost: $297 (3 months of Pro plan). The ROI: measurable revenue increase far exceeding the cost.',
     ],
   },
-  {
-    slug: 'competitor-intelligence-playbook',
+  'competitor-intelligence-playbook': {
     title: 'The Competitor Intelligence Playbook: 5 Ways to Use Review Data',
     excerpt: 'Your competitors\' reviews are a goldmine of strategic insight. Here is how to extract actionable intelligence from them.',
     category: 'Strategy',
@@ -99,8 +95,7 @@ const POSTS = [
       'ReviewReply\'s Competitor Intelligence module automates all of this. We pull competitor data weekly, run sentiment analysis, and generate AI strategy suggestions. The result: you always know where you stand and what to do next.',
     ],
   },
-  {
-    slug: 'why-we-built-reviewreply',
+  'why-we-built-reviewreply': {
     title: 'Why We Built ReviewReply (And Why It Is Different)',
     excerpt: 'A founders\' perspective on the review management market and what we are doing differently.',
     category: 'Company',
@@ -110,48 +105,77 @@ const POSTS = [
       'When we started ReviewReply in early 2026, the review management market felt broken. On one end, you had Birdeye and Podium — powerful but expensive ($3,000+/month), with dated UIs and aggressive sales processes. On the other end, you had basic tools like Grade.us that were affordable but lacked AI and analytics.',
       'We saw a gap: a premium, modern, AI-powered platform at a price point that respects SMB budgets. A tool that feels like Linear or Vercel — not like enterprise software from 2015.',
       'Three things make ReviewReply different:',
-      'First, brand-voice-trained AI. Every competitor now has "AI reply generation." None of them train the AI on your specific voice. We do. Your drafts sound like you, not like ChatGPT.',
+      'First, brand-voice-trained AI. Every competitor now has "AI reply generation." None of them train the AI on your specific voice. We do. Your drafts sound like you, not like a chatbot.',
       'Second, competitor intelligence built in. Reputation.com offers this at $5,000+/month. We include it in every plan. You always know how you stack up against your top competitors.',
       'Third, a premium product experience. We obsess over design — micro-interactions, dark mode, command palette, glassmorphism. This is not vanity; it is retention. Users actually want to log in.',
       'We are not trying to be the cheapest. We are trying to be the best value — the platform that delivers 90% of Birdeye\'s features at 3% of the price, with a product experience that makes you want to use it every day.',
       'If that resonates with you, we would love to have you as a customer. Start a free trial — no credit card required.',
     ],
   },
-]
+}
 
-export default function BlogPage() {
+export function generateStaticParams() {
+  return Object.keys(POSTS).map(slug => ({ slug }))
+}
+
+export default function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  // This is a synchronous wrapper since we can't use async in generateStaticParams mode
+  // We'll use React.use() in the component body instead
+  return <BlogPostContent params={params} />
+}
+
+import * as React from 'react'
+function BlogPostContent({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = React.use(params)
+  const post = POSTS[slug]
+
+  if (!post) {
+    notFound()
+  }
+
   return (
-    <LegalLayout title="Blog" lastUpdated="August 2026">
+    <LegalLayout title={post.title} lastUpdated={post.date}>
       <div className="mb-8">
-        <p className="text-base text-muted-foreground">
-          Insights on review management, local SEO, customer experience, and the future of reputation management.
-        </p>
+        <Link href="/blog" className="inline-flex items-center gap-1.5 text-sm text-[var(--brass)] hover:underline mb-4">
+          <ArrowLeft className="w-3.5 h-3.5" />
+          Back to blog
+        </Link>
+        <div className="flex items-center gap-3 mb-4">
+          <Badge variant="outline" className="text-[10px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
+            {post.category}
+          </Badge>
+          <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
+            <Calendar className="w-3 h-3" />
+            {post.date}
+          </span>
+          <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            {post.readTime} read
+          </span>
+        </div>
+        <p className="text-base text-muted-foreground leading-relaxed">{post.excerpt}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {POSTS.map(post => (
-          <Card key={post.slug} className="p-5 glass-card hover:border-[var(--brass)]/30 transition-all">
-            <div className="flex items-center gap-2 mb-3">
-              <Badge variant="outline" className="text-[9px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
-                {post.category}
-              </Badge>
-              <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {post.date}
-              </span>
-              <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {post.readTime}
-              </span>
-            </div>
-            <h3 className="font-display font-bold text-base mb-2 leading-tight">{post.title}</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed mb-3">{post.excerpt}</p>
-            <Link href={`/blog/${post.slug}`} className="text-xs text-[var(--brass)] hover:underline flex items-center gap-1">
-              Read more
-              <ArrowRight className="w-3 h-3" />
-            </Link>
-          </Card>
+      <div className="space-y-4">
+        {post.content.map((paragraph, i) => (
+          <p key={i} className="text-sm leading-relaxed text-foreground/90">
+            {paragraph}
+          </p>
         ))}
+      </div>
+
+      <div className="mt-12 pt-8 border-t border-border/30">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-2">
+            <Star className="w-5 h-5 text-[var(--brass)] fill-[var(--brass)]" />
+            <span className="text-sm font-medium">Ready to try ReviewReply?</span>
+          </div>
+          <Link href="/signup">
+            <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">
+              Start free trial
+            </Button>
+          </Link>
+        </div>
       </div>
     </LegalLayout>
   )

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import {
   UserCheck, Bell, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface AdminData {
   overview: {
@@ -41,6 +43,7 @@ interface AdminData {
 }
 
 export default function AdminDashboardPage() {
+  const router = useRouter()
   const [data, setData] = useState<AdminData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -338,13 +341,14 @@ function AdminContent({ data }: { data: AdminData }) {
         <h3 className="font-display font-bold mb-4">Admin Actions</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: 'Extend trial', desc: 'Give a user more time', icon: Clock, color: 'text-amber-500' },
-            { label: 'Manage plans', desc: 'Upgrade/downgrade orgs', icon: CreditCard, color: 'text-[var(--brass)]' },
-            { label: 'View audit log', desc: 'Full platform audit', icon: Shield, color: 'text-blue-500' },
-            { label: 'Send broadcast', desc: 'Email all users', icon: Bell, color: 'text-purple-500' },
+            { label: 'Extend trial', desc: 'Give a user more time', icon: Clock, color: 'text-amber-500', action: () => toast.info('Extend trial', { description: 'Search for a user to extend their trial' }) },
+            { label: 'Manage plans', desc: 'Upgrade/downgrade orgs', icon: CreditCard, color: 'text-[var(--brass)]', action: () => router.push('/billing') },
+            { label: 'View audit log', desc: 'Full platform audit', icon: Shield, color: 'text-blue-500', action: () => router.push('/compliance') },
+            { label: 'Send broadcast', desc: 'Email all users', icon: Bell, color: 'text-purple-500', action: () => toast.info('Broadcast', { description: 'Compose an email to all users' }) },
           ].map(action => (
             <button
               key={action.label}
+              onClick={action.action}
               className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all"
             >
               <action.icon className={cn('w-5 h-5 mb-2', action.color)} />

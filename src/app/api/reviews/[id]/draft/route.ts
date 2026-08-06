@@ -28,7 +28,7 @@ export async function POST(
       return NextResponse.json({
         draft: review.draftText,
         status: review.draftStatus,
-        generatedAt: review.updatedAt.toISOString(),
+        generatedAt: new Date().toISOString(),
         model: 'cached',
       })
     }

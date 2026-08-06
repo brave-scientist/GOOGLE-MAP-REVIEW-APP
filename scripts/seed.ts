@@ -72,7 +72,11 @@ function getReviewTextAndTopics(rating: number) {
   let sentiment: number
   if (rating >= 4) {
     text = pick(REVIEW_TEXTS_POSITIVE)
-    topics = [pick(TOPICS_POSITIVE), pick(TOPICS_POSITIVE)]
+    // Ensure unique topics
+    const t1 = pick(TOPICS_POSITIVE)
+    let t2 = pick(TOPICS_POSITIVE)
+    while (t2 === t1) t2 = pick(TOPICS_POSITIVE)
+    topics = [t1, t2]
     sentiment = 0.6 + Math.random() * 0.4
   } else if (rating === 3) {
     text = pick(REVIEW_TEXTS_NEUTRAL)
@@ -80,7 +84,10 @@ function getReviewTextAndTopics(rating: number) {
     sentiment = (Math.random() - 0.5) * 0.4
   } else {
     text = pick(REVIEW_TEXTS_NEGATIVE)
-    topics = [pick(TOPICS_NEGATIVE), pick(TOPICS_NEGATIVE)]
+    const t1 = pick(TOPICS_NEGATIVE)
+    let t2 = pick(TOPICS_NEGATIVE)
+    while (t2 === t1) t2 = pick(TOPICS_NEGATIVE)
+    topics = [t1, t2]
     sentiment = -0.4 - Math.random() * 0.5
   }
   return { text, topics: JSON.stringify(topics), sentiment: Math.round(sentiment * 100) / 100 }

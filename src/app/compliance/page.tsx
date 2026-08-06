@@ -204,7 +204,7 @@ export default function CompliancePage() {
                 <div className="space-y-1">
                   {[
                     { action: 'reply.posted', target: 'Review from Jordan Lee', actor: 'Sarah Chen', ip: '192.168.1.1', time: '2m ago' },
-                    { action: 'draft.generated', target: 'Review from Marcus Webb', actor: 'System (Claude)', ip: '—', time: '14m ago' },
+                    { action: 'draft.generated', target: 'Review from Marcus Webb', actor: 'System (AI)', ip: '—', time: '14m ago' },
                     { action: 'campaign.sent', target: 'Post-visit follow-up', actor: 'Sarah Chen', ip: '192.168.1.1', time: '1h ago' },
                     { action: 'user.login', target: 'Sarah Chen', actor: 'Sarah Chen', ip: '192.168.1.1', time: '3h ago' },
                     { action: 'billing.viewed', target: 'Plans page', actor: 'Sarah Chen', ip: '192.168.1.1', time: '4h ago' },

@@ -41,16 +41,13 @@ export async function POST(request: NextRequest) {
       })
 
       // In production, send the OTP via email (Resend)
-      // For demo, we return it in the response (NOT for production!)
+      // For dev: log it server-side so it can be viewed in terminal
       console.log(`[OTP] ${email}: ${code}`)
 
       return NextResponse.json({
         message: isNewUser
-          ? 'OTP sent! Check your email (demo: code shown in response)'
-          : 'OTP sent! Check your email to log in',
-        // In production, NEVER return the OTP in the response
-        // This is only for demo purposes so the user can see it
-        demoCode: code,
+          ? 'OTP sent! Check the server console (dev mode) or your email (production).'
+          : 'OTP sent! Check the server console (dev mode) or your email (production).',
         isNewUser,
       })
     }

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Star, TrendingUp, MessageSquare, Target, ArrowRight, ArrowUp, ArrowDown,
-  Clock, Globe, Sparkles, Bell, ChevronRight,
+  Clock, Globe, Sparkles, Bell, ChevronRight, AlertCircle, RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
@@ -26,12 +26,16 @@ interface DashboardData {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/dashboard')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then(d => { setData(d); setLoading(false) })
-      .catch(e => { console.error(e); setLoading(false) })
+      .catch(e => { console.error(e); setError(e.message); setLoading(false) })
   }, [])
 
   return (
@@ -43,11 +47,27 @@ export default function DashboardPage() {
           description="Overview of your review performance across all businesses"
         />
         <div className="p-4 sm:p-6 space-y-6">
-          {loading ? <DashboardSkeleton /> : data && <DashboardContent data={data} />}
+          {loading ? <DashboardSkeleton /> : error ? <ErrorState message={error} /> : data && <DashboardContent data={data} />}
         </div>
       </main>
       <MobileNav />
     </div>
+  )
+}
+
+function ErrorState({ message }: { message: string }) {
+  return (
+    <Card className="p-12 glass-card text-center">
+      <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+        <AlertCircle className="w-8 h-8 text-red-500" />
+      </div>
+      <h3 className="font-display font-bold mb-1">Failed to load dashboard</h3>
+      <p className="text-sm text-muted-foreground mb-4">{message}</p>
+      <Button variant="outline" onClick={() => window.location.reload()}>
+        <RefreshCw className="w-4 h-4 mr-2" />
+        Retry
+      </Button>
+    </Card>
   )
 }
 
