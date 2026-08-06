@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
+import { CampaignBuilder } from '@/components/app/campaign-builder'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Send, Mail, Phone, Globe, QrCode, Users, Clock, TrendingUp, Plus } from 'lucide-react'
+import { Send, Mail, Phone, Globe, QrCode, Users, Clock, TrendingUp, Plus, Download, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface Campaign {
   id: string
@@ -29,13 +31,42 @@ interface Campaign {
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
+  const [builderOpen, setBuilderOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
-  useEffect(() => {
+  const fetchCampaigns = () => {
     fetch('/api/campaigns')
       .then(r => r.json())
       .then(d => { setCampaigns(d.campaigns || []); setLoading(false) })
       .catch(e => { console.error(e); setLoading(false) })
+  }
+
+  useEffect(() => {
+    fetchCampaigns()
   }, [])
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const res = await fetch('/api/export?type=campaigns')
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = window.document.createElement('a')
+        a.href = url
+        a.download = `campaigns-${new Date().toISOString().slice(0, 10)}.csv`
+        a.click()
+        URL.revokeObjectURL(url)
+        toast.success('Export complete', { description: 'Campaigns CSV downloaded' })
+      } else {
+        toast.error('Export failed')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const totals = campaigns.reduce((acc, c) => ({
     sent: acc.sent + c.sentCount,
@@ -82,12 +113,20 @@ export default function CampaignsPage() {
                   <p className="text-xs text-muted-foreground">Send review requests via SMS, email, QR, or WhatsApp</p>
                 </div>
               </div>
-              <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">
+              <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => setBuilderOpen(true)}>
                 <Plus className="w-4 h-4 mr-1" />
                 New campaign
               </Button>
             </div>
           </Card>
+
+          {/* Export bar */}
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" className="h-8 text-xs glass-card" onClick={handleExport} disabled={exporting}>
+              {exporting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1" />}
+              Export campaigns (CSV)
+            </Button>
+          </div>
 
           {/* Campaign list */}
           <div className="space-y-3">
@@ -111,6 +150,7 @@ export default function CampaignsPage() {
         </div>
       </main>
       <MobileNav />
+      <CampaignBuilder open={builderOpen} onOpenChange={setBuilderOpen} onSuccess={fetchCampaigns} />
     </div>
   )
 }

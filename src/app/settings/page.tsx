@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -7,9 +8,74 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Building2, User, CreditCard, Plug, Shield, Bell } from 'lucide-react'
+import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check } from 'lucide-react'
+import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
+
+interface Integration {
+  provider: string
+  name: string
+  status: 'connected' | 'available'
+  desc: string
+  icon: string
+  category: 'review-source' | 'communication' | 'billing' | 'alerts'
+  userFacing: boolean // false = managed by platform (admin-only)
+}
+
+const INITIAL_INTEGRATIONS: Integration[] = [
+  { provider: 'google', name: 'Google Business Profile', status: 'connected', desc: 'Pull reviews from Google', icon: '🔍', category: 'review-source', userFacing: true },
+  { provider: 'facebook', name: 'Facebook Pages', status: 'connected', desc: 'Pull reviews from Facebook', icon: '📘', category: 'review-source', userFacing: true },
+  { provider: 'yelp', name: 'Yelp', status: 'available', desc: 'Yelp partnership API', icon: '⭐', category: 'review-source', userFacing: true },
+  { provider: 'trustpilot', name: 'Trustpilot', status: 'available', desc: 'Trustpilot API', icon: '✓', category: 'review-source', userFacing: true },
+  { provider: 'slack', name: 'Slack', status: 'available', desc: 'Real-time alerts in your Slack channels', icon: '💬', category: 'alerts', userFacing: true },
+  { provider: 'teams', name: 'Microsoft Teams', status: 'available', desc: 'Alerts via Power Automate', icon: '👥', category: 'alerts', userFacing: true },
+  // Platform-managed integrations (not user-configurable)
+  { provider: 'twilio', name: 'Twilio (SMS)', status: 'connected', desc: 'SMS delivery — managed by ReviewReply platform', icon: '📱', category: 'communication', userFacing: false },
+  { provider: 'resend', name: 'Resend (Email)', status: 'connected', desc: 'Email delivery — managed by ReviewReply platform', icon: '✉', category: 'communication', userFacing: false },
+  { provider: 'stripe', name: 'Stripe', status: 'connected', desc: 'Payment processing — managed by ReviewReply platform', icon: '💳', category: 'billing', userFacing: false },
+]
 
 export default function SettingsPage() {
+  const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS)
+  const [processingProvider, setProcessingProvider] = useState<string | null>(null)
+  const [savingBusiness, setSavingBusiness] = useState(false)
+
+  const handleToggleIntegration = async (int: Integration) => {
+    setProcessingProvider(int.provider)
+    const action = int.status === 'connected' ? 'disconnect' : 'connect'
+    try {
+      const res = await fetch('/api/integrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: int.provider, action }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setIntegrations(prev => prev.map(i =>
+          i.provider === int.provider
+            ? { ...i, status: action === 'connect' ? 'connected' : 'available' }
+            : i
+        ))
+        toast.success(data.message || `${int.name} ${action}ed`)
+      } else {
+        toast.error(`Failed to ${action} ${int.name}`, { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setProcessingProvider(null)
+    }
+  }
+
+  const handleSaveBusiness = async () => {
+    setSavingBusiness(true)
+    await new Promise(r => setTimeout(r, 1000))
+    setSavingBusiness(false)
+    toast.success('Settings saved', { description: 'Business profile updated' })
+  }
+
+  const userIntegrations = integrations.filter(i => i.userFacing)
+  const platformIntegrations = integrations.filter(i => !i.userFacing)
   return (
     <div className="flex min-h-screen">
       <AppSidebar />
@@ -76,50 +142,91 @@ export default function SettingsPage() {
                       <Input id="email" defaultValue="hello@bamboogarden.com" className="mt-1.5 glass-card" />
                     </div>
                   </div>
-                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">Save changes</Button>
+                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleSaveBusiness} disabled={savingBusiness}>
+                    {savingBusiness ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    {savingBusiness ? 'Saving...' : 'Save changes'}
+                  </Button>
                 </div>
               </Card>
             </TabsContent>
 
             <TabsContent value="integrations">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-4xl">
-                {[
-                  { name: 'Google Business Profile', status: 'connected', desc: 'Pull reviews from Google', icon: '🔍' },
-                  { name: 'Facebook Pages', status: 'connected', desc: 'Pull reviews from Facebook', icon: '📘' },
-                  { name: 'Yelp', status: 'available', desc: 'Yelp partnership API', icon: '⭐' },
-                  { name: 'Trustpilot', status: 'available', desc: 'Trustpilot API', icon: '✓' },
-                  { name: 'Twilio (SMS)', status: 'connected', desc: 'Send SMS review requests', icon: '📱' },
-                  { name: 'Resend (Email)', status: 'connected', desc: 'Send email review requests', icon: '✉' },
-                  { name: 'Stripe', status: 'connected', desc: 'Billing & subscriptions', icon: '💳' },
-                  { name: 'Slack', status: 'available', desc: 'Real-time alerts', icon: '💬' },
-                ].map(int => (
-                  <Card key={int.name} className="p-4 glass-card hover:border-[var(--brass)]/30 transition-all">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-accent/40 flex items-center justify-center text-lg flex-shrink-0">
-                        {int.icon}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="text-sm font-medium">{int.name}</h4>
-                          <Badge
-                            variant="outline"
-                            className={
-                              int.status === 'connected'
-                                ? 'text-[10px] bg-green-500/10 text-green-600 border-green-500/30'
-                                : 'text-[10px] text-muted-foreground'
-                            }
-                          >
-                            {int.status}
-                          </Badge>
+              <div className="max-w-4xl space-y-6">
+                {/* Your integrations (user-configurable) */}
+                <div>
+                  <h3 className="font-display font-bold mb-1">Your Integrations</h3>
+                  <p className="text-xs text-muted-foreground mb-4">Connect your accounts to pull reviews and send alerts. You control these.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {userIntegrations.map(int => (
+                      <Card key={int.provider} className="p-4 glass-card hover:border-[var(--brass)]/30 transition-all">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-accent/40 flex items-center justify-center text-lg flex-shrink-0">
+                            {int.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="text-sm font-medium">{int.name}</h4>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-[10px]',
+                                  int.status === 'connected'
+                                    ? 'bg-green-500/10 text-green-600 border-green-500/30'
+                                    : 'text-muted-foreground'
+                                )}
+                              >
+                                {int.status}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-2">{int.desc}</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 text-[10px]"
+                              onClick={() => handleToggleIntegration(int)}
+                              disabled={processingProvider === int.provider}
+                            >
+                              {processingProvider === int.provider ? (
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                              ) : int.status === 'connected' ? (
+                                'Disconnect'
+                              ) : (
+                                'Connect'
+                              )}
+                            </Button>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground mb-2">{int.desc}</p>
-                        <Button variant="outline" size="sm" className="h-6 text-[10px]">
-                          {int.status === 'connected' ? 'Manage' : 'Connect'}
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Platform-managed integrations (read-only) */}
+                <div>
+                  <h3 className="font-display font-bold mb-1">Platform Services</h3>
+                  <p className="text-xs text-muted-foreground mb-4">These are managed by ReviewReply. You do not need to configure them.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {platformIntegrations.map(int => (
+                      <Card key={int.provider} className="p-3 glass-card">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center text-sm flex-shrink-0">
+                            {int.icon}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-medium truncate">{int.name}</div>
+                            <Badge variant="outline" className="text-[9px] bg-green-500/10 text-green-600 border-green-500/30">
+                              <Check className="w-2.5 h-2.5 mr-0.5" />
+                              Active
+                            </Badge>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    SMS, email, and payment processing are handled by ReviewReply. You are billed for usage overage only.
+                  </p>
+                </div>
               </div>
             </TabsContent>
 

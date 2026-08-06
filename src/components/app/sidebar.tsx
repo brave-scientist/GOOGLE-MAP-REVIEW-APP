@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Inbox, Star, Send, BarChart3, Code2, FileText,
-  Settings, Sparkles, ChevronRight, Building2, CreditCard, Shield, Target,
+  Settings, Sparkles, ChevronRight, Building2, CreditCard, Shield, Target, Crown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -120,6 +120,21 @@ export function AppSidebar() {
         >
           <Shield className="w-4 h-4" />
           <span>Compliance</span>
+        </Link>
+        <Link
+          href="/admin"
+          className={cn(
+            'flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-all',
+            pathname === '/admin'
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50'
+          )}
+        >
+          <Crown className="w-4 h-4 text-[var(--brass)]" />
+          <span>Developer</span>
+          <Badge variant="outline" className="text-[8px] ml-auto bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
+            OWNER
+          </Badge>
         </Link>
       </nav>
 

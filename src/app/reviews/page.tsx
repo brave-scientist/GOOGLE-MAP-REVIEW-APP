@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Star, Search, Filter, RefreshCw, Star as StarIcon, Clock, Check, MessageSquare,
-  TrendingUp, TrendingDown, Plus, Download, Reply,
+  TrendingUp, TrendingDown, Plus, Download, Reply, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -34,6 +34,7 @@ export default function ReviewsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'positive' | 'negative' | 'replied' | 'pending'>('all')
+  const [exporting, setExporting] = useState(false)
 
   const fetchReviews = useCallback(async () => {
     setLoading(true)
@@ -129,8 +130,29 @@ export default function ReviewsPage() {
                 </button>
               ))}
             </div>
-            <Button variant="outline" size="sm" className="glass-card" onClick={() => toast.info('Exporting reviews...')}>
-              <Download className="w-3.5 h-3.5 mr-1" />
+            <Button variant="outline" size="sm" className="glass-card" onClick={async () => {
+              setExporting(true)
+              try {
+                const res = await fetch('/api/export?type=reviews')
+                if (res.ok) {
+                  const blob = await res.blob()
+                  const url = URL.createObjectURL(blob)
+                  const a = window.document.createElement('a')
+                  a.href = url
+                  a.download = `reviews-${new Date().toISOString().slice(0, 10)}.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                  toast.success('Export complete', { description: 'Reviews CSV downloaded' })
+                } else {
+                  toast.error('Export failed')
+                }
+              } catch {
+                toast.error('Network error')
+              } finally {
+                setExporting(false)
+              }
+            }} disabled={exporting}>
+              {exporting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1" />}
               Export
             </Button>
             <Button variant="outline" size="sm" className="glass-card" onClick={fetchReviews}>

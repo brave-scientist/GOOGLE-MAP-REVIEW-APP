@@ -1238,29 +1238,45 @@ function Footer() {
   const cols = [
     {
       title: 'Product',
-      links: ['Features', 'Pricing', 'Integrations', 'API Docs', 'Changelog', 'Roadmap'],
+      links: [
+        { name: 'Features', href: '/#features' },
+        { name: 'Pricing', href: '/#pricing' },
+        { name: 'Changelog', href: '/changelog' },
+        { name: 'Status', href: '/status' },
+      ],
     },
     {
       title: 'Solutions',
-      links: ['Restaurants', 'Dental', 'Hospitality', 'Real Estate', 'Agencies', 'Multi-location'],
+      links: [
+        { name: 'Restaurants', href: '/signup' },
+        { name: 'Dental', href: '/signup' },
+        { name: 'Hospitality', href: '/signup' },
+        { name: 'Agencies', href: '/signup' },
+      ],
     },
     {
       title: 'Resources',
-      links: ['Blog', 'Customer Stories', 'Help Center', 'Webinars', 'Review Guides', 'API Reference'],
-    },
-    {
-      title: 'Company',
-      links: ['About', 'Careers', 'Press', 'Partners', 'Contact', 'Status'],
+      links: [
+        { name: 'Blog', href: '/blog' },
+        { name: 'Help Center', href: '/help' },
+        { name: 'Contact', href: '/contact' },
+        { name: 'About', href: '/about' },
+      ],
     },
     {
       title: 'Legal',
-      links: ['Privacy', 'Terms', 'DPA', 'Security', 'Sub-processors', 'GDPR'],
+      links: [
+        { name: 'Privacy', href: '/privacy' },
+        { name: 'Terms', href: '/terms' },
+        { name: 'Security', href: '/help' },
+        { name: 'GDPR', href: '/privacy' },
+      ],
     },
   ]
   return (
     <footer className="border-t border-border/30 bg-card/20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-16">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-8">
           {/* Logo + newsletter */}
           <div className="col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2 mb-4">
@@ -1286,9 +1302,9 @@ function Footer() {
               <h4 className="font-medium text-xs uppercase tracking-wider text-muted-foreground mb-4 font-mono">{col.title}</h4>
               <ul className="space-y-2.5">
                 {col.links.map(link => (
-                  <li key={link}>
-                    <Link href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                      {link}
+                  <li key={link.name}>
+                    <Link href={link.href} className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                      {link.name}
                     </Link>
                   </li>
                 ))}

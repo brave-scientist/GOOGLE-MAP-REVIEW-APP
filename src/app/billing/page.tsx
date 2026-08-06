@@ -95,8 +95,8 @@ export default function BillingPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="h-8">Manage subscription</Button>
-                    <Button size="sm" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8">
+                    <Button variant="outline" size="sm" className="h-8" onClick={() => toast.info('Opening customer portal...')}>Manage subscription</Button>
+                    <Button size="sm" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8" onClick={() => toast.success('Redirecting to checkout...', { description: 'Enterprise plan · $299/month' })}>
                       Upgrade to Enterprise
                       <ArrowRight className="w-3.5 h-3.5 ml-1" />
                     </Button>

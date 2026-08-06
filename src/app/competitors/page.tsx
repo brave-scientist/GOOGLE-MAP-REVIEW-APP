@@ -1,70 +1,112 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
+import { CampaignBuilder } from '@/components/app/campaign-builder'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import {
   Target, TrendingUp, TrendingDown, Star, Users, MessageSquare, AlertCircle,
-  ArrowUp, ArrowDown, Lightbulb, Plus,
+  ArrowUp, ArrowDown, Lightbulb, Plus, Loader2, Send, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
-const COMPETITORS = [
-  {
-    name: 'Bamboo Garden (You)',
-    rating: 4.6,
-    ratingTrend: 0.3,
-    reviews: 247,
-    reviewVelocity: 12,
-    responseRate: 87,
-    sentimentScore: 0.72,
-    isYou: true,
-  },
-  {
-    name: 'Golden Dragon Restaurant',
-    rating: 4.4,
-    ratingTrend: -0.1,
-    reviews: 312,
-    reviewVelocity: 18,
-    responseRate: 62,
-    sentimentScore: 0.65,
-    isYou: false,
-  },
-  {
-    name: 'Jade Palace',
-    rating: 4.3,
-    ratingTrend: 0.2,
-    reviews: 198,
-    reviewVelocity: 8,
-    responseRate: 71,
-    sentimentScore: 0.61,
-    isYou: false,
-  },
-  {
-    name: 'Sakura Sushi Bar',
-    rating: 4.7,
-    ratingTrend: 0.1,
-    reviews: 421,
-    reviewVelocity: 22,
-    responseRate: 92,
-    sentimentScore: 0.78,
-    isYou: false,
-  },
-]
-
-const TOPIC_GAPS = [
-  { topic: 'food', you: 0.82, competitor: 0.88, gap: -0.06, status: 'losing' },
-  { topic: 'service', you: 0.71, competitor: 0.65, gap: 0.06, status: 'winning' },
-  { topic: 'cleanliness', you: 0.65, competitor: 0.72, gap: -0.07, status: 'losing' },
-  { topic: 'atmosphere', you: 0.78, competitor: 0.74, gap: 0.04, status: 'winning' },
-  { topic: 'value', you: 0.58, competitor: 0.62, gap: -0.04, status: 'losing' },
-  { topic: 'wait-time', you: -0.15, competitor: -0.08, gap: -0.07, status: 'losing' },
-]
+interface Competitor {
+  id: string
+  name: string
+  rating: number
+  ratingTrend: number
+  reviews: number
+  reviewVelocity: number
+  responseRate: number
+  sentimentScore: number
+  isYou?: boolean
+}
 
 export default function CompetitorsPage() {
-  const you = COMPETITORS[0]
-  const competitors = COMPETITORS.filter(c => !c.isYou)
+  const [competitors, setCompetitors] = useState<Competitor[]>([])
+  const [loading, setLoading] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
+  const [campaignOpen, setCampaignOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newUrl, setNewUrl] = useState('')
+  const [adding, setAdding] = useState(false)
+
+  useEffect(() => {
+    fetchCompetitors()
+  }, [])
+
+  const fetchCompetitors = async () => {
+    try {
+      const res = await fetch('/api/competitors')
+      const data = await res.json()
+      // Add "you" entry at the top
+      const youEntry: Competitor = {
+        id: 'you',
+        name: 'Bamboo Garden (You)',
+        rating: 4.6,
+        ratingTrend: 0.3,
+        reviews: 247,
+        reviewVelocity: 12,
+        responseRate: 87,
+        sentimentScore: 0.72,
+        isYou: true,
+      }
+      setCompetitors([youEntry, ...(data.competitors || [])])
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleAddCompetitor = async () => {
+    if (!newName) {
+      toast.error('Name required', { description: 'Please enter a competitor name' })
+      return
+    }
+    setAdding(true)
+    try {
+      const res = await fetch('/api/competitors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName, googleMapsUrl: newUrl }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Competitor added!', {
+          description: `Now tracking ${newName}. Weekly updates will appear here.`,
+        })
+        setCompetitors(prev => [...prev, {
+          id: data.competitor.id,
+          name: data.competitor.name,
+          rating: Math.round(data.competitor.rating * 10) / 10,
+          ratingTrend: 0,
+          reviews: data.competitor.reviews,
+          reviewVelocity: data.competitor.velocity,
+          responseRate: data.competitor.responseRate,
+          sentimentScore: Math.round(data.competitor.sentiment * 100) / 100,
+        }])
+        setNewName('')
+        setNewUrl('')
+        setAddOpen(false)
+      } else {
+        toast.error('Failed to add', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const you = competitors.find(c => c.isYou) || competitors[0]
+  const competitorsOnly = competitors.filter(c => !c.isYou)
 
   return (
     <div className="flex min-h-screen">
@@ -72,7 +114,7 @@ export default function CompetitorsPage() {
       <main className="flex-1 min-w-0 pb-20 lg:pb-0">
         <AppTopbar
           title="Competitor Intelligence"
-          description="Weekly benchmark against your top 3 local competitors"
+          description="Weekly benchmark against your local competitors"
         />
         <div className="p-4 sm:p-6 space-y-6">
           {/* Alert banner */}
@@ -87,7 +129,7 @@ export default function CompetitorsPage() {
                   Golden Dragon&apos;s review velocity jumped 50% week-over-week (18 reviews/week vs their 12 average). They likely launched a review request campaign. Consider running one of your own to keep pace.
                 </p>
               </div>
-              <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600 h-7 text-xs flex-shrink-0">
+              <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600 h-7 text-xs flex-shrink-0" onClick={() => setCampaignOpen(true)}>
                 Launch campaign
               </Button>
             </div>
@@ -96,10 +138,10 @@ export default function CompetitorsPage() {
           {/* Stats */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: 'Your Rank', value: '#2', sub: 'of 4 competitors', icon: Target, color: 'text-[var(--brass)]' },
-              { label: 'Rating Gap', value: '+0.2', sub: 'vs market avg', icon: Star, color: 'text-green-500' },
-              { label: 'Response Rate', value: '87%', sub: '25% above market', icon: MessageSquare, color: 'text-blue-500' },
-              { label: 'Review Velocity', value: '12/wk', sub: 'below market avg', icon: TrendingUp, color: 'text-amber-500' },
+              { label: 'Your Rank', value: `#${competitors.length > 0 ? competitors.filter(c => !c.isYou && c.rating > (you?.rating || 0)).length + 1 : 1}`, sub: `of ${competitors.length} total`, icon: Target, color: 'text-[var(--brass)]' },
+              { label: 'Rating Gap', value: competitorsOnly.length > 0 ? `+${Math.max(0, (you?.rating || 0) - (competitorsOnly.reduce((s, c) => s + c.rating, 0) / competitorsOnly.length)).toFixed(1)}` : '—', sub: 'vs market avg', icon: Star, color: 'text-green-500' },
+              { label: 'Response Rate', value: `${you?.responseRate || 0}%`, sub: '25% above market', icon: MessageSquare, color: 'text-blue-500' },
+              { label: 'Review Velocity', value: `${you?.reviewVelocity || 0}/wk`, sub: 'below market avg', icon: TrendingUp, color: 'text-amber-500' },
             ].map(s => (
               <Card key={s.label} className="p-4 glass-card">
                 <div className="flex items-center justify-between mb-3">
@@ -117,9 +159,9 @@ export default function CompetitorsPage() {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="font-display font-bold">Competitive Benchmark</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Snapshot from Aug 6, 2026 · updates weekly</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Snapshot from Aug 7, 2026 · updates weekly</p>
               </div>
-              <Button variant="outline" size="sm" className="h-7 text-xs">
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setAddOpen(true)}>
                 <Plus className="w-3 h-3 mr-1" />
                 Add competitor
               </Button>
@@ -127,7 +169,6 @@ export default function CompetitorsPage() {
 
             <div className="overflow-x-auto scrollbar-premium">
               <div className="min-w-[640px]">
-                {/* Header */}
                 <div className="grid grid-cols-12 gap-2 pb-3 border-b border-border/30 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
                   <div className="col-span-4">Business</div>
                   <div className="col-span-2 text-center">Rating</div>
@@ -135,155 +176,165 @@ export default function CompetitorsPage() {
                   <div className="col-span-2 text-center">Velocity</div>
                   <div className="col-span-2 text-center">Response</div>
                 </div>
-                {/* Rows */}
-                {COMPETITORS.map(c => (
-                  <div key={c.name} className={cn(
-                    'grid grid-cols-12 gap-2 py-3 border-b border-border/20 items-center',
-                    c.isYou && 'bg-[var(--brass)]/5 -mx-2 px-2 rounded'
-                  )}>
-                    <div className="col-span-4 flex items-center gap-2">
-                      <div className={cn(
-                        'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
-                        c.isYou ? 'bg-[var(--brass)] text-white' : 'bg-muted/40'
-                      )}>
-                        {c.name.split(' ').map(w => w[0]).slice(0, 2).join('')}
+                {loading ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">Loading competitors...</div>
+                ) : (
+                  competitors.map(c => (
+                    <div key={c.id} className={cn(
+                      'grid grid-cols-12 gap-2 py-3 border-b border-border/20 items-center',
+                      c.isYou && 'bg-[var(--brass)]/5 -mx-2 px-2 rounded'
+                    )}>
+                      <div className="col-span-4 flex items-center gap-2">
+                        <div className={cn(
+                          'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
+                          c.isYou ? 'bg-[var(--brass)] text-white' : 'bg-muted/40'
+                        )}>
+                          {c.name.split(' ').map(w => w[0]).slice(0, 2).join('')}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                            {c.name}
+                            {c.isYou && <Badge variant="outline" className="text-[9px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">You</Badge>}
+                          </div>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate flex items-center gap-1.5">
-                          {c.name}
-                          {c.isYou && <Badge variant="outline" className="text-[9px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">You</Badge>}
+                      <div className="col-span-2 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Star className="w-3 h-3 text-[var(--brass)] fill-[var(--brass)]" />
+                          <span className="font-bold text-sm">{c.rating}</span>
+                        </div>
+                        <div className={cn('text-[10px] font-mono flex items-center justify-center gap-0.5', c.ratingTrend > 0 ? 'text-green-500' : c.ratingTrend < 0 ? 'text-red-500' : 'text-muted-foreground')}>
+                          {c.ratingTrend > 0 ? <ArrowUp className="w-2.5 h-2.5" /> : c.ratingTrend < 0 ? <ArrowDown className="w-2.5 h-2.5" /> : null}
+                          {c.ratingTrend !== 0 ? Math.abs(c.ratingTrend) : '—'}
+                        </div>
+                      </div>
+                      <div className="col-span-2 text-center">
+                        <div className="font-bold text-sm">{c.reviews}</div>
+                      </div>
+                      <div className="col-span-2 text-center">
+                        <div className="font-bold text-sm">{c.reviewVelocity}/wk</div>
+                        <div className="text-[10px] text-muted-foreground">reviews</div>
+                      </div>
+                      <div className="col-span-2 text-center">
+                        <div className="font-bold text-sm">{c.responseRate}%</div>
+                        <div className="w-full h-1 rounded-full bg-muted/30 mt-1 overflow-hidden">
+                          <div className="h-full bg-[var(--brass)]" style={{ width: `${c.responseRate}%` }} />
                         </div>
                       </div>
                     </div>
-                    <div className="col-span-2 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <Star className="w-3 h-3 text-[var(--brass)] fill-[var(--brass)]" />
-                        <span className="font-bold text-sm">{c.rating}</span>
-                      </div>
-                      <div className={cn('text-[10px] font-mono flex items-center justify-center gap-0.5', c.ratingTrend > 0 ? 'text-green-500' : 'text-red-500')}>
-                        {c.ratingTrend > 0 ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
-                        {Math.abs(c.ratingTrend)}
-                      </div>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <div className="font-bold text-sm">{c.reviews}</div>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <div className="font-bold text-sm">{c.reviewVelocity}/wk</div>
-                      <div className="text-[10px] text-muted-foreground">reviews</div>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <div className="font-bold text-sm">{c.responseRate}%</div>
-                      <div className="w-full h-1 rounded-full bg-muted/30 mt-1 overflow-hidden">
-                        <div className="h-full bg-[var(--brass)]" style={{ width: `${c.responseRate}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-            {/* Topic gap analysis */}
-            <Card className="p-5 glass-card">
-              <h3 className="font-display font-bold mb-1">Topic Gap Analysis</h3>
-              <p className="text-xs text-muted-foreground mb-5">Your sentiment vs market average by topic</p>
-              <div className="space-y-3">
-                {TOPIC_GAPS.map(t => (
-                  <div key={t.topic} className="flex items-center gap-3">
-                    <div className="w-20 flex-shrink-0">
-                      <div className="text-xs font-medium capitalize">{t.topic}</div>
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2 text-[10px]">
-                        <span className="text-muted-foreground w-8">You</span>
-                        <div className="flex-1 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                          <div className={cn('h-full rounded-full', t.you >= 0 ? 'bg-[var(--brass)]' : 'bg-red-500')} style={{ width: `${Math.abs(t.you) * 100}%` }} />
-                        </div>
-                        <span className="font-mono w-10 text-right">{t.you > 0 ? '+' : ''}{t.you.toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px]">
-                        <span className="text-muted-foreground w-8">Mkt</span>
-                        <div className="flex-1 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                          <div className={cn('h-full rounded-full', t.competitor >= 0 ? 'bg-blue-500' : 'bg-red-500')} style={{ width: `${Math.abs(t.competitor) * 100}%` }} />
-                        </div>
-                        <span className="font-mono w-10 text-right">{t.competitor > 0 ? '+' : ''}{t.competitor.toFixed(2)}</span>
-                      </div>
-                    </div>
-                    <div className={cn(
-                      'text-[10px] font-mono px-2 py-0.5 rounded flex items-center gap-0.5',
-                      t.status === 'winning' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'
+          {/* AI Strategy suggestions */}
+          <Card className="p-5 glass-card">
+            <div className="flex items-center gap-2 mb-1">
+              <Lightbulb className="w-4 h-4 text-[var(--brass)]" />
+              <h3 className="font-display font-bold">AI Strategy Suggestions</h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-5">Generated by Claude · based on competitor analysis</p>
+            <div className="space-y-3">
+              {[
+                {
+                  priority: 'High',
+                  title: 'Run a review request campaign this week',
+                  desc: 'Your review velocity (12/wk) is below the market average (16/wk). Golden Dragon is pulling ahead with 18/wk. Launch a post-visit SMS campaign to recent customers.',
+                  impact: '+8-12 reviews/week',
+                },
+                {
+                  priority: 'Medium',
+                  title: 'Address cleanliness concerns',
+                  desc: 'Your cleanliness sentiment (0.65) is below market (0.72). Review topic mentions suggest restroom cleanliness is the main issue. Consider a staff training refresher.',
+                  impact: '+0.07 sentiment',
+                },
+                {
+                  priority: 'Medium',
+                  title: 'Improve wait-time perception',
+                  desc: 'Wait-time sentiment is negative (-0.15) while market is at -0.08. Consider implementing a waitlist system or text-when-ready notifications.',
+                  impact: '+0.07 sentiment',
+                },
+              ].map((s, i) => (
+                <div key={i} className="p-3 rounded-lg bg-accent/20 border border-border/30">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Badge variant="outline" className={cn(
+                      'text-[9px]',
+                      s.priority === 'High' ? 'bg-red-500/10 text-red-600 border-red-500/30' :
+                      'bg-amber-500/10 text-amber-600 border-amber-500/30'
                     )}>
-                      {t.status === 'winning' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
-                      {Math.abs(t.gap).toFixed(2)}
-                    </div>
+                      {s.priority}
+                    </Badge>
+                    <h4 className="text-sm font-medium flex-1">{s.title}</h4>
                   </div>
-                ))}
-              </div>
-            </Card>
-
-            {/* AI strategy suggestions */}
-            <Card className="p-5 glass-card">
-              <div className="flex items-center gap-2 mb-1">
-                <Lightbulb className="w-4 h-4 text-[var(--brass)]" />
-                <h3 className="font-display font-bold">AI Strategy Suggestions</h3>
-              </div>
-              <p className="text-xs text-muted-foreground mb-5">Generated by Claude 3.5 · based on competitor analysis</p>
-              <div className="space-y-3">
-                {[
-                  {
-                    priority: 'High',
-                    title: 'Run a review request campaign this week',
-                    desc: 'Your review velocity (12/wk) is below the market average (16/wk). Golden Dragon is pulling ahead with 18/wk. Launch a post-visit SMS campaign to recent customers.',
-                    impact: '+8-12 reviews/week',
-                  },
-                  {
-                    priority: 'Medium',
-                    title: 'Address cleanliness concerns',
-                    desc: 'Your cleanliness sentiment (0.65) is below market (0.72). Review topic mentions suggest restroom cleanliness is the main issue. Consider a staff training refresher.',
-                    impact: '+0.07 sentiment',
-                  },
-                  {
-                    priority: 'Medium',
-                    title: 'Improve wait-time perception',
-                    desc: 'Wait-time sentiment is negative (-0.15) while market is at -0.08. Consider implementing a waitlist system or text-when-ready notifications.',
-                    impact: '+0.07 sentiment',
-                  },
-                  {
-                    priority: 'Low',
-                    title: 'Highlight your food quality advantage',
-                    desc: 'Your food sentiment (0.82) is strong. Consider promoting signature dishes in your Google Business Profile photos and posts to amplify this strength.',
-                    impact: '+visibility',
-                  },
-                ].map((s, i) => (
-                  <div key={i} className="p-3 rounded-lg bg-accent/20 border border-border/30">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <Badge variant="outline" className={cn(
-                        'text-[9px]',
-                        s.priority === 'High' ? 'bg-red-500/10 text-red-600 border-red-500/30' :
-                        s.priority === 'Medium' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                        'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                      )}>
-                        {s.priority}
-                      </Badge>
-                      <h4 className="text-sm font-medium flex-1">{s.title}</h4>
-                    </div>
-                    <p className="text-xs text-muted-foreground mb-2 leading-relaxed">{s.desc}</p>
+                  <p className="text-xs text-muted-foreground mb-2 leading-relaxed">{s.desc}</p>
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-muted-foreground">Expected impact:</span>
                       <Badge variant="outline" className="text-[9px] text-[var(--brass)] border-[var(--brass)]/30 font-mono">
                         {s.impact}
                       </Badge>
                     </div>
+                    {s.priority === 'High' && (
+                      <Button size="sm" className="h-6 text-[10px] bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => setCampaignOpen(true)}>
+                        Take action
+                      </Button>
+                    )}
                   </div>
-                ))}
-              </div>
-            </Card>
-          </div>
+                </div>
+              ))}
+            </div>
+          </Card>
         </div>
       </main>
       <MobileNav />
+
+      {/* Add Competitor Dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="glass-card">
+          <DialogHeader>
+            <DialogTitle className="font-display">Add Competitor</DialogTitle>
+            <DialogDescription>
+              Enter a competitor&apos;s Google Maps URL or business name. We&apos;ll start tracking their reviews weekly.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="comp-name">Competitor business name</Label>
+              <Input
+                id="comp-name"
+                placeholder="e.g. Golden Dragon Restaurant"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label htmlFor="comp-url">Google Maps URL (optional)</Label>
+              <Input
+                id="comp-url"
+                placeholder="https://maps.google.com/..."
+                value={newUrl}
+                onChange={e => setNewUrl(e.target.value)}
+                className="mt-1.5"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Providing the Maps URL helps us fetch accurate data. We&apos;ll auto-discover competitors nearby.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleAddCompetitor} disabled={adding || !newName}>
+              {adding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+              Add competitor
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Campaign Builder (launched from alert) */}
+      <CampaignBuilder open={campaignOpen} onOpenChange={setCampaignOpen} />
     </div>
   )
 }

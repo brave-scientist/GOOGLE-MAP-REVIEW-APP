@@ -7,16 +7,26 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
-import { Star, ArrowRight, Check, Sparkles, TrendingUp, MessageSquare } from 'lucide-react'
+import { Separator } from '@/components/ui/separator'
+import {
+  Star, ArrowRight, Check, Sparkles, TrendingUp, MessageSquare, Mail,
+  Loader2,
+} from 'lucide-react'
 import { toast } from 'sonner'
+
+type Mode = 'password' | 'otp'
 
 export default function LoginPage() {
   const router = useRouter()
+  const [mode, setMode] = useState<Mode>('password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
@@ -36,6 +46,92 @@ export default function LoginPage() {
       toast.error('Network error')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSendOtp = async () => {
+    if (!email) {
+      toast.error('Email required', { description: 'Please enter your email first' })
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send', email }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setOtpSent(true)
+        toast.success('OTP sent!', {
+          description: data.demoCode ? `Demo code: ${data.demoCode}` : 'Check your email for the 6-digit code',
+        })
+      } else {
+        toast.error('Failed to send OTP', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode || otpCode.length !== 6) {
+      toast.error('Invalid code', { description: 'Please enter the 6-digit code' })
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', email, code: otpCode }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Logged in!', { description: data.isNewUser ? 'Welcome to ReviewReply!' : 'Welcome back!' })
+        router.push(data.redirectTo || '/dashboard')
+      } else {
+        toast.error('Verification failed', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true)
+    try {
+      // In production, this would redirect to Google OAuth consent screen
+      // For demo, we simulate with a prompt
+      const email = window.prompt('Enter your Google email (demo OAuth):', 'you@gmail.com')
+      if (!email) {
+        setGoogleLoading(false)
+        return
+      }
+
+      const name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Logged in with Google!', { description: data.user?.name })
+        router.push(data.redirectTo || '/dashboard')
+      } else {
+        toast.error('Google login failed', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setGoogleLoading(false)
     }
   }
 
@@ -65,44 +161,152 @@ export default function LoginPage() {
             <p className="text-sm text-muted-foreground">Log in to your ReviewReply dashboard</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@business.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                className="mt-1.5 glass-card"
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link href="#" className="text-xs text-[var(--brass)] hover:underline">Forgot password?</Link>
-              </div>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                className="mt-1.5 glass-card"
-              />
-            </div>
+          {/* Google OAuth button */}
+          <Button
+            variant="outline"
+            className="w-full h-11 glass-card mb-4"
+            onClick={handleGoogleLogin}
+            disabled={googleLoading}
+          >
+            {googleLoading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+            )}
+            Continue with Google
+          </Button>
 
-            <Button
-              type="submit"
-              className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer h-11"
-              disabled={loading}
+          {/* Divider */}
+          <div className="flex items-center gap-3 mb-4">
+            <Separator className="flex-1" />
+            <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">or</span>
+            <Separator className="flex-1" />
+          </div>
+
+          {/* Mode tabs */}
+          <div className="flex gap-1 p-1 glass-card rounded-lg mb-4">
+            <button
+              onClick={() => setMode('password')}
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${mode === 'password' ? 'bg-[var(--brass)] text-white' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              {loading ? 'Logging in...' : 'Log in'}
-              {!loading && <ArrowRight className="ml-2 w-4 h-4" />}
-            </Button>
-          </form>
+              Password
+            </button>
+            <button
+              onClick={() => setMode('otp')}
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${mode === 'otp' ? 'bg-[var(--brass)] text-white' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Email OTP
+            </button>
+          </div>
+
+          {mode === 'password' && (
+            <form onSubmit={handlePasswordLogin} className="space-y-4">
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@business.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                  className="mt-1.5 glass-card"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <button type="button" onClick={() => setMode('otp')} className="text-xs text-[var(--brass)] hover:underline">
+                    Forgot password?
+                  </button>
+                </div>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                  className="mt-1.5 glass-card"
+                />
+              </div>
+              <Button
+                type="submit"
+                className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer h-11"
+                disabled={loading}
+              >
+                {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Log in
+                {!loading && <ArrowRight className="ml-2 w-4 h-4" />}
+              </Button>
+            </form>
+          )}
+
+          {mode === 'otp' && (
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="otp-email">Email</Label>
+                <Input
+                  id="otp-email"
+                  type="email"
+                  placeholder="you@business.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  disabled={otpSent}
+                  required
+                  className="mt-1.5 glass-card"
+                />
+              </div>
+
+              {!otpSent ? (
+                <Button
+                  onClick={handleSendOtp}
+                  className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-11"
+                  disabled={loading || !email}
+                >
+                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Mail className="w-4 h-4 mr-2" />}
+                  Send login code
+                </Button>
+              ) : (
+                <>
+                  <div>
+                    <Label htmlFor="otp-code">6-digit code</Label>
+                    <Input
+                      id="otp-code"
+                      placeholder="123456"
+                      value={otpCode}
+                      onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      maxLength={6}
+                      className="mt-1.5 glass-card font-mono text-center text-lg tracking-widest"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Code sent to {email} · expires in 10 minutes
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleVerifyOtp}
+                    className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-11"
+                    disabled={loading || otpCode.length !== 6}
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    Verify & log in
+                  </Button>
+                  <button
+                    onClick={handleSendOtp}
+                    className="w-full text-xs text-[var(--brass)] hover:underline"
+                    disabled={loading}
+                  >
+                    Resend code
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="mt-4 p-3 rounded-lg bg-[var(--brass)]/5 border border-[var(--brass)]/20">
             <div className="flex items-center gap-2 mb-1">
@@ -150,7 +354,7 @@ export default function LoginPage() {
           <div className="space-y-4">
             {[
               { icon: MessageSquare, title: 'Unified Review Inbox', desc: 'Google, Facebook, Yelp, Trustpilot — all in one place' },
-              { icon: Sparkles, title: 'AI Brand Voice', desc: 'Claude 3.5 drafts replies that sound like you' },
+              { icon: Sparkles, title: 'AI Brand Voice', desc: 'Claude-powered drafts that sound like you' },
               { icon: TrendingUp, title: 'Competitor Intelligence', desc: 'Weekly benchmarks against your top 3 competitors' },
             ].map(f => (
               <div key={f.title} className="flex items-start gap-3 p-3 rounded-lg glass-card">

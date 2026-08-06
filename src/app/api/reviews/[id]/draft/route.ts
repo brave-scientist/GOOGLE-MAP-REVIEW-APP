@@ -3,8 +3,9 @@ import { db } from '@/lib/db'
 import { DraftStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30 // 30 seconds for AI generation
 
-// POST /api/reviews/[id]/draft — Generate AI draft reply for a review
+// POST /api/reviews/[id]/draft — Generate AI draft reply using real LLM (z-ai-web-dev-sdk)
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -28,14 +29,17 @@ export async function POST(
         draft: review.draftText,
         status: review.draftStatus,
         generatedAt: review.updatedAt.toISOString(),
+        model: 'cached',
       })
     }
 
-    const draft = generateDraft({
-      rating: review.rating,
-      text: review.text,
-      author: review.author,
-      business: { name: review.business.name },
+    // Generate draft using REAL LLM via z-ai-web-dev-sdk
+    const { draft, model, tokensUsed } = await generateLLMDraft({
+      reviewText: review.text,
+      reviewRating: review.rating,
+      reviewAuthor: review.author,
+      businessName: review.business.name,
+      businessIndustry: review.business.industry || 'business',
     })
 
     await db.review.update({
@@ -55,7 +59,8 @@ export async function POST(
           reviewId: review.id,
           rating: review.rating,
           source: review.source,
-          model: 'claude-3-5-sonnet-20241022',
+          model,
+          tokensUsed,
           businessId: review.businessId,
         }),
       },
@@ -65,6 +70,8 @@ export async function POST(
       draft,
       status: DraftStatus.PENDING,
       generatedAt: new Date().toISOString(),
+      model,
+      tokensUsed,
     })
   } catch (error) {
     console.error('Draft generation error:', error)
@@ -75,33 +82,102 @@ export async function POST(
   }
 }
 
-// Rule-based AI draft generator (simulates Claude 3.5 output with brand voice)
-function generateDraft(review: {
-  rating: number
-  text: string
-  author: string
-  business: { name: string }
-}): string {
-  const { rating, text, author, business } = review
-  const firstName = author.split(' ')[0]
-  const bizName = business.name
+// Real LLM-powered draft generation
+async function generateLLMDraft(params: {
+  reviewText: string
+  reviewRating: number
+  reviewAuthor: string
+  businessName: string
+  businessIndustry: string
+}): Promise<{ draft: string; model: string; tokensUsed: number }> {
+  const { reviewText, reviewRating, reviewAuthor, businessName, businessIndustry } = params
+  const firstName = reviewAuthor.split(' ')[0]
 
+  // Build the system prompt — this encodes the "brand voice" rules
+  const systemPrompt = `You are an expert customer service representative for ${businessName}, a ${businessIndustry} business.
+
+Your task is to write a public reply to a customer's online review. The reply should:
+
+1. Be warm, professional, and authentic — sound like a real person, not a bot
+2. Address the customer by first name (${firstName})
+3. Reference specific details from their review to show you actually read it
+4. Be concise (2-4 sentences, max 60 words)
+5. Match the sentiment:
+   - For 4-5 star reviews: Express genuine gratitude, invite them back
+   - For 3 star reviews: Thank them, acknowledge their feedback, commit to improvement
+   - For 1-2 star reviews: Sincerely apologize, take responsibility, offer to make it right with a specific contact method
+6. NEVER use generic phrases like "We apologize for any inconvenience" or "We take feedback seriously"
+7. NEVER mention that this is an AI-generated response
+8. If the review mentions anything that sounds like a legal threat (lawsuit, lawyer, BBB, attorney), respond professionally and ask them to contact management directly — do NOT apologize or admit fault
+9. Do not include emojis or hashtags
+10. Do not sign off with a name — the platform will append the signature automatically
+
+Write ONLY the reply text, no preamble, no explanation.`
+
+  const userPrompt = `Review details:
+- Customer name: ${reviewAuthor}
+- Rating: ${reviewRating} out of 5 stars
+- Business: ${businessName} (${businessIndustry})
+
+Review text:
+"${reviewText}"
+
+Write the reply:`
+
+  try {
+    // Dynamically import the SDK (server-side only)
+    const ZAIModule = await import('z-ai-web-dev-sdk')
+    const ZAI = ZAIModule.default
+    const zai = await ZAI.create()
+
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: 'assistant', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      thinking: { type: 'disabled' },
+    })
+
+    const draft = completion.choices[0]?.message?.content?.trim() || ''
+
+    if (!draft) {
+      throw new Error('Empty response from LLM')
+    }
+
+    // Clean up the draft (remove quotes if the LLM wrapped it)
+    const cleanedDraft = draft.replace(/^["']|["']$/g, '').trim()
+
+    return {
+      draft: cleanedDraft,
+      model: 'glm-4.6-real',
+      tokensUsed: completion.usage?.total_tokens || 0,
+    }
+  } catch (error) {
+    console.error('LLM call failed, falling back to rule-based:', error)
+    // Fallback to rule-based generation if LLM fails
+    const fallback = generateFallbackDraft(reviewRating, reviewAuthor, businessName, reviewText)
+    return {
+      draft: fallback,
+      model: 'rule-based-fallback',
+      tokensUsed: 0,
+    }
+  }
+}
+
+// Fallback rule-based draft (used only if LLM is unavailable)
+function generateFallbackDraft(rating: number, author: string, business: string, text: string): string {
+  const firstName = author.split(' ')[0]
   const escalationKeywords = ['lawsuit', 'BBB', 'lawyer', 'health inspector', 'attorney', 'sue']
   const lowerText = text.toLowerCase()
   if (escalationKeywords.some(k => lowerText.includes(k))) {
-    return `Thank you for reaching out, ${firstName}. We take matters like this very seriously. A member of our management team will contact you within 24 hours to address your concerns directly. We appreciate your patience as we work to resolve this.`
+    return `Thank you for reaching out, ${firstName}. We take matters like this very seriously. A member of our management team will contact you within 24 hours to address your concerns directly.`
   }
 
   if (rating >= 4) {
-    const drafts = [
-      `Thank you so much for the wonderful review, ${firstName}! We are thrilled to hear you had such a great experience at ${bizName}. Our team takes pride in what we do, and feedback like yours makes it all worthwhile. We cannot wait to welcome you back soon!`,
-      `${firstName}, thank you for taking the time to share your experience! It means the world to us at ${bizName}. We look forward to serving you again — and if there is anything we can do to make your next visit even better, just let us know.`,
-      `We are so grateful for your kind words, ${firstName}! Reviews like yours remind us why we love what we do at ${bizName}. Thank you for being a part of our community, and we hope to see you again soon!`,
-    ]
-    return drafts[Math.floor(Math.random() * drafts.length)]
+    return `Thank you so much for the wonderful review, ${firstName}! We are thrilled to hear you had such a great experience at ${business}. Our team takes pride in what we do, and feedback like yours makes it all worthwhile. We cannot wait to welcome you back soon!`
   } else if (rating === 3) {
-    return `Thank you for your feedback, ${firstName}. We appreciate you taking the time to share your experience at ${bizName}. We are always looking for ways to improve, and your input helps us do that. We hope to have the opportunity to provide you with a 5-star experience next time — please reach out if there is anything we can do to make that happen.`
+    return `Thank you for your feedback, ${firstName}. We appreciate you taking the time to share your experience at ${business}. We are always looking for ways to improve, and your input helps us do that. We hope to have the opportunity to provide you with a 5-star experience next time.`
   } else {
-    return `${firstName}, we are truly sorry to hear that your experience at ${bizName} fell short of expectations. This is not the standard we hold ourselves to, and we would like to make it right. Please reach out to us directly at hello@${bizName.toLowerCase().replace(/[^a-z]/g, '')}.com or call us during business hours — we would love the opportunity to turn this around for you.`
+    return `${firstName}, we are truly sorry to hear that your experience at ${business} fell short of expectations. This is not the standard we hold ourselves to, and we would like to make it right. Please reach out to us directly so we can turn this around for you.`
   }
 }
