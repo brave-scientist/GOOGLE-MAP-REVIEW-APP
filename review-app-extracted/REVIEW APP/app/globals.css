@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Landing-page fonts + base styling, ported faithfully from landing-page.html.
+   The full landing page is rendered as React components in app/(marketing);
+   these globals ensure the design tokens apply app-wide. */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ink text-cream font-sans antialiased;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display font-bold;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Awning-stripe divider (storefront motif) used across marketing + app. */
+.awning {
+  height: 14px;
+  background: repeating-linear-gradient(
+    115deg,
+    theme("colors.brass.DEFAULT") 0 22px,
+    theme("colors.ink.3") 22px 44px
+  );
+  opacity: 0.9;
+}
+
+/* Typewriter cursor + posted-check pulse (hero demo card). */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ===== Scroll reveal system (Task 1) ===== */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+.reveal-delay-5 { transition-delay: 0.5s; }
+
+/* Stagger children */
+.stagger-children > * {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stagger-children.visible > *:nth-child(1) { opacity: 1; transform: none; transition-delay: 0s; }
+.stagger-children.visible > *:nth-child(2) { opacity: 1; transform: none; transition-delay: 0.1s; }
+.stagger-children.visible > *:nth-child(3) { opacity: 1; transform: none; transition-delay: 0.2s; }
+.stagger-children.visible > *:nth-child(4) { opacity: 1; transform: none; transition-delay: 0.3s; }
+.stagger-children.visible > *:nth-child(5) { opacity: 1; transform: none; transition-delay: 0.4s; }
+
+/* Slide in from left/right */
+.reveal-left {
+  opacity: 0;
+  transform: translateX(-32px);
+  transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reveal-right {
+  opacity: 0;
+  transform: translateX(32px);
+  transition: opacity 0.65s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reveal-left.visible,
+.reveal-right.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ===== Micro-interactions (Task 8) ===== */
+.btn-lift {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.btn-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
+}
+.price-card-hover {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.price-card-hover:hover {
+  border-color: rgba(200, 155, 60, 0.6);
+  box-shadow: 0 0 0 4px rgba(200, 155, 60, 0.08), 0 16px 40px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+.star-clickable {
+  cursor: pointer;
+  transition: transform 0.1s ease, color 0.1s ease;
+  display: inline-block;
+}
+.star-clickable:hover {
+  transform: scale(1.25);
+}
+
+/* ===== Logo carousel (Task 5) ===== */
+.carousel-track {
+  display: flex;
+  gap: 32px;
+  width: max-content;
+  animation: scroll-left 28s linear infinite;
+}
+.carousel-track:hover {
+  animation-play-state: paused;
+}
+@keyframes scroll-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.carousel-wrapper {
+  overflow: hidden;
+  position: relative;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 12%,
+    black 88%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 12%,
+    black 88%,
+    transparent 100%
+  );
+}
+
+/* ===== Tab transition (Task 4) ===== */
+.tab-content {
+  transition: opacity 0.3s ease;
+}
+.tab-content.hidden-tab {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+/* ===== Price transition (Task 9) ===== */
+.price-transition {
+  transition: opacity 0.2s ease;
+}
+.price-transition.fading {
+  opacity: 0;
+}

@@ -1,0 +1,298 @@
+     1→# Frontend Audit Report — ReviewReply-Lite
+     2→
+     3→**Task ID:** `audit-1`
+     4→**Agent:** Frontend Auditor
+     5→**Scope:** `app/`, `components/`, `app/api/*` (frontend-facing routes), `tailwind.config.ts`, `globals.css`
+     6→**Depth:** very thorough (every frontend file read end-to-end)
+     7→**Codebase location:** `/home/z/my-project/review-app-extracted/REVIEW APP/`
+     8→**Stack:** Next.js 14.2.15 (App Router) · React 18 · TypeScript 5.6 strict · Tailwind 3.4 · Inngest 3 · Stripe 16 · Zod 3 · Supabase SSR (mock-mode default)
+     9→
+    10→---
+    11→
+    12→## Executive Summary
+    13→
+    14→- **The marketing landing page (`app/(marketing)/page.tsx`, `LiveDemo`, `BeforeAfter`, `TestimonialCarousel`, `PricingToggle`, `StatCounter`, `ScrollReveal`, `LogoCarousel`) is genuinely polished** — custom awning-stripe motif, branded ink/cream/brass/coral palette, Space Grotesk display font, hand-rolled scroll-reveal + IntersectionObserver animations, interactive live demo with typewriter effect, animated stat counters, dot-nav testimonial carousel. This is the strongest part of the codebase and is closer to a "premium $50k feel" than the app shell.
+    15→- **The authenticated app shell (`(app)/dashboard`, `reviews`, `requests`, `settings`, `billing`, `org-dashboard`) is functional but visually flat** — plain cards with thin borders, no charts, no skeletons, no toasts, no animations, no icon library (uses unicode `★☆✓` and emojis), no design-system primitives. Reads as "MVP that works," not "premium SaaS."
+    16→- **One P0 production-breaking bug:** `OnboardingForm.tsx` calls `POST /api/businesses/${businessId}/connect/facebook`, but **no such route exists** in `app/api/businesses/[id]/connect/`. The Facebook connect button is dead — every new user who tries to connect Facebook gets a 404.
+    17→- **One P0 revenue bug:** the Enterprise plan ($249/mo) is sold in `BillingManager.tsx` and on `/solutions/[slug]` but **both `/api/billing/checkout` and `/api/billing/manage` reject `enterprise`** with `if (plan !== "starter" && plan !== "pro")`. Clicking "Upgrade to Enterprise" returns 400. Enterprise tier is unreachable.
+    18→- **One P1 multi-tenant bug:** `/api/billing/manage` uses `businesses[0]` instead of the active business from the cookie. Multi-location (Enterprise) users who switch to location #2 and click "Cancel subscription" will cancel location #1's subscription.
+    19→- **Duplicate H1 on `/requests`** — `requests/page.tsx` renders `<h1>Review Requests</h1>` and `RequestsManager.tsx` renders another `<h1>Review Requests</h1>`. SEO + a11y issue.
+    20→- **Three invalid Tailwind classes silently no-op:** `space-y-22` and `mb-22` (default scale stops at `12` / jumps to `14, 16, 20, 24`; `22` is invalid) in `(marketing)/page.tsx`, and `duration-400` (default scale jumps `300 → 500`) in `TestimonialCarousel.tsx`. Also `prose prose-invert` in `terms/page.tsx` requires `@tailwindcss/typography`, which is **not installed**.
+    21→- **No shared marketing layout** — each marketing page re-implements its own header/footer. `/vs/birdeye`, `/vs/podium`, `/privacy`, `/terms` have no top nav and no footer (dead-end pages).
+    22→- **No `error.tsx`, `loading.tsx`, or `not-found.tsx`** anywhere in the route tree — no branded 404, no Suspense fallbacks, no error boundaries.
+    23→- **Accessibility is uneven:** login + onboarding forms associate labels correctly via `htmlFor`/`id`, but `RequestsManager`, `SettingsForm`, `LiveDemo` use sibling `<label>` elements with no association; `LiveDemo`'s clickable stars are `<span onClick>` with no keyboard handler; `AppNav`'s account dropdown has no `aria-expanded`, no Escape, no outside-click dismiss.
+    24→- **Heavy mock-mode leakage:** OnboardingForm hardcodes `MOCK_GOOGLE_LOCATIONS[0]` (always "The Copper Spoon (Mock)") regardless of the business name the user typed; `LogoCarousel` and `TestimonialCarousel` ship "PLACEHOLDER" comments; the marketing page advertises "Built for single-location businesses" but the org-dashboard + Enterprise plan exist for multi-location. Inconsistent positioning.
+    25→- **Wasted work:** `dashboard/page.tsx`, `reviews/page.tsx`, `requests/page.tsx` all call `const user = await getCurrentUser()` and never use the result (the `(app)/layout.tsx` already gates auth).
+    26→
+    27→---
+    28→
+    29→## Per-File Findings
+    30→
+    31→Legend: **Status** = ✅ OK / ⚠️ Issues / ❌ Broken / 🟡 Stub/Empty
+    32→**Severity** = P0 (blocks production) · P1 (broken feature) · P2 (UX/a11y) · P3 (polish)
+    33→
+    34→### App Shell — `app/`
+    35→
+    36→| File | Status | Issues | Severity |
+    37→|---|---|---|---|
+    38→| `app/layout.tsx` | ✅ | Loads Google Fonts via `<link>` in `<head>` (works, but no `next/font` optimization). No theme-color meta, no viewport meta (Next 14 auto-injects viewport but explicit is better). Body has `overflow-x-hidden` — fine. | P3 |
+    39→| `app/globals.css` | ⚠️ | Custom CSS animations + scroll-reveal system are well-built. `theme()` calls inside `@layer` work. No dark-mode CSS variables (the app is permanently dark). No `:focus-visible` global style (focus rings depend on Tailwind's `focus:ring-brass` per-component, often missing). | P2 |
+    40→| `app/(app)/layout.tsx` | ✅ | Auth guard + business-existence guard + active-business resolution all correct. Uses `businesses[0]!.id` non-null assertion after `length === 0` redirect guard — safe. | — |
+    41→| `app/(app)/dashboard/page.tsx` | ⚠️ | `const user = await getCurrentUser()` is unused (line 14). Renders 4 stat cards + 2 recent lists. No charts, no time-range filter, no skeletons. Empty states are inline `<p>` tags. No loading state. | P2 |
+    42→| `app/(app)/reviews/page.tsx` | ⚠️ | `const user = await getCurrentUser()` unused (line 15). Builds a `Map` of replies — fine. No filtering by source/rating/status, no search, no pagination. Empty state OK. | P2 |
+    43→| `app/(app)/requests/page.tsx` | ❌ | **Duplicate `<h1>Review Requests</h1>`** — page.tsx line 30 AND RequestsManager.tsx line 181. Bad SEO + a11y. `const user` unused. | **P1** |
+    44→| `app/(app)/settings/page.tsx` | ✅ | Thin server wrapper around `<SettingsForm>` — fine. | — |
+    45→| `app/(app)/billing/page.tsx` | ⚠️ | Computes plan limits inline (duplicates `PLAN_LIMITS` from `lib/types.ts`). Defaults `plan = "starter"` and `status = "none"` when no subscription — a brand-new business has no subscription row, so the Billing UI shows "starter" plan even though no checkout has happened. | P2 |
+    46→| `app/(app)/org-dashboard/page.tsx` | ⚠️ | Iterates `businesses` and calls `store.listReviews(b.id)` + `store.listReviewRequests(b.id)` for each — N+1 query pattern. Sorts leaderboard by response rate. Table is hand-coded (no `<DataTable>` primitive). `idx` variable in `.map((loc, idx) => ...)` is unused. | P2 |
+    47→| `app/onboarding/page.tsx` | ✅ | Server guard: redirects to `/dashboard` if user already has a connected business. Wraps `<OnboardingForm>`. Fine. | — |
+    48→
+    49→### Marketing — `app/(marketing)/`
+    50→
+    51→| File | Status | Issues | Severity |
+    52→|---|---|---|---|
+    53→| `app/(marketing)/page.tsx` | ⚠️ | Strongest file in the codebase — full landing page with hero typewriter, logo carousel, problem stats, how-it-works, live demo, before/after, features, pricing toggle, testimonials, FAQ accordion, final CTA, footer. **Bugs:** `space-y-22` (line 187) and `mb-22` (line 319) are invalid Tailwind classes (no-op). Placeholder stat cards labeled "Placeholder stat — replace with sourced figure." Feature-row images use `<img src="https://placehold.co/...">` instead of `next/image`. FAQ buttons lack `aria-expanded`/`aria-controls`. Two `<StatCard>` components defined inline (one here, one in solutions/[slug]) — duplication. | P2 |
+    54→| `app/(marketing)/solutions/[slug]/page.tsx` | ⚠️ | Client component for industry-specific landing pages (dental, salon, restaurant, contractor). `notFound()` called from client component — works but renders default Next 404 (no `not-found.tsx`). `useEffect` references `industry` in body but deps array is `[industry]` — handles undefined safely with early return. Re-declares `StatCard`, `StepCard`, `PriceCard`, `FooterCol` (duplicated from main landing page). Adds Enterprise plan to the pricing grid here but not on the main landing page — **inconsistent pricing surface**. | P2 |
+    55→| `app/(marketing)/login/page.tsx` | ⚠️ | Mock-mode login: any email works. Uses `htmlFor`/`id` correctly (✓ a11y). No password field, no OAuth buttons, no "forgot password" link — but the marketing copy promises "Card required to start trial." No signup/login distinction. Form submit handler is correct. | P2 |
+    56→| `app/(marketing)/privacy/page.tsx` | ⚠️ | Placeholder legal text with coral warning banner. No nav, no footer — only "← Back to home" link. No table of contents. | P3 |
+    57→| `app/(marketing)/terms/page.tsx` | ⚠️ | Same as privacy: placeholder legal text, no nav/footer. Uses `prose prose-invert` classes — **`@tailwindcss/typography` is not installed**, so these classes silently no-op. Section 6 is literally `[To be drafted by legal counsel.]`. | P3 |
+    58→| `app/(marketing)/layout.tsx` | 🟡 | **DOES NOT EXIST.** Each marketing page re-implements its own header/footer. Major missed reuse. | **P1** |
+    59→
+    60→### Comparison Pages — `app/vs/`
+    61→
+    62→| File | Status | Issues | Severity |
+    63→|---|---|---|---|
+    64→| `app/vs/birdeye/page.tsx` | ⚠️ | Server component. Renders a single H1, two `<section>` blocks, one comparison table, one CTA. **No top nav, no footer, no logo, no way back to marketing site except browser back.** Tables use semantic `<th>`/`<td>` — good. No internal anchors. | **P1** |
+    65→| `app/vs/podium/page.tsx` | ⚠️ | Identical structure to birdeye page. Same dead-end-page problem. | **P1** |
+    66→
+    67→### Components — `components/`
+    68→
+    69→| File | Status | Issues | Severity |
+    70→|---|---|---|---|
+    71→| `components/AppNav.tsx` | ⚠️ | Sticky top nav, desktop + mobile rows. Business picker is a native `<select>` with no label/aria-label. Account menu opens via `setOpen(!open)` but has **no `aria-expanded`, no Escape handler, no outside-click dismiss**. Mobile nav is an inline scrollable row (not a real hamburger menu). `useRouter` imported and used only for `router.refresh()` — fine. | P2 |
+    72→| `components/BillingManager.tsx` | ❌ | Three plan cards (Starter/Pro/Enterprise). **`startCheckout("enterprise")` and `changePlan("enterprise")` both call APIs that reject `enterprise`** → 400 error. Single shared `busy` state disables ALL buttons during any mutation (clicking "Cancel" grays out "Upgrade to Pro"). Cancel confirm is inline (no modal). No loading skeleton. `fmtDate` uses `toLocaleDateString("en-US")` — fine. | **P0** |
+    73→| `components/SettingsForm.tsx` | ⚠️ | Auto-post toggle, template editor, notification checkboxes. **Textarea `<label>` is sibling without `htmlFor`/`id`** (a11y). No validation that merge fields `{customer_name}/{business_name}/{review_link}` are present in the template. No character counter on the template. No "reset to default" button. Save → 2s "✓ Saved" toast (inline). | P2 |
+    74→| `components/RequestsManager.tsx` | ⚠️ | Tabbed quick-add / paste-list / CSV upload. **All 3 input labels in quick-add are sibling `<label>` without `htmlFor`/`id`** (a11y). No CSV preview pagination (shows first 10 only). `refresh()` callback has no error handling. No phone/email format validation on the client. No character counter on the paste textarea. Status badge styles are inline. | P2 |
+    75→| `components/OnboardingForm.tsx` | ❌ | 3-step wizard. **`connectFacebook()` calls `/api/businesses/${businessId}/connect/facebook` — endpoint DOES NOT EXIST → 404.** Google connect always picks `MOCK_GOOGLE_LOCATIONS[0]` ("The Copper Spoon (Mock)") regardless of the user's typed business name. "Skip Facebook for now" button renders whenever Google is connected, **even after Facebook is also connected** (UX bug). Timezone auto-detect uses `Intl.DateTimeFormat().resolvedOptions().timeZone` — correct. Progress indicator is 3 bars (good). Labels use `htmlFor`/`id` correctly (✓ a11y). | **P0** |
+    76→| `components/LiveDemo.tsx` | ⚠️ | Interactive demo with rating stars, business-type select, review textarea, typewriter reply. **Star rating uses `<span onClick>` with no `role="button"`, no `tabIndex`, no `onKeyDown`** — keyboard users cannot change the rating. "Post to Google" tooltip opens via click but no Escape dismiss. Hardcoded `replyTemplates` and `exampleReviews` for 5 ratings × 5 categories = 50 strings (well-written). `intervalRef` cleanup is correct. | P2 |
+    77→| `components/ReviewCard.tsx` | ⚠️ | Single review + AI draft + Post/Regenerate buttons. **`suppressHydrationWarning` + `mounted` flag for `toLocaleString()`** — workaround, not a fix (better: format server-side or use `Intl.DateTimeFormat` with explicit timeZone). `STATUS_STYLES` keyed by `Review["status"]` — type-safe. No loading skeleton during draft generation (button text changes only). No "copy to clipboard" button. No "ignore" action. | P2 |
+    78→| `components/LogoCarousel.tsx` | ⚠️ | Pure CSS marquee with mask-image fade. **Hardcoded fake business logos** (pizza/salon/dental emojis + fictional names). "PLACEHOLDER: Replace with real business logos after beta" comment. No `aria-label` on the carousel. No pause control (CSS hover pauses). | P3 |
+    79→| `components/BeforeAfter.tsx` | ⚠️ | Tab switcher between "Without" and "With" scenarios. Uses CSS `.tab-content.hidden-tab` with `position: absolute; opacity: 0; pointer-events: none` — hidden tab is still in DOM and **may be read by screen readers** (should use `visibility: hidden` or `aria-hidden`). Step numbers `0${i+1}` hardcode leading zero (breaks at i≥9, but only 5 steps). | P2 |
+    80→| `components/TestimonialCarousel.tsx` | ⚠️ | Auto-advancing carousel with dot navigation. **`duration-400` is not a valid Tailwind class** (default scale: 300, 500) — transition is instant. Hardcoded 6 fake testimonials with "PLACEHOLDER" comment. `handleDotClick` pauses for 6s — good. `cardsPerView` recalculated on resize — good. Dot buttons have `aria-label` (✓ a11y). No prev/next arrows. | P2 |
+    81→| `components/PricingToggle.tsx` | ⚠️ | Monthly/Annual toggle. **`isAnnual` state is local — parent doesn't control it**, so navigating away and back resets to Monthly. Comment says "Annual billing not yet live — activate in Stripe when ready." No keyboard arrow support (Tab works, Enter/Space work because they're `<button>`). | P3 |
+    82→| `components/ScrollReveal.tsx` | ✅ | IntersectionObserver-based reveal. Runs once on mount, queries all `.reveal/.reveal-left/.reveal-right/.stagger-children` elements. Disconnects on unmount. Correct. | — |
+    83→| `components/StatCounter.tsx` | ✅ | Animated count-up with IntersectionObserver + requestAnimationFrame + cubic ease-out. Correct. Mild hydration flash (server renders "0", client animates up). | — |
+    84→
+    85→### API Routes with Frontend Dependencies — `app/api/`
+    86→
+    87→| File | Status | Issues | Severity |
+    88→|---|---|---|---|
+    89→| `app/api/auth/route.ts` | ⚠️ | Mock-mode POST accepts any email containing `@`. No password, no rate limiting, no CSRF token. DELETE logs out. Real mode returns 501 ("not wired"). | P2 |
+    90→| `app/api/auth/active-business/route.ts` | ⚠️ | Sets `rr_active_business` cookie for 1 year. Uses `(cookieStore as any).set(...)` — works in Next 14 but bypasses type safety. No validation that the businessId belongs to the current user. | P2 |
+    91→| `app/api/businesses/route.ts` | ✅ | GET/POST businesses. Validates category against enum. Auth-gated. Correct. | — |
+    92→| `app/api/businesses/[id]/route.ts` | ✅ | GET/PATCH business. PATCH allow-lists safe fields. Owner check. Correct. | — |
+    93→| `app/api/businesses/[id]/connect/google/route.ts` | ✅ | Mock Google connect. Validates against `MOCK_GOOGLE_LOCATIONS`. Stores fake-encrypted token. Correct for mock mode. | — |
+    94→| `app/api/businesses/[id]/connect/facebook/route.ts` | 🟡 | **DOES NOT EXIST.** `OnboardingForm.tsx` calls this endpoint → 404. | **P0** |
+    95→| `app/api/businesses/[id]/review-requests/route.ts` | ✅ | GET list. Auth + owner check. Correct. | — |
+    96→| `app/api/businesses/[id]/review-requests/quick-add/route.ts` | ⚠️ | Validates name + phone/email. Phone validation: `replace(/\D/g, "").length >= 10` — accepts 10+ digits regardless of format. Email validation: `includes("@")` — accepts "a@b". Calls `runSendReviewRequest` synchronously (blocks the response until send completes). No plan-limit gating (Starter users can send SMS, which requires Pro). | P2 |
+    97→| `app/api/businesses/[id]/review-requests/parse-paste/route.ts` | ✅ | Calls `parsePasteList`. Returns contacts + unparsed. Correct. | — |
+    98→| `app/api/businesses/[id]/review-requests/send-batch/route.ts` | ⚠️ | Iterates contacts, creates a request for each, calls `runSendReviewRequest` synchronously per contact — **N synchronous SMS/email sends in a single request** (slow for large batches, no pacing despite `BATCH_PACING_MS` constant existing in `send-review-request.ts`). No plan-limit gating. | P2 |
+    99→| `app/api/businesses/[id]/review-requests/upload/route.ts` | ✅ | CSV upload via FormData. Reuses `parsePasteList`. Correct. | — |
+   100→| `app/api/reviews/[id]/draft/route.ts` | ⚠️ | Iterates all user businesses calling `store.listReviews(b.id)` to find the review — O(N×M) scan. Should add a `getReviewById(id)` to the store interface. | P2 |
+   101→| `app/api/reviews/[id]/reply/route.ts` | ⚠️ | Same O(N×M) scan to find the review. Posts via Google or Facebook integration based on `review.source`. Correct error handling. | P2 |
+   102→| `app/api/billing/checkout/route.ts` | ❌ | **Rejects `enterprise` plan**: `if (!plan || (plan !== "starter" && plan !== "pro"))`. `BillingManager` calls `startCheckout("enterprise")` when status is canceled/none → 400 error. | **P0** |
+   103→| `app/api/billing/manage/route.ts` | ❌ | **Two bugs:** (1) Same `enterprise` rejection as checkout. (2) Uses `businesses[0]` instead of `getActiveBusiness()` — multi-location users cancel/change the wrong business. | **P0** |
+   104→| `app/api/inngest/route.ts` | ✅ | Standard Inngest serve(). Correct. | — |
+   105→| `app/api/dev/trigger/route.ts` | ✅ | Manual job trigger for dev. Switch on `job` query param. Correct. | — |
+   106→
+   107→### Config
+   108→
+   109→| File | Status | Issues | Severity |
+   110→|---|---|---|---|
+   111→| `tailwind.config.ts` | ⚠️ | Custom palette (ink/paper/brass/coral/cream) + 3 font families. **No `spacing` extension** — so `space-y-22`, `mb-22` are invalid. **No `transitionDuration` extension** — so `duration-400` is invalid. **No plugins** — so `prose prose-invert` (requires `@tailwindcss/typography`) is invalid. `content` glob is correct. | P2 |
+   112→| `next.config.mjs` | ⚠️ | `reactStrictMode: true` ✓. `images.remotePatterns` includes `placehold.co` and `fonts.googleapis.com`, but the marketing page uses raw `<img>` tags (not `next/image`) — so the remotePatterns are unused. No `experimental.optimizePackageImports`. | P3 |
+   113→| `postcss.config.mjs` | ✅ | Standard tailwind + autoprefixer. Correct. | — |
+   114→| `tsconfig.json` | ✅ | Strict mode + `noUncheckedIndexedAccess` + `noImplicitOverride` — rigorous. `paths: {"@/*": ["./*"]}`. Correct. | — |
+   115→| `.eslintrc.json` | ⚠️ | Extends `next/core-web-vitals` only. Disables `react/no-unescaped-entities`. No `@typescript-eslint/no-unused-vars` rule (which would catch the 3 unused `user` consts). | P3 |
+   116→
+   117→---
+   118→
+   119→## Top 20 Critical Frontend Bugs (Ranked)
+   120→
+   121→| # | Bug | File(s) | Severity |
+   122→|---|---|---|---|
+   123→| 1 | **Facebook connect endpoint missing** — `OnboardingForm.connectFacebook()` POSTs to `/api/businesses/${id}/connect/facebook` which does not exist → 404 for every new user who tries Facebook | `components/OnboardingForm.tsx:126` | **P0** |
+   124→| 2 | **Enterprise plan unreachable** — `BillingManager` calls `startCheckout("enterprise")` and `changePlan("enterprise")` but both `/api/billing/checkout` and `/api/billing/manage` reject `enterprise` with 400 | `components/BillingManager.tsx:200,224,246` + `app/api/billing/checkout/route.ts:19` + `app/api/billing/manage/route.ts:26` | **P0** |
+   125→| 3 | **Billing manage uses wrong business** — `businesses[0]` instead of `getActiveBusiness()`; multi-location users mutate location #1 regardless of which location they're viewing | `app/api/billing/manage/route.ts:22` | **P0** |
+   126→| 4 | **Duplicate H1 on /requests** — page.tsx and RequestsManager both render `<h1>Review Requests</h1>` | `app/(app)/requests/page.tsx:30` + `components/RequestsManager.tsx:181` | **P1** |
+   127→| 5 | **No marketing layout** — every marketing page re-implements header/footer; `/vs/birdeye`, `/vs/podium`, `/privacy`, `/terms` have no nav at all (dead-end pages) | missing `app/(marketing)/layout.tsx` | **P1** |
+   128→| 6 | **No branded 404 / error / loading** — calling `notFound()` in `solutions/[slug]/page.tsx` renders the default Next.js 404; no `error.tsx` or `loading.tsx` anywhere | missing `app/not-found.tsx`, `app/error.tsx`, `app/loading.tsx` | **P1** |
+   129→| 7 | **Invalid Tailwind classes silently no-op** — `space-y-22`, `mb-22` (marketing page), `duration-400` (testimonial carousel), `prose prose-invert` (terms page, requires uninstalled `@tailwindcss/typography` plugin) | `app/(marketing)/page.tsx:187,319`, `components/TestimonialCarousel.tsx:95`, `app/(marketing)/terms/page.tsx:19`, `tailwind.config.ts` | **P1** |
+   130→| 8 | **LiveDemo star rating not keyboard accessible** — `<span onClick>` with no `role`, `tabIndex`, or `onKeyDown` | `components/LiveDemo.tsx:138-145` | P2 |
+   131→| 9 | **AppNav account dropdown no a11y/dismiss** — no `aria-expanded`, no Escape handler, no outside-click dismiss | `components/AppNav.tsx:109-128` | P2 |
+   132→| 10 | **Form labels not associated** — `RequestsManager` (5 labels), `SettingsForm` (1 label), `LiveDemo` (2 labels) use sibling `<label>` without `htmlFor`/`id` | `components/RequestsManager.tsx:220,230,240,264,326`, `components/SettingsForm.tsx:90`, `components/LiveDemo.tsx:151,166` | P2 |
+   133→| 11 | **Mock Google location always "The Copper Spoon"** — `OnboardingForm` hardcodes `MOCK_GOOGLE_LOCATIONS[0]` regardless of user's typed business name; user sees a mismatched location name post-connect | `components/OnboardingForm.tsx:104,283` | P2 |
+   134→| 12 | **"Skip Facebook for now" shown when Facebook IS connected** — conditional is `{googleConnected && ...}` but should be `{googleConnected && !facebookConnected && ...}` | `components/OnboardingForm.tsx:317` | P2 |
+   135→| 13 | **No plan-limit gating on review requests** — Starter users can send SMS requests (Pro-only feature) in mock mode; `quick-add` and `send-batch` routes don't check the subscription | `app/api/businesses/[id]/review-requests/quick-add/route.ts`, `send-batch/route.ts` | P2 |
+   136→| 14 | **`refresh()` in RequestsManager has no error handling** — if the fetch fails, the requests list silently doesn't update and the user sees no feedback | `components/RequestsManager.tsx:52-56` | P2 |
+   137→| 15 | **O(N×M) review lookup** — `/api/reviews/[id]/draft` and `/api/reviews/[id]/reply` iterate all user businesses calling `listReviews` per business to find one review; needs a `getReviewById` store method | `app/api/reviews/[id]/draft/route.ts:25-32`, `reply/route.ts:33-40` | P2 |
+   138→| 16 | **Synchronous SMS/email sends in batch** — `send-batch` route calls `runSendReviewRequest` per contact in a loop with no pacing (the `BATCH_PACING_MS` constant exists in `send-review-request.ts` but is only used by `runSendBatch`, which the route doesn't call) | `app/api/businesses/[id]/review-requests/send-batch/route.ts:46-58` | P2 |
+   139→| 17 | **BeforeAfter hidden tab still in accessibility tree** — `.tab-content.hidden-tab` uses `opacity:0 + pointer-events:none + position:absolute` but no `aria-hidden`/`visibility:hidden` | `app/globals.css:166-174` + `components/BeforeAfter.tsx:56,75` | P2 |
+   140→| 18 | **`active-business` endpoint doesn't validate ownership** — any authenticated user can set any `businessId` as active via POST; the cookie is then trusted by `getActiveBusiness()` | `app/api/auth/active-business/route.ts:11-22` | P2 |
+   141→| 19 | **No template merge-field validation** — `SettingsForm` lets users save a template missing `{review_link}`; the send job will render a broken SMS with no clickable link | `components/SettingsForm.tsx:90-95` | P2 |
+   142→| 20 | **`PricingToggle` state is local** — parent doesn't control `isAnnual`, so navigating away and back resets to Monthly; the toggle also has no controlled-component escape hatch | `components/PricingToggle.tsx:9` | P3 |
+   143→
+   144→---
+   145→
+   146→## Top 10 Design Quality Gaps (vs. "Premium $50k Feel")
+   147→
+   148→1. **No icon library.** The entire UI uses unicode (`★ ☆ ✓ →`) and emojis (`🍕 ✦ ◎ ⬡ ▣ ◈ ◆ ❋`). A premium SaaS needs `lucide-react` or `@heroicons/react` for consistent, scalable iconography — especially in the app shell (nav, buttons, empty states, status badges).
+   149→
+   150→2. **No design-system primitives.** Every button is `<button className="rounded-lg bg-brass px-6 py-2.5 font-semibold text-ink...">` repeated ad nauseam. No `<Button variant="primary|secondary|ghost|danger">`, no `<Card>`, no `<Input>`, no `<Badge>`, no `<Tabs>`, no `<Modal>`, no `<Toast>`, no `<Skeleton>`, no `<EmptyState>`. This is the single biggest gap between the current state and a maintainable premium product.
+   151→
+   152→3. **No animations in the app shell.** The marketing page has scroll-reveal, stat counters, typewriter, carousels. The dashboard/reviews/requests/settings/billing pages have **zero animation** — no page transitions, no list stagger, no hover lifts, no loading skeletons. Feels static and dated.
+   153→
+   154→4. **No charts or data visualization.** The dashboard shows 4 plain number cards. The org-dashboard shows a plain HTML table. A premium review-management SaaS needs rating-trend lines, source breakdown (Google vs Facebook pie), response-time histograms, request-funnel bars (sent → clicked → reviewed). Currently zero data viz.
+   155→
+   156→5. **No loading skeletons or optimistic updates.** Every mutation just changes button text to "Saving…" / "Sending…" / "Canceling…". No skeleton placeholders for initial page loads. No optimistic UI for quick-add (the new row appears only after `refresh()` completes).
+   157→
+   158→6. **No toast/notification system.** Success and error feedback are inline `<span>` tags below buttons. A premium SaaS needs a top-right toast stack (e.g., `sonner` or `react-hot-toast`) for "✓ Settings saved", "✓ Reply posted", "✗ Checkout failed".
+   159→
+   160→7. **No empty-state illustrations.** Empty reviews/requests show a plain `<p>No reviews yet.</p>`. Premium SaaS uses illustrated empty states (e.g., unDraw or custom SVG) with a clear CTA.
+   161→
+   162→8. **Inconsistent pricing surface.** The main landing page shows 2 plans (Starter, Pro). The `/solutions/[slug]` pages show 3 plans (Starter, Pro, Enterprise). The billing page shows 3 plans. The footer links to "vs Birdeye" and "vs Podium" but not to a pricing page. Enterprise is sold but unreachable (see bug #2).
+   163→
+   164→9. **Dead-end comparison pages.** `/vs/birdeye` and `/vs/podium` are bare text + table with no nav, no footer, no logos, no screenshots, no testimonials. They read as 2020-era SEO landing pages, not 2025 premium product pages.
+   165→
+   166→10. **No dark/light theme toggle.** The app is permanently dark (ink background). This is a valid design choice, but premium SaaS typically offers a light mode for accessibility and user preference. The `tailwind.config.ts` has no `darkMode` strategy configured.
+   167→
+   168→---
+   169→
+   170→## Missing Components List
+   171→
+   172→### Missing Route-Level Files
+   173→- `app/(marketing)/layout.tsx` — shared marketing nav/footer (P1)
+   174→- `app/not-found.tsx` — branded 404 page (P1)
+   175→- `app/error.tsx` — global error boundary (P2)
+   176→- `app/loading.tsx` — global loading skeleton (P2)
+   177→- `app/(app)/error.tsx` — app-shell error boundary (P2)
+   178→- `app/(app)/loading.tsx` — app-shell loading skeleton (P2)
+   179→- `app/api/businesses/[id]/connect/facebook/route.ts` — **referenced by OnboardingForm, does not exist** (P0)
+   180→- `app/api/webhooks/stripe/route.ts` — referenced in `lib/integrations/stripe.ts` comments (P3, real-mode only)
+   181→- `app/api/webhooks/google-oauth-callback/route.ts` — referenced in connect/google route comments (P3, real-mode only)
+   182→- `app/r/[click_token]/page.tsx` — public review-request landing page (the `review_link` in send-review-request.ts generates `${APP_URL}/r/${click_token}` but no route consumes it; clicking the link 404s)
+   183→
+   184→### Missing UI Primitives (would be in `components/ui/`)
+   185→- `<Button>` — variant system (primary/secondary/ghost/danger/success)
+   186→- `<Input>` / `<Textarea>` / `<Select>` / `<Checkbox>` / `<Switch>` — form primitives with consistent styling + a11y
+   187→- `<Card>` / `<CardHeader>` / `<CardContent>` / `<CardFooter>`
+   188→- `<Badge>` — status badges (currently inline)
+   189→- `<Tabs>` — accessible tab system (currently hand-rolled in RequestsManager + BeforeAfter)
+   190→- `<Modal>` / `<Dialog>` — accessible modal (currently cancel confirmations are inline)
+   191→- `<Toast>` / `<NotificationStack>` — toast system
+   192→- `<Skeleton>` — loading placeholder
+   193→- `<EmptyState>` — illustrated empty state
+   194→- `<Avatar>` — user avatar (currently hand-rolled in AppNav)
+   195→- `<DropdownMenu>` — accessible dropdown (currently hand-rolled in AppNav)
+   196→- `<DataTable>` — sortable/filterable/paginated table (org-dashboard is hand-coded)
+   197→- `<Pagination>` — pagination control (reviews/requests lists render all items)
+   198→- `<SearchInput>` — debounced search input
+   199→- `<DateRangePicker>` — date filter
+   200→- `<Tooltip>` — accessible tooltip (currently hand-rolled in LiveDemo)
+   201→- `<Accordion>` — accessible FAQ accordion (currently hand-rolled)
+   202→- `<Chart>` / `<BarChart>` / `<LineChart>` / `<DonutChart>` — data viz (currently none)
+   203→- `<Stat>` / `<StatCard>` — dashboard stat card (currently hand-coded)
+   204→
+   205→### Missing Provider/HOC Files
+   206→- `components/providers/ThemeProvider.tsx` — theme toggle
+   207→- `components/providers/ToastProvider.tsx` — toast context
+   208→- `components/providers/ModalProvider.tsx` — modal context
+   209→- `components/providers/QueryProvider.tsx` — if adding `@tanstack/react-query` for client-side data fetching (currently all data is server-rendered)
+   210→
+   211→---
+   212→
+   213→## Recommended New Components for Enterprise SaaS
+   214→
+   215→### Tier 1 — Blocking for "Premium" Claim (P0)
+   216→1. **`<Button>`** with variants `primary | secondary | ghost | danger | success` and sizes `sm | md | lg`. CVA (`class-variance-authority`) + `tailwind-merge` for the implementation.
+   217→2. **`<Card>`** family — `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`.
+   218→3. **`<Toast>`** system (use `sonner` — 3kb, battle-tested). Replace all inline `<span className="text-green-400">✓ Saved</span>` patterns.
+   219→4. **`<Modal>`** — accessible dialog (`@radix-ui/react-dialog` or `headlessui`). Replace inline cancel-confirmations in BillingManager.
+   220→5. **`<Skeleton>`** — gray pulsing placeholder. Replace the current "show nothing while server-rendered data loads" pattern.
+   221→
+   222→### Tier 2 — Enterprise SaaS Table Stakes (P1)
+   223→6. **`<DataTable>`** with sorting, filtering, pagination, row selection, empty state. Use `@tanstack/react-table`. Replace the org-dashboard hand-coded table.
+   224→7. **`<Tabs>`** — accessible (`@radix-ui/react-tabs`). Replace hand-rolled tab systems in RequestsManager + BeforeAfter.
+   225→8. **`<DropdownMenu>`** — accessible (`@radix-ui/react-dropdown-menu`). Replace AppNav account menu.
+   226→9. **`<Badge>`** — variant system `default | success | warning | danger | info`. Replace inline status badges.
+   227→10. **`<EmptyState>`** — illustration + heading + description + CTA. Replace inline `<p>No reviews yet.</p>`.
+   228→
+   229→### Tier 3 — Premium Polish (P2)
+   230→11. **`<Chart>` suite** — `BarChart`, `LineChart`, `DonutChart`, `Sparkline`. Use `recharts` or `visx`. Add rating trends, source breakdown, response-time histogram, request funnel to the dashboard.
+   231→12. **`<Stat>` / `<MetricCard>`** — large number + label + delta + sparkline. Replace the 4 plain number cards on the dashboard.
+   232→13. **`<CommandPalette>`** — `cmd+k` palette (`cmdk` library). Quick navigation for power users.
+   233→14. **`<OnboardingTour>`** — `driver.js` or `react-joyride`. Walk new users through the dashboard after onboarding.
+   234→15. **`<ActivityFeed>`** — real-time event stream ("Review replied · 2m ago", "Request sent · 5m ago"). Currently no activity log exists.
+   235→16. **`<NotificationBell>`** — dropdown of recent notifications (new reviews, failed sends, trial ending).
+   236→17. **`<Breadcrumbs>`** — for nested navigation (currently none).
+   237→18. **`<Pagination>`** — for reviews/requests lists once they exceed ~50 items.
+   238→19. **`<SearchInput>`** with debounced query — for filtering reviews by reviewer name / text.
+   239→20. **`<DateRangePicker>`** — for filtering reviews/requests by date.
+   240→
+   241→### Tier 4 — Enterprise-Specific (P3)
+   242→21. **`<RoleBadge>`** — show user role (individual / org_admin / location_manager) in the nav.
+   243→22. **`<TeamMemberList>`** — for multi-user organizations (no team management UI exists).
+   244→23. **`<AuditLog>`** — who replied to what, when (no audit trail exists).
+   245→24. **`<APIKeyManager>`** — for programmatic access (no API exists).
+   246→25. **`<WebhookSettings>`** — for outbound webhooks on review events (no webhook system exists).
+   247→
+   248→---
+   249→
+   250→## Additional Notes
+   251→
+   252→### Dependency Audit
+   253→- **Installed:** `next@14.2.15`, `react@18.3.1`, `@supabase/ssr`, `@supabase/supabase-js`, `inngest@3.27`, `stripe@16.12`, `zod@3.23`.
+   254→- **Not installed (commonly expected for premium SaaS):** `framer-motion` (animations), `lucide-react` (icons), `@radix-ui/*` (primitives), `headlessui` (primitives), `class-variance-authority` (variant system), `tailwind-merge` (class dedup), `clsx` (conditional classes), `sonner` (toasts), `cmdk` (command palette), `recharts`/`visx` (charts), `@tanstack/react-table` (data tables), `@tanstack/react-query` (client data fetching), `@tailwindcss/typography` (prose classes), `@tailwindcss/forms` (form styling).
+   255→- The codebase is intentionally lean — every animation is hand-rolled CSS, every icon is unicode. This keeps the bundle small but caps the design ceiling.
+   256→
+   257→### Hydration Concerns
+   258→- `ReviewCard.tsx` uses `suppressHydrationWarning` + `mounted` flag for `toLocaleString()` — workaround for server/client timezone mismatch. Better fix: format server-side with explicit `Intl.DateTimeFormat("en-US", { timeZone: business.timezone })`.
+   259→- `StatCounter.tsx` starts at 0 and animates up — server renders "0", client animates. Mild hydration flash but not a warning.
+   260→
+   261→### Mock-Mode Leakage
+   262→- `LogoCarousel.tsx` and `TestimonialCarousel.tsx` ship with "PLACEHOLDER" comments and fake data — appropriate for beta but must be replaced before commercial launch.
+   263→- `OnboardingForm.tsx` shows "The Copper Spoon (Mock)" as the Google location name regardless of the user's business name — confusing for demo users.
+   264→- The marketing page advertises "Card required to start trial" but the mock-mode login accepts any email with no card collection.
+   265→
+   266→### Tailwind Config Gaps
+   267→- No `spacing` extension → `space-y-22`, `mb-22`, `gap-22` are invalid.
+   268→- No `transitionDuration` extension → `duration-400` is invalid.
+   269→- No `darkMode` strategy → no light mode.
+   270→- No plugins → `prose prose-invert` (typography) and any `@tailwindcss/forms` features are unavailable.
+   271→- No `container` configuration → default centering + padding.
+   272→
+   273→### TypeScript Strictness
+   274→- `tsconfig.json` is rigorous: `strict: true`, `noUncheckedIndexedAccess: true`, `noImplicitOverride: true`.
+   275→- Three unused `const user = await getCurrentUser()` in dashboard/reviews/requests pages — would be caught by `@typescript-eslint/no-unused-vars` if the rule were enabled.
+   276→- `lib/auth.ts` has both branches of `if (useMocks)` returning the same thing — dead code.
+   277→
+   278→### Build/Runtime Evidence
+   279→- `dev-server.log` shows the app was exercised heavily in dev mode (177 HTTP requests logged). Occasional 500s on `POST /api/auth` are webpack-cache-related (`Cannot find module './731.js'`), not code bugs — fixed by clearing `.next/`.
+   280→- No `node_modules` in the extracted project — cannot run `tsc --noEmit` or `next build` to verify compilation, but the import graph is consistent (every `@/lib/...` and `@/components/...` import resolves to an existing file).
+   281→
+   282→---
+   283→
+   284→## Recommended Action Order
+   285→
+   286→1. **Fix P0 bugs first** (1–3 above): add the missing `connect/facebook` route, allow `enterprise` in billing routes, use `getActiveBusiness()` in `/api/billing/manage`.
+   287→2. **Fix P1 bugs** (4–7): remove the duplicate H1, create `app/(marketing)/layout.tsx`, add `app/not-found.tsx` + `app/error.tsx` + `app/loading.tsx`, fix/extend the Tailwind config (add `spacing.22`, `transitionDuration.400`, install `@tailwindcss/typography`).
+   288→3. **Build the Tier 1 design-system primitives** (`<Button>`, `<Card>`, `<Toast>`, `<Modal>`, `<Skeleton>`) and refactor existing components to use them.
+   289→4. **Install `lucide-react`** and replace all unicode/emoji icons.
+   290→5. **Add charts to the dashboard** (`recharts`) — this single change does the most for the "premium feel."
+   291→6. **Fix the a11y issues** (bugs 8–10, 17): keyboard handlers on LiveDemo stars, `aria-expanded` on AppNav dropdown, `htmlFor`/`id` on all form labels, `aria-hidden` on hidden BeforeAfter tab.
+   292→7. **Add plan-limit gating** to the review-request routes (bug 13).
+   293→8. **Build the public review-request landing page** at `/r/[click_token]` (currently 404s).
+   294→
+   295→---
+   296→
+   297→*End of audit. Report generated by Frontend Auditor agent, task `audit-1`.*
+   298→
