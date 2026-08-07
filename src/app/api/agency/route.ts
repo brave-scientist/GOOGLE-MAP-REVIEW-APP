@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server'
+import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/agency — Fetch real client businesses from DB
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authResult = await requirePlan(request, "ENTERPRISE")
+  if (authResult instanceof NextResponse) return authResult
   try {
     const businesses = await db.business.findMany({
       include: {

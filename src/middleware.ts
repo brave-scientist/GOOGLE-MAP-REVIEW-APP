@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromRequest } from '@/lib/auth'
+import { rateLimit, getClientIP, RATE_LIMITS } from '@/lib/rate-limit'
 
 // Routes that DON'T require authentication
 const PUBLIC_ROUTES = [
@@ -14,6 +15,7 @@ const PUBLIC_ROUTES = [
   '/contact',
   '/status',
   '/changelog',
+  '/refund',
 ]
 
 // API routes that DON'T require authentication
@@ -30,19 +32,12 @@ const PUBLIC_API_ROUTES = [
 ]
 
 function isPublicRoute(pathname: string): boolean {
-  // Check exact match for public pages
   if (PUBLIC_ROUTES.includes(pathname)) return true
-  // Blog post dynamic routes are public
   if (pathname.startsWith('/blog/')) return true
-  // Help article dynamic routes are public
   if (pathname.startsWith('/help/')) return true
-  // Review request landing page (QR code / SMS link target)
   if (pathname.startsWith('/r/')) return true
-  // Unsubscribe page (email link target)
   if (pathname.startsWith('/unsubscribe')) return true
-  // Widget.js embeddable script (must be public for external sites)
   if (pathname === '/widget.js') return true
-  // Next.js internal routes
   if (pathname.startsWith('/_next')) return true
   if (pathname.startsWith('/favicon')) return true
   return false
@@ -52,8 +47,50 @@ function isPublicApiRoute(pathname: string): boolean {
   return PUBLIC_API_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'))
 }
 
+// Rate limit configuration per route pattern
+function getRateLimitConfig(pathname: string): { limit: number; windowMs: number; identifier: string } | null {
+  const ip = getClientIP({ headers: new Headers() } as any) // placeholder, real IP from request
+
+  if (pathname === '/api/auth/login') {
+    return { ...RATE_LIMITS.login, identifier: `login:${ip}` }
+  }
+  if (pathname === '/api/auth/signup') {
+    return { ...RATE_LIMITS.signup, identifier: `signup:${ip}` }
+  }
+  if (pathname === '/api/contact') {
+    return { ...RATE_LIMITS.contact, identifier: `contact:${ip}` }
+  }
+  if (pathname.startsWith('/r/')) {
+    return { ...RATE_LIMITS.reviewRequest, identifier: `r:${ip}` }
+  }
+  if (pathname === '/widget.js') {
+    return { ...RATE_LIMITS.widget, identifier: `widget:${ip}` }
+  }
+  return null
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const ip = getClientIP(request)
+
+  // Rate limit public endpoints
+  const rateLimitConfig = getRateLimitConfigWithIP(pathname, ip)
+  if (rateLimitConfig) {
+    const result = rateLimit(rateLimitConfig.identifier, rateLimitConfig.limit, rateLimitConfig.windowMs)
+    if (!result.allowed) {
+      const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000)
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          { error: 'Rate limit exceeded', code: 'RATE_LIMITED', retryAfter },
+          { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+        )
+      }
+      return new NextResponse('Too Many Requests', {
+        status: 429,
+        headers: { 'Retry-After': String(retryAfter) },
+      })
+    }
+  }
 
   // Allow public pages
   if (isPublicRoute(pathname)) {
@@ -65,7 +102,6 @@ export async function middleware(request: NextRequest) {
     if (isPublicApiRoute(pathname)) {
       return NextResponse.next()
     }
-    // Protected API route — check session
     const session = await getSessionFromRequest(request)
     if (!session) {
       return NextResponse.json(
@@ -79,7 +115,6 @@ export async function middleware(request: NextRequest) {
   // For app routes (not public), check session
   const session = await getSessionFromRequest(request)
   if (!session) {
-    // Redirect to login with return URL
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('redirect', pathname)
     return NextResponse.redirect(loginUrl)
@@ -88,8 +123,26 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next()
 }
 
+function getRateLimitConfigWithIP(pathname: string, ip: string): { limit: number; windowMs: number; identifier: string } | null {
+  if (pathname === '/api/auth/login') {
+    return { ...RATE_LIMITS.login, identifier: `login:${ip}` }
+  }
+  if (pathname === '/api/auth/signup') {
+    return { ...RATE_LIMITS.signup, identifier: `signup:${ip}` }
+  }
+  if (pathname === '/api/contact') {
+    return { ...RATE_LIMITS.contact, identifier: `contact:${ip}` }
+  }
+  if (pathname.startsWith('/r/')) {
+    return { ...RATE_LIMITS.reviewRequest, identifier: `r:${ip}` }
+  }
+  if (pathname === '/widget.js') {
+    return { ...RATE_LIMITS.widget, identifier: `widget:${ip}` }
+  }
+  return null
+}
+
 export const config = {
-  // Match all routes except static assets
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|logo.svg|robots.txt|sitemap.xml).*)',
   ],

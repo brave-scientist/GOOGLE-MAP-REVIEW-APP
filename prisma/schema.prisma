@@ -69,6 +69,7 @@ model Business {
   campaigns    Campaign[]
   replyTemplates ReplyTemplate[]
   brandVoiceProfile BrandVoiceProfile?
+  oauthTokens       OAuthToken[]
 }
 
 model Review {
@@ -238,4 +239,21 @@ model OptOut {
   channel      String   @default("all") // sms, email, or all
   reason       String?  // "STOP keyword", "unsubscribe link", "manual"
   createdAt    DateTime @default(now())
+}
+
+model OAuthToken {
+  id                String   @id @default(cuid())
+  businessId        String
+  provider          String   // 'google' | 'facebook' | 'apple'
+  accessTokenEnc    String   // encrypted access token
+  refreshTokenEnc   String   // encrypted refresh token
+  expiresAt         DateTime?
+  scopes            String   @default("") // comma-separated
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, provider])
+  @@index([businessId])
 }

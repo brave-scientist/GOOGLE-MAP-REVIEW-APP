@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -50,4 +51,13 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Sentry config — only active when SENTRY_DSN env var is set
+  silent: true, // Suppresses Sentry build logs when no DSN
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  // Only upload source maps in production
+  sourcemaps: { disable: process.env.NODE_ENV !== 'production' },
+  // Automatically instrument Next.js routes
+  automaticRouterInstrumentation: true,
+});

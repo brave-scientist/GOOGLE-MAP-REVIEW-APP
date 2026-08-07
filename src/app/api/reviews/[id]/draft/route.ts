@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
 import { DraftStatus } from '@prisma/client'
 
@@ -10,6 +11,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requirePlan(request, "STARTER")
+  if (authResult instanceof NextResponse) return authResult
   try {
     const { id } = await params
     const body = await request.json().catch(() => ({}))

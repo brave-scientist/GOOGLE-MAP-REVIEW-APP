@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/brand-voice — Get the brand voice profile for the first business
 export async function GET(request: NextRequest) {
+  const authResult = await requirePlan(request, "PRO")
+  if (authResult instanceof NextResponse) return authResult
   try {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get('businessId')
@@ -43,6 +46,8 @@ export async function GET(request: NextRequest) {
 
 // POST /api/brand-voice — Create or update the brand voice profile
 export async function POST(request: NextRequest) {
+  const authResult = await requirePlan(request, "PRO")
+  if (authResult instanceof NextResponse) return authResult
   try {
     const body = await request.json()
     const { businessId, examples, toneGuidelines, signature, forbiddenPhrases } = body

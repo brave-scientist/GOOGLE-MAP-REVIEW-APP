@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
@@ -13,6 +14,8 @@ export async function GET(request: NextRequest) {
     const reanalyze = searchParams.get('reanalyze') === 'true'
 
     // If reanalyze requested, run LLM on all reviews that need it
+    const authCheck = await requirePlan(request, "PRO")
+    if (authCheck instanceof NextResponse) return authCheck
     if (reanalyze) {
       await reanalyzeAllReviews()
     }

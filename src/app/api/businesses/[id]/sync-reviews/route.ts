@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { fetchGoogleReviews, googleStarRatingToInt, refreshAccessToken, isGoogleConfigured } from '@/lib/integrations/google-business-profile'
+import { getTokens, updateAccessToken } from '@/lib/oauth-store'
 import { ReviewSource, DraftStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -26,22 +27,19 @@ export async function POST(
       return NextResponse.json({ error: 'Business not found' }, { status: 404 })
     }
 
-    // Check if Google is connected (googleLocationId contains the token JSON)
-    if (!business.googleLocationId || !business.googleLocationId.startsWith('google_connected:')) {
+    // Fetch encrypted tokens from the OAuthToken table
+    const tokens = await getTokens(id, 'google')
+    if (!tokens) {
       return NextResponse.json({
         error: 'Google Business Profile not connected',
         message: 'Connect your Google account in Settings → Integrations first.',
       }, { status: 400 })
     }
 
-    // Parse stored tokens
-    const tokenJson = business.googleLocationId.replace('google_connected:', '')
-    const tokens = JSON.parse(tokenJson)
-
     // Check if token is expired, refresh if needed
-    let accessToken = tokens.access_token
-    if (tokens.expires_at < Date.now()) {
-      const refreshed = await refreshAccessToken(tokens.refresh_token)
+    let accessToken = tokens.accessToken
+    if (tokens.expiresAt && tokens.expiresAt < new Date()) {
+      const refreshed = await refreshAccessToken(tokens.refreshToken)
       if (!refreshed) {
         return NextResponse.json({
           error: 'Google token expired and refresh failed',
@@ -50,30 +48,19 @@ export async function POST(
       }
       accessToken = refreshed.access_token
 
-      // Update stored tokens
-      await db.business.update({
-        where: { id },
-        data: {
-          googleLocationId: `google_connected:${JSON.stringify({
-            ...tokens,
-            access_token: refreshed.access_token,
-            expires_at: refreshed.expires_at,
-          })}`,
-        },
-      })
+      // Update the stored access token (encrypted)
+      await updateAccessToken(id, 'google', refreshed.access_token, new Date(refreshed.expires_at))
     }
 
     // Fetch reviews from Google
     // Note: accountName and locationName need to be discovered via the GBP API
-    // For now, we use the business name as a placeholder
-    // In production, you'd call accounts.list and locations.list first
-    const accountName = 'accounts/placeholder' // TODO: Discover via API
-    const locationName = 'locations/placeholder' // TODO: Discover via API
+    // For now, we use placeholder values — in production, discover via accounts.list and locations.list
+    const accountName = 'accounts/placeholder'
+    const locationName = 'locations/placeholder'
 
     try {
       const googleReviews = await fetchGoogleReviews(accessToken, accountName, locationName)
 
-      // Upsert reviews into the database
       let newCount = 0
       let updatedCount = 0
 
@@ -89,7 +76,6 @@ export async function POST(
         })
 
         if (existing) {
-          // Update existing review
           await db.review.update({
             where: { id: existing.id },
             data: {
@@ -102,7 +88,6 @@ export async function POST(
           })
           updatedCount++
         } else {
-          // Create new review
           await db.review.create({
             data: {
               businessId: id,
@@ -121,7 +106,6 @@ export async function POST(
         }
       }
 
-      // Log the sync
       await db.auditLog.create({
         data: {
           action: 'google.sync_reviews',
@@ -144,12 +128,10 @@ export async function POST(
         message: `Synced ${googleReviews.length} reviews from Google (${newCount} new, ${updatedCount} updated)`,
       })
     } catch (apiError) {
-      // Google API not yet approved or account/location discovery needed
       return NextResponse.json({
         error: 'Google API call failed',
-        message: 'Your Google Business Profile API access may still be pending approval (typically 4-6 weeks), or account/location discovery is needed.',
+        message: 'Your Google Business Profile API access may still be pending approval (4-6 weeks), or account/location discovery is needed.',
         details: String(apiError),
-        setupNote: 'After Google approves your API access, you need to: (1) Call accounts.list to get your account name, (2) Call locations.list to get your location name, (3) Update the sync-reviews route with these values.',
       }, { status: 502 })
     }
   } catch (error) {

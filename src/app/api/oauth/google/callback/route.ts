@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { exchangeCodeForTokens } from '@/lib/integrations/google-business-profile'
+import { storeTokens } from '@/lib/oauth-store'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,20 +28,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/settings?error=google_token_failed', request.url))
     }
 
-    // Store the tokens in the database (encrypted in production)
-    // For now, store in the business's googleLocationId field as a JSON blob
-    // In production, use a dedicated oauth_tokens table with encryption
     const businessId = state
 
+    // Store tokens in the encrypted OAuthToken table (NOT in googleLocationId)
+    await storeTokens({
+      businessId,
+      provider: 'google',
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: new Date(tokens.expires_at),
+      scopes: 'https://www.googleapis.com/auth/business.manage',
+    })
+
+    // Mark business as Google-connected
     await db.business.update({
       where: { id: businessId },
       data: {
-        googleLocationId: `google_connected:${JSON.stringify({
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          expires_at: tokens.expires_at,
-          connected_at: new Date().toISOString(),
-        })}`,
+        googleLocationId: 'google_connected',
       },
     })
 
@@ -50,11 +54,10 @@ export async function GET(request: NextRequest) {
         action: 'google.connected',
         targetType: 'business',
         targetId: businessId,
-        metadata: JSON.stringify({ businessId }),
+        metadata: JSON.stringify({ businessId, provider: 'google' }),
       },
     })
 
-    // Redirect back to settings with success
     return NextResponse.redirect(new URL('/settings?google=connected', request.url))
   } catch (error) {
     console.error('Google OAuth callback error:', error)

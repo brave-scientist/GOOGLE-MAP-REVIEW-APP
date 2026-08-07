@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/export — Export reviews as CSV
 export async function GET(request: NextRequest) {
+  const authResult = await requirePlan(request, "STARTER")
+  if (authResult instanceof NextResponse) return authResult
   try {
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type') || 'reviews' // reviews | campaigns | users
