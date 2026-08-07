@@ -51,7 +51,7 @@ export default function ReportsPage() {
                         <p className="text-xs text-muted-foreground">Daily, weekly, or monthly — sent to your inbox</p>
                       </div>
                     </div>
-                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">
+                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => toast.info('New report', { description: 'Configure a scheduled report — daily, weekly, or monthly. (Requires Resend API key to send emails.)' })}>
                       <Plus className="w-4 h-4 mr-1" />
                       New report
                     </Button>
@@ -130,7 +130,7 @@ export default function ReportsPage() {
                             <Send className="w-3 h-3 mr-1" />
                             Test
                           </Button>
-                          <Button variant="outline" size="sm" className="h-7 text-xs">
+                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.info('Edit report', { description: 'Modify schedule, recipients, or format.' })}>
                             Edit
                           </Button>
                         </div>

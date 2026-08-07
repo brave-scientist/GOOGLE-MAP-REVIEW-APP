@@ -42,7 +42,10 @@ export function AppSidebar() {
 
       {/* Business switcher */}
       <div className="p-3 border-b border-sidebar-border">
-        <button className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-sidebar-accent transition-colors text-left">
+        <button
+          onClick={() => router.push('/agency')}
+          className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-sidebar-accent transition-colors text-left"
+        >
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
             BG
           </div>

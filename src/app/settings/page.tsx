@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -312,7 +312,7 @@ export default function SettingsPage() {
                     <h3 className="font-display font-bold">Team Members</h3>
                     <p className="text-xs text-muted-foreground">3 of 5 seats used on Pro plan</p>
                   </div>
-                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">Invite member</Button>
+                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => toast.info('Invite member', { description: 'An invitation email would be sent to the entered address. (Requires Resend API key to send real emails.)' })}>Invite member</Button>
                 </div>
                 <div className="space-y-2">
                   {[

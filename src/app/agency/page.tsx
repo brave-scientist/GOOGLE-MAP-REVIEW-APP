@@ -66,12 +66,12 @@ export default function AgencyPage() {
               <Loader2 className="w-8 h-8 text-[var(--brass)] mx-auto mb-3 animate-spin" />
               <p className="text-sm text-muted-foreground">Loading agency data...</p>
             </Card>
-          ) : data ? (
+          ) : data && data.clients ? (
             <>
               {/* Agency stats */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {[
-                  { label: 'Active Clients', value: stats.totalClients.toString(), sub: `${data.clients.length} total`, icon: Building2, color: 'text-blue-500' },
+                  { label: 'Active Clients', value: (stats.totalClients || data.clients.length).toString(), sub: `${data.clients.length} total`, icon: Building2, color: 'text-blue-500' },
                   { label: 'Monthly Revenue', value: `$${stats.totalMRR.toLocaleString()}`, sub: '87% margin', icon: DollarSign, color: 'text-green-500' },
                   { label: 'Avg Health Score', value: stats.avgHealth.toString(), sub: stats.atRisk > 0 ? `${stats.atRisk} at risk` : 'All healthy', icon: TrendingUp, color: stats.atRisk > 0 ? 'text-amber-500' : 'text-[var(--brass)]' },
                   { label: 'Reviews Managed', value: stats.totalReviews.toLocaleString(), sub: 'across all clients', icon: Star, color: 'text-purple-500' },
@@ -215,6 +215,19 @@ export default function AgencyPage() {
                 </div>
               </Card>
             </>
+          ) : data && data.error ? (
+            <Card className="p-12 glass-card text-center">
+              <Building2 className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
+              <h3 className="font-display font-bold mb-1">{data.error}</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                {data.code === 'PLAN_UPGRADE_REQUIRED'
+                  ? `Agency mode requires ${data.requiredPlan} plan. Your current plan: ${data.currentPlan}.`
+                  : 'Unable to load agency data.'}
+              </p>
+              <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => router.push('/billing')}>
+                Upgrade plan
+              </Button>
+            </Card>
           ) : (
             <Card className="p-12 glass-card text-center">
               <p className="text-sm text-muted-foreground">Failed to load agency data</p>
