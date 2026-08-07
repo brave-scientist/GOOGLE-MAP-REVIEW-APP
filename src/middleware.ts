@@ -25,6 +25,8 @@ const PUBLIC_API_ROUTES = [
   '/api/auth/google',
   '/api/auth/me',
   '/api/contact',
+  '/api/unsubscribe',
+  '/api/webhooks/twilio',
 ]
 
 function isPublicRoute(pathname: string): boolean {
@@ -36,6 +38,8 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/help/')) return true
   // Review request landing page (QR code / SMS link target)
   if (pathname.startsWith('/r/')) return true
+  // Unsubscribe page (email link target)
+  if (pathname.startsWith('/unsubscribe')) return true
   // Widget.js embeddable script (must be public for external sites)
   if (pathname === '/widget.js') return true
   // Next.js internal routes

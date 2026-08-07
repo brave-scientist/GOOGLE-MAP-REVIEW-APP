@@ -231,3 +231,11 @@ model BrandVoiceProfile {
   updatedAt    DateTime @updatedAt
   business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
+
+model OptOut {
+  id           String   @id @default(cuid())
+  contact      String   @unique // phone number or email
+  channel      String   @default("all") // sms, email, or all
+  reason       String?  // "STOP keyword", "unsubscribe link", "manual"
+  createdAt    DateTime @default(now())
+}

@@ -1319,7 +1319,7 @@ function Footer() {
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-[var(--brass)]" />
-              99.98% uptime
+              Target: 99.9% uptime
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5 text-[var(--brass)]" />

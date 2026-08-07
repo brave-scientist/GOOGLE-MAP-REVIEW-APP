@@ -41,6 +41,23 @@ export default function SettingsPage() {
   const [savingBusiness, setSavingBusiness] = useState(false)
 
   const handleToggleIntegration = async (int: Integration) => {
+    // Google OAuth — redirect to the real OAuth flow
+    if (int.provider === 'google' && int.status !== 'connected') {
+      // Fetch the first business ID for the OAuth state param
+      try {
+        const dashRes = await fetch('/api/dashboard')
+        const dashData = await dashRes.json()
+        const businessId = dashData.businesses?.[0]?.id
+        if (businessId) {
+          window.location.href = `/api/oauth/google?businessId=${businessId}`
+          return
+        }
+      } catch {
+        toast.error('Failed to start Google OAuth')
+        return
+      }
+    }
+
     setProcessingProvider(int.provider)
     const action = int.status === 'connected' ? 'disconnect' : 'connect'
     try {

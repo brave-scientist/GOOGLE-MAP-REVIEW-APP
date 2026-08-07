@@ -51,8 +51,8 @@ export default function StatusPage() {
             <CheckCircle className="w-5 h-5 text-green-500" />
           </div>
           <div>
-            <h3 className="font-display font-bold text-lg">All Systems Operational</h3>
-            <p className="text-xs text-muted-foreground">Last updated: just now · Auto-refreshes every 60 seconds</p>
+            <h3 className="font-display font-bold text-lg">All Systems Operational (Demo)</h3>
+            <p className="text-xs text-muted-foreground">Status page is representative — real uptime monitoring (UptimeRobot/BetterStack) not yet configured</p>
           </div>
         </div>
       </Card>
