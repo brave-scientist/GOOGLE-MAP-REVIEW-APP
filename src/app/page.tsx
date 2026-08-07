@@ -196,7 +196,7 @@ function Hero() {
           </h1>
 
           <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mb-10 leading-relaxed">
-            ReviewReply Enterprise aggregates reviews from Google, Facebook, Yelp, and Trustpilot into one inbox.
+            ReviewReply Enterprise brings all your customer reviews into one unified inbox. AI trained on your brand voice drafts replies in seconds.
             AI trained on your brand voice drafts replies in seconds. Built-in competitor intelligence keeps you ahead.
           </p>
 
@@ -429,7 +429,7 @@ function BentoFeatures() {
               </div>
               <div>
                 <h3 className="font-display text-xl font-bold">Unified Review Inbox</h3>
-                <p className="text-sm text-muted-foreground mt-1">Google · Facebook · Yelp · Trustpilot · Apple Maps</p>
+                <p className="text-sm text-muted-foreground mt-1">All your review sources in one place</p>
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
@@ -440,7 +440,7 @@ function BentoFeatures() {
               {[
                 { author: 'Sarah C.', rating: 5, text: 'Absolutely phenomenal experience...', source: 'Google', time: '2m' },
                 { author: 'Marcus W.', rating: 2, text: 'Disappointing visit, wait time...', source: 'Facebook', time: '14m' },
-                { author: 'Priya P.', rating: 5, text: 'Best service in town, will...', source: 'Yelp', time: '1h' },
+                { author: 'Priya P.', rating: 5, text: 'Best service in town, will...', source: 'Google', time: '1h' },
               ].map((r, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-background/40 border border-border/30 hover:border-[var(--brass)]/40 transition-colors">
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center text-xs font-bold text-white">
@@ -781,7 +781,7 @@ function AnalyticsDemo() {
 function WidgetsDemo() {
   return (
     <div>
-      <h3 className="font-display font-bold text-lg mb-4">Branded Widget & Testimonials</h3>
+      <h3 className="font-display font-bold text-lg mb-4">Branded Review Widget</h3>
       <p className="text-sm text-muted-foreground mb-6">Embeddable widgets for your website. Auto-generated from positive reviews. SEO-friendly with JSON-LD schema.</p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
@@ -867,17 +867,13 @@ function HowItWorks() {
 // ─────────────────────────────────────────────────────────
 function Comparison() {
   const features = [
-    { name: 'Unified Review Inbox (Google + FB + Yelp)', rr: true, birdeye: true, podium: true, reputation: true },
+    { name: 'Unified Review Inbox', rr: true, birdeye: true, podium: true, reputation: true },
     { name: 'AI Reply Draft Generation', rr: true, birdeye: true, podium: false, reputation: true },
     { name: 'Brand Voice Training', rr: true, birdeye: false, podium: false, reputation: false },
     { name: 'Multi-Channel Request (SMS + Email + QR)', rr: true, birdeye: true, podium: true, reputation: false },
     { name: 'Sentiment + Topic Analytics', rr: true, birdeye: true, podium: false, reputation: true },
-    { name: 'Competitor Benchmarking', rr: true, birdeye: false, podium: false, reputation: true },
-    { name: 'Branded Widget & Testimonial Engine', rr: true, birdeye: false, podium: false, reputation: true },
+    { name: 'Branded Review Widget', rr: true, birdeye: false, podium: false, reputation: true },
     { name: 'Multi-Tenant Agency Mode', rr: true, birdeye: true, podium: false, reputation: true },
-    { name: 'Local SEO + Schema Markup', rr: true, birdeye: true, podium: false, reputation: true },
-    { name: 'Real-time Slack/Teams Alerts', rr: true, birdeye: false, podium: false, reputation: true },
-    { name: 'Public API + Webhooks', rr: true, birdeye: false, podium: false, reputation: true },
   ]
   return (
     <section id="comparisons" className="py-24 sm:py-32 bg-card/20 border-y border-border/30">
@@ -1156,7 +1152,7 @@ function Pricing({ billingCycle, onCycleChange }: {
 function FAQ() {
   const faqs = [
     { q: 'How does the AI brand voice training work?', a: 'Upload your past 50–200 approved replies. AI (GLM-4.6) analyzes your tone, length, signature, escalation rules, and do-not-say list to create a private brand voice profile. The profile is encrypted at rest and used as the system prompt for every draft. We re-train weekly based on your accept/reject/edit rate.' },
-    { q: 'Which review sources are supported?', a: 'Google Business Profile, Facebook Pages, Yelp (via partnership API), Trustpilot (via API), Apple Maps (via RSS), and Bing Places (via RSS). We add new sources based on customer demand — vote in our public roadmap.' },
+    { q: 'Which review sources are supported?', a: 'The unified inbox supports reviews from Google Business Profile and Facebook Pages. Additional sources (Yelp, Trustpilot) are on our roadmap. You can also manually import reviews from any platform via CSV upload.' },
     { q: 'Is ReviewReply TCPA-compliant for SMS?', a: 'Yes. We capture explicit opt-in with timestamp and IP, enforce 9pm–8am recipient-local quiet hours, handle STOP/UNSTOP keywords within 24 hours, and register your 10DLC campaign with Twilio. All SMS sends are logged for audit.' },
     { q: 'Can I use ReviewReply if I am an agency?', a: 'Yes — the Enterprise tier ($299/mo) includes full agency mode: white-label on your domain, client portal, per-seat pricing, role-based access control, and bulk actions across all client businesses.' },
     { q: 'How long is the free trial?', a: '14 days, no credit card required. Full Pro features. Data is retained for 30 days after trial ends, so you can upgrade without losing anything.' },

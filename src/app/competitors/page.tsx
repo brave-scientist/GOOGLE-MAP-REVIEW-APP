@@ -159,7 +159,9 @@ export default function CompetitorsPage() {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="font-display font-bold">Competitive Benchmark</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Snapshot from Aug 7, 2026 · updates weekly</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Showing demo data · Real competitor sync (Google Places API) is on our roadmap
+                </p>
               </div>
               <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setAddOpen(true)}>
                 <Plus className="w-3 h-3 mr-1" />

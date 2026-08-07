@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { BarChart3, Clock, TrendingUp, MessageSquare, Star } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { BarChart3, Clock, TrendingUp, MessageSquare, Star, Sparkles, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface AnalyticsData {
   topicAnalysis: Array<{ topic: string; count: number; avgSentiment: number; avgRating: number }>
@@ -13,18 +15,47 @@ interface AnalyticsData {
   sentimentDistribution: { positive: number; neutral: number; negative: number }
   avgResponseHours: number
   totalReviewsAnalyzed: number
+  sentimentSource?: string
+  aiSentimentCount?: number
 }
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [reanalyzing, setReanalyzing] = useState(false)
 
-  useEffect(() => {
+  const fetchData = () => {
+    setLoading(true)
     fetch('/api/analytics')
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { console.error(e); setLoading(false) })
+  }
+
+  useEffect(() => {
+    fetchData()
   }, [])
+
+  const handleReanalyze = async () => {
+    setReanalyzing(true)
+    toast.info('Re-analyzing reviews with AI...', { description: 'This may take 30-60 seconds' })
+    try {
+      const res = await fetch('/api/analytics?reanalyze=true')
+      const d = await res.json()
+      if (res.ok) {
+        setData(d)
+        toast.success('AI analysis complete!', {
+          description: `${d.totalReviewsAnalyzed} reviews analyzed with real LLM sentiment`
+        })
+      } else {
+        toast.error('Re-analysis failed', { description: d.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setReanalyzing(false)
+    }
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -45,7 +76,36 @@ export default function AnalyticsPage() {
               ))}
             </div>
           ) : data ? (
-            <AnalyticsContent data={data} />
+            <>
+              {/* AI sentiment banner */}
+              <Card className="p-4 glass-card border-[var(--brass)]/30 bg-gradient-to-r from-[var(--brass)]/5 to-transparent">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-[var(--brass)]/10 flex items-center justify-center">
+                      <Sparkles className="w-4 h-4 text-[var(--brass)]" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-sm">AI-Powered Sentiment Analysis</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {data.sentimentSource === 'ai-computed'
+                          ? `Sentiment computed by GLM-4.6 · ${data.aiSentimentCount || 0} reviews analyzed by AI`
+                          : `Click "Re-analyze" to compute real sentiment scores using GLM-4.6 AI`}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-7 text-xs"
+                    onClick={handleReanalyze}
+                    disabled={reanalyzing}
+                  >
+                    {reanalyzing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Sparkles className="w-3 h-3 mr-1" />}
+                    {reanalyzing ? 'Analyzing...' : 'Re-analyze with AI'}
+                  </Button>
+                </div>
+              </Card>
+              <AnalyticsContent data={data} />
+            </>
           ) : null}
         </div>
       </main>

@@ -36,6 +36,8 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/help/')) return true
   // Review request landing page (QR code / SMS link target)
   if (pathname.startsWith('/r/')) return true
+  // Widget.js embeddable script (must be public for external sites)
+  if (pathname === '/widget.js') return true
   // Next.js internal routes
   if (pathname.startsWith('/_next')) return true
   if (pathname.startsWith('/favicon')) return true
