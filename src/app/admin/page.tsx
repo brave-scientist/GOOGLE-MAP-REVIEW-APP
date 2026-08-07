@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
+import { ExtendTrialModal, BroadcastModal } from '@/components/app/admin-modals'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -100,6 +101,8 @@ export default function AdminDashboardPage() {
 }
 
 function AdminContent({ data }: { data: AdminData }) {
+  const [extendTrialOpen, setExtendTrialOpen] = useState(false)
+  const [broadcastOpen, setBroadcastOpen] = useState(false)
   const { overview, planBreakdown, trialOrgs, recentSignups, usage, signupsByDay, recentActivity } = data
 
   const topStats = [
@@ -341,10 +344,10 @@ function AdminContent({ data }: { data: AdminData }) {
         <h3 className="font-display font-bold mb-4">Admin Actions</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: 'Extend trial', desc: 'Give a user more time', icon: Clock, color: 'text-amber-500', action: () => toast.info('Extend trial', { description: 'Search for a user to extend their trial' }) },
+            { label: 'Extend trial', desc: 'Give a user more time', icon: Clock, color: 'text-amber-500', action: () => setExtendTrialOpen(true) },
             { label: 'Manage plans', desc: 'Upgrade/downgrade orgs', icon: CreditCard, color: 'text-[var(--brass)]', action: () => router.push('/billing') },
             { label: 'View audit log', desc: 'Full platform audit', icon: Shield, color: 'text-blue-500', action: () => router.push('/compliance') },
-            { label: 'Send broadcast', desc: 'Email all users', icon: Bell, color: 'text-purple-500', action: () => toast.info('Broadcast', { description: 'Compose an email to all users' }) },
+            { label: 'Send broadcast', desc: 'Email all users', icon: Bell, color: 'text-purple-500', action: () => setBroadcastOpen(true) },
           ].map(action => (
             <button
               key={action.label}
@@ -358,6 +361,8 @@ function AdminContent({ data }: { data: AdminData }) {
           ))}
         </div>
       </Card>
+      <ExtendTrialModal open={extendTrialOpen} onOpenChange={setExtendTrialOpen} />
+      <BroadcastModal open={broadcastOpen} onOpenChange={setBroadcastOpen} />
     </>
   )
 }

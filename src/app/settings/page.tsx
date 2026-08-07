@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { InviteMemberModal } from '@/components/app/admin-modals'
 
 interface Integration {
   provider: string
@@ -39,6 +40,7 @@ export default function SettingsPage() {
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS)
   const [processingProvider, setProcessingProvider] = useState<string | null>(null)
   const [savingBusiness, setSavingBusiness] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
 
   const handleToggleIntegration = async (int: Integration) => {
     // Google OAuth — redirect to the real OAuth flow
@@ -312,7 +314,7 @@ export default function SettingsPage() {
                     <h3 className="font-display font-bold">Team Members</h3>
                     <p className="text-xs text-muted-foreground">3 of 5 seats used on Pro plan</p>
                   </div>
-                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => toast.info('Invite member', { description: 'An invitation email would be sent to the entered address. (Requires Resend API key to send real emails.)' })}>Invite member</Button>
+                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => setInviteOpen(true)}>Invite member</Button>
                 </div>
                 <div className="space-y-2">
                   {[
@@ -388,6 +390,7 @@ export default function SettingsPage() {
         </div>
       </main>
       <MobileNav />
+      <InviteMemberModal open={inviteOpen} onOpenChange={setInviteOpen} />
     </div>
   )
 }

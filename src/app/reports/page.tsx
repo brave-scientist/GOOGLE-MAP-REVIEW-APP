@@ -1,6 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
+import { NewReportModal, EditReportModal } from '@/components/app/admin-modals'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,6 +15,9 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
 export default function ReportsPage() {
+  const [newReportOpen, setNewReportOpen] = useState(false)
+  const [editReport, setEditReport] = useState<{ name: string; schedule: string } | null>(null)
+
   return (
     <div className="flex min-h-screen">
       <AppSidebar />
@@ -51,7 +56,7 @@ export default function ReportsPage() {
                         <p className="text-xs text-muted-foreground">Daily, weekly, or monthly — sent to your inbox</p>
                       </div>
                     </div>
-                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => toast.info('New report', { description: 'Configure a scheduled report — daily, weekly, or monthly. (Requires Resend API key to send emails.)' })}>
+                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => setNewReportOpen(true)}>
                       <Plus className="w-4 h-4 mr-1" />
                       New report
                     </Button>
@@ -130,7 +135,7 @@ export default function ReportsPage() {
                             <Send className="w-3 h-3 mr-1" />
                             Test
                           </Button>
-                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.info('Edit report', { description: 'Modify schedule, recipients, or format.' })}>
+                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditReport({ name: r.name, schedule: 'weekly' })}>
                             Edit
                           </Button>
                         </div>
@@ -271,6 +276,8 @@ export default function ReportsPage() {
         </div>
       </main>
       <MobileNav />
+      <NewReportModal open={newReportOpen} onOpenChange={setNewReportOpen} />
+      <EditReportModal open={!!editReport} onOpenChange={(v) => { if (!v) setEditReport(null) }} report={editReport} />
     </div>
   )
 }
