@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Users, Building2, DollarSign, TrendingUp, Star, Send, MessageSquare,
-  Activity, Clock, Crown, Zap, ArrowUp, ArrowDown, Shield, CreditCard,
+  Activity, Clock, Crown, Zap, ArrowUp, ArrowDown, Shield,
   UserCheck, Bell, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -342,11 +342,10 @@ function AdminContent({ data }: { data: AdminData }) {
       {/* Admin quick actions */}
       <Card className="p-5 glass-card">
         <h3 className="font-display font-bold mb-4">Admin Actions</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
           {[
             { label: 'Extend trial', desc: 'Give a user more time', icon: Clock, color: 'text-amber-500', action: () => setExtendTrialOpen(true) },
-            { label: 'Manage plans', desc: 'Upgrade/downgrade orgs', icon: CreditCard, color: 'text-[var(--brass)]', action: () => router.push('/billing') },
-            { label: 'View audit log', desc: 'Full platform audit', icon: Shield, color: 'text-blue-500', action: () => router.push('/compliance') },
+            { label: 'View audit log', desc: 'Full platform audit', icon: Shield, color: 'text-blue-500', action: () => router.push('/admin/audit-log') },
             { label: 'Send broadcast', desc: 'Email all users', icon: Bell, color: 'text-purple-500', action: () => setBroadcastOpen(true) },
           ].map(action => (
             <button

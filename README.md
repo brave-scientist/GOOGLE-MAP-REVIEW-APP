@@ -16,6 +16,9 @@ closed** (deny access) rather than fail open (grant unintended access).
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | Optional | Twilio credentials for SMS sending. | SMS campaigns are queued but not sent; status `not_configured`. |
 | `RESEND_API_KEY` | Optional | Resend API key for transactional email. | Email broadcasts and review-request emails are queued but not sent. |
 | `NEXT_PUBLIC_APP_URL` | **Required in production** | Public URL of the deployment. Used in email links (unsubscribe, review-request) **and** for Twilio webhook signature validation. | Email links point to `http://localhost:3000` (broken in prod). **Twilio webhooks silently fail validation and return 403** — because the validator reconstructs the URL Twilio signed against, and if `NEXT_PUBLIC_APP_URL` is unset it falls back to the internal request URL (e.g. `http://10.0.0.5:3000/...`) which doesn't match what Twilio signed. Fails safe (rejects), but breaks all SMS opt-out/opt-in processing with no obvious error. |
+| `SENTRY_DSN` | Optional but recommended | Sentry Data Source Name for error monitoring. Get from Sentry.io → Project Settings → Client Keys. Sentry is installed (`@sentry/nextjs`) and configured (`sentry.{client,server,edge}.config.ts`), but remains a **no-op until you set this**. Free tier covers 5K errors/month. | No error monitoring — unhandled exceptions are only visible in server logs. |
+| `SENTRY_ORG` / `SENTRY_PROJECT` | Optional | Sentry organization slug and project slug. Used for source-map uploads during build. | Source maps not uploaded to Sentry — stack traces in production errors will be minified. |
+| `DATABASE_URL` (Postgres) | **Required for production** | Postgres connection string. Format: `postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public`. Run `bash scripts/migrate-to-postgres.sh` after updating `.env` to migrate from SQLite. | App uses SQLite (`db/custom.db`) — fine for dev, **not suitable for production** (no concurrent writes, no backups, single-file). |
 
 ## Security model
 
@@ -110,3 +113,28 @@ signature stays the same — only the storage backend changes). This affects:
 
 This is a known dev-scale limitation, not a bug — the file's header comment
 flags it. Just don't forget when you scale.
+
+## UptimeRobot setup (external, ~5 min)
+
+UptimeRobot monitors your site from outside — it pings a URL every 5 minutes
+and alerts you if it doesn't get a 200. This is purely external (account
+creation on their side), but the code-side piece is ready:
+
+1. **Health-check endpoint:** `GET /api/health` returns `200 {"status":"ok"}`
+   if the app + DB are healthy, `503` if not. This is what UptimeRobot should
+   monitor — it's a real signal, not just "is the process running".
+
+2. **In UptimeRobot:** create a new monitor of type "HTTP(s)", URL
+   `https://yourapp.com/api/health`, check interval 5 minutes. Set it to
+   alert you (email/SMS/Discord) on 2 consecutive failures (avoids flapping).
+
+3. **Status page (optional):** the `/status` page currently shows hardcoded
+   uptime values. To show real UptimeRobot data, you can either:
+   - Embed UptimeRobot's public status-page widget (requires their paid plan
+     for custom domain), or
+   - Fetch from UptimeRobot's API (`api.uptimerobot.com/v2/getMonitors`) and
+     render the values server-side. This needs an `UPTIMEROBOT_API_KEY` env
+     var. Not implemented yet — the hardcoded values are a placeholder.
+
+No code-side work needed beyond what's already done — just create the
+UptimeRobot account and point it at `/api/health`.

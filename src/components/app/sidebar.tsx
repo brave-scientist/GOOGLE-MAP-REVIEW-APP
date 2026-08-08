@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Inbox, Star, Send, BarChart3, Code2, FileText,
-  Settings, Sparkles, ChevronRight, Building2, CreditCard, Shield, Target, Crown,
+  Settings, Sparkles, Building2, CreditCard, Shield, Target, Crown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -40,21 +40,21 @@ export function AppSidebar() {
         </Link>
       </div>
 
-      {/* Business switcher */}
+      {/* Manage businesses link (not a context switcher — navigates to /agency) */}
       <div className="p-3 border-b border-sidebar-border">
-        <button
-          onClick={() => router.push('/agency')}
+        <Link
+          href="/agency"
           className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-sidebar-accent transition-colors text-left"
         >
           <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
             BG
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-medium truncate">Bamboo Garden Group</div>
-            <div className="text-[10px] text-muted-foreground truncate">4 businesses · Pro plan</div>
+            <div className="text-xs font-medium truncate">Manage businesses</div>
+            <div className="text-[10px] text-muted-foreground truncate">View all locations</div>
           </div>
-          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-        </button>
+          <Building2 className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        </Link>
       </div>
 
       {/* Nav */}

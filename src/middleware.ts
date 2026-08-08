@@ -29,6 +29,7 @@ const PUBLIC_API_ROUTES = [
   '/api/contact',
   '/api/unsubscribe',
   '/api/webhooks/twilio',
+  '/api/health', // Public — for UptimeRobot / load balancer health checks
 ]
 
 function isPublicRoute(pathname: string): boolean {

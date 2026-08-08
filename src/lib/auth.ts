@@ -48,11 +48,43 @@ async function decodeSession(token: string): Promise<SessionUser | null> {
   }
 }
 
+// Determine whether the session cookie should be marked Secure.
+//
+// SEC-06: Previously this was `process.env.NODE_ENV === 'production'`, which
+// trusts NODE_ENV entirely. If a deployment forgets to set NODE_ENV=production
+// (e.g. via Docker, systemd, or a hosting platform that doesn't default it),
+// the cookie would be sent over plain HTTP — allowing interception on an
+// untrusted network or a man-in-the-middle downgrade.
+//
+// Safer default: Secure=true unless we're EXPLICITLY on localhost over HTTP.
+// - In production (NODE_ENV=production), always Secure.
+// - In dev (NODE_ENV=development or unset), Secure only if the app is being
+//   served over HTTPS (e.g. behind a dev tunnel like ngrok with TLS).
+// - On localhost over HTTP (typical `npm run dev`), Secure=false so the
+//   cookie actually gets set.
+function shouldUseSecureCookie(): boolean {
+  // Production: always Secure, no exceptions.
+  if (process.env.NODE_ENV === 'production') return true
+
+  // Dev/test: check if we're on localhost over HTTP. If so, the browser
+  // won't accept a Secure cookie, so we must set Secure=false.
+  // We check NEXT_PUBLIC_APP_URL because that's the URL the user accesses;
+  // if it's https, the cookie needs Secure=true even in dev.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (appUrl) {
+    return appUrl.startsWith('https://')
+  }
+
+  // No app URL configured — assume localhost dev over HTTP.
+  // Safe because dev servers on localhost aren't exposed to the network.
+  return false
+}
+
 export async function createSession(response: NextResponse, user: SessionUser) {
   const token = await encodeSession(user)
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: shouldUseSecureCookie(),
     sameSite: 'lax',
     maxAge: SESSION_TTL / 1000,
     path: '/',

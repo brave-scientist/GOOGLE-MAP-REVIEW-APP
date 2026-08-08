@@ -9,6 +9,17 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // SEC-09: Strip console.log/info/debug from production builds.
+  // KEEPS console.error and console.warn — those are legitimate error-reporting
+  // channels that Sentry captures and that are essential for production debugging.
+  // Only strips the dev-only console.log/info/debug calls (48 total: 46 error,
+  // 1 log, 1 warn — only the 1 log gets stripped; warn is kept).
+  compiler: {
+    removeConsole:
+      process.env.NODE_ENV === 'production'
+        ? { exclude: ['error', 'warn'] }
+        : false,
+  },
   // Security headers applied to all responses
   async headers() {
     return [

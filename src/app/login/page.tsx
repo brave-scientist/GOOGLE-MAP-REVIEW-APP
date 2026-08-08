@@ -14,13 +14,16 @@ import {
   Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { safeRedirectPath } from '@/lib/redirect-allowlist'
 
 type Mode = 'password' | 'otp'
 
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectTo = searchParams.get('redirect') || '/dashboard'
+  // SEC-10: validate the redirect param against an allowlist to prevent
+  // open-redirect attacks (e.g. ?redirect=https://evil.com)
+  const redirectTo = safeRedirectPath(searchParams.get('redirect'), '/dashboard')
 
   const [mode, setMode] = useState<Mode>('password')
   const [email, setEmail] = useState('')
