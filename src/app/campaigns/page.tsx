@@ -110,7 +110,7 @@ export default function CampaignsPage() {
                 </div>
                 <div>
                   <h3 className="font-display font-bold">Create New Campaign</h3>
-                  <p className="text-xs text-muted-foreground">Send review requests via SMS, email, QR, or WhatsApp</p>
+                  <p className="text-xs text-muted-foreground">Send review requests via SMS, email, or QR</p>
                 </div>
               </div>
               <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => setBuilderOpen(true)}>

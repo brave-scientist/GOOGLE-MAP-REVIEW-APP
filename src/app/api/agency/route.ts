@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Agency API error:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch agency data', details: String(error) },
+      { error: 'Failed to fetch agency data' },
       { status: 500 }
     )
   }

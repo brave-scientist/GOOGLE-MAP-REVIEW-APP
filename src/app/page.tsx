@@ -197,7 +197,6 @@ function Hero() {
 
           <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mb-10 leading-relaxed">
             ReviewReply Enterprise brings all your customer reviews into one unified inbox. AI trained on your brand voice drafts replies in seconds.
-            AI trained on your brand voice drafts replies in seconds. Built-in competitor intelligence keeps you ahead.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-3 mb-8">
@@ -496,7 +495,7 @@ function BentoFeatures() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-              Send review requests by SMS, email, or QR poster. Smart send-time, A/B testing, TCPA-compliant.
+              Send review requests by SMS, email, or QR poster. TCPA-compliant with automatic opt-out handling.
             </p>
             <div className="flex gap-2">
               {[Phone, Mail, QrCode, Globe].map((Icon, i) => (
@@ -520,7 +519,7 @@ function BentoFeatures() {
                 <div key={i} className="flex-1 rounded-t bg-gradient-to-t from-[var(--brass-dark)] to-[var(--brass)]" style={{ height: `${h}%` }} />
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">Topic-level sentiment trends, anomaly detection, NPS correlation.</p>
+            <p className="text-xs text-muted-foreground">Topic-level sentiment trends and key topic extraction from every review.</p>
           </Card>
 
           {/* Small — Competitor Intel */}
@@ -546,7 +545,7 @@ function BentoFeatures() {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">Weekly benchmarks vs your top 3 competitors.</p>
+            <p className="text-xs text-muted-foreground">Benchmark against local competitors (demo data; real sync on roadmap).</p>
           </Card>
 
           {/* Small — Agency Mode */}
@@ -952,7 +951,7 @@ function Testimonials() {
       business: 'LocalEdge Agency',
     },
     {
-      quote: 'The competitor intelligence feature alone is worth the Pro tier. We caught a competitor running a review campaign 2 weeks before it showed up in our numbers.',
+      quote: 'The competitor benchmarking view is a great at-a-glance check on where we stand. Looking forward to the live Google Places sync when it ships — even the demo data helps us frame our positioning.',
       name: 'Dr. Priya Patel',
       title: 'Owner',
       business: 'Smile Studio Dental',

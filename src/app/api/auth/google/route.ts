@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Google auth error:', error)
     return NextResponse.json(
-      { error: 'Failed to authenticate with Google', details: String(error) },
+      { error: 'Failed to authenticate with Google' },
       { status: 500 }
     )
   }

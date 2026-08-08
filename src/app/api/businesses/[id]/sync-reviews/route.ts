@@ -138,14 +138,14 @@ export async function POST(
         message: `Synced ${googleReviews.length} reviews from Google (${newCount} new, ${updatedCount} updated)`,
       })
     } catch (apiError) {
+      console.error('Google API call failed:', apiError)
       return NextResponse.json({
         error: 'Google API call failed',
         message: 'Your Google Business Profile API access may still be pending approval (4-6 weeks), or account/location discovery is needed.',
-        details: String(apiError),
       }, { status: 502 })
     }
   } catch (error) {
     console.error('Google sync error:', error)
-    return NextResponse.json({ error: 'Failed to sync reviews', details: String(error) }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to sync reviews' }, { status: 500 })
   }
 }

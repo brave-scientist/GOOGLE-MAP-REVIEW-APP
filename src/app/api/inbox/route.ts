@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Inbox API error:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch reviews', details: String(error) },
+      { error: 'Failed to fetch reviews' },
       { status: 500 }
     )
   }

@@ -15,7 +15,7 @@ closed** (deny access) rather than fail open (grant unintended access).
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional | Google OAuth credentials for Google Business Profile integration. | Google integration disabled; `/api/oauth/google` returns 503 with setup instructions. |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_PHONE_NUMBER` | Optional | Twilio credentials for SMS sending. | SMS campaigns are queued but not sent; status `not_configured`. |
 | `RESEND_API_KEY` | Optional | Resend API key for transactional email. | Email broadcasts and review-request emails are queued but not sent. |
-| `NEXT_PUBLIC_APP_URL` | Optional | Public URL of the deployment (used in email links). | Defaults to `http://localhost:3000`. Set this in production so email links point to the right host. |
+| `NEXT_PUBLIC_APP_URL` | **Required in production** | Public URL of the deployment. Used in email links (unsubscribe, review-request) **and** for Twilio webhook signature validation. | Email links point to `http://localhost:3000` (broken in prod). **Twilio webhooks silently fail validation and return 403** — because the validator reconstructs the URL Twilio signed against, and if `NEXT_PUBLIC_APP_URL` is unset it falls back to the internal request URL (e.g. `http://10.0.0.5:3000/...`) which doesn't match what Twilio signed. Fails safe (rejects), but breaks all SMS opt-out/opt-in processing with no obvious error. |
 
 ## Security model
 
@@ -91,3 +91,22 @@ The demo login (`owner@bamboogarden.com` / any password) gives you a PRO-plan
 account on the "Bamboo Garden Restaurant" org. Without `ADMIN_EMAILS` set in
 `.env`, `/api/admin` returns `403 ADMINS_NOT_CONFIGURED` — this is the
 correct production-safe behavior.
+
+## Before scaling horizontally
+
+The rate-limit store (`src/lib/rate-limit.ts`) is an in-memory `Map` —
+**per-process**. This is fine for a single server instance, but if you deploy
+multiple instances behind a load balancer, each instance gets its own counter
+and the effective rate limit multiplies by your instance count (e.g. 4
+instances → 12 OTP sends per 10 min per email instead of 3).
+
+**Before adding a second server instance**, swap the in-memory store for a
+shared backend. `@upstash/redis` is the recommended drop-in (the function
+signature stays the same — only the storage backend changes). This affects:
+
+- OTP send rate limit (SEC-04, 3/10min per email)
+- OTP verify rate limit (SEC-04, 5/10min per email)
+- Any future rate-limited routes that use the same `rateLimit()` helper
+
+This is a known dev-scale limitation, not a bug — the file's header comment
+flags it. Just don't forget when you scale.

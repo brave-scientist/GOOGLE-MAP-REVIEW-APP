@@ -95,7 +95,7 @@ export async function POST(
   } catch (error) {
     console.error('Draft generation error:', error)
     return NextResponse.json(
-      { error: 'Failed to generate draft', details: String(error) },
+      { error: 'Failed to generate draft' },
       { status: 500 }
     )
   }

@@ -258,7 +258,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('OTP error:', error)
     return NextResponse.json(
-      { error: 'Failed to process OTP', details: String(error) },
+      { error: 'Failed to process OTP' },
       { status: 500 }
     )
   }

@@ -86,7 +86,7 @@ export async function POST(
   } catch (error) {
     console.error('Approve error:', error)
     return NextResponse.json(
-      { error: 'Failed to approve reply', details: String(error) },
+      { error: 'Failed to approve reply' },
       { status: 500 }
     )
   }

@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Admin API error:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch admin stats', details: String(error) },
+      { error: 'Failed to fetch admin stats' },
       { status: 500 }
     )
   }
