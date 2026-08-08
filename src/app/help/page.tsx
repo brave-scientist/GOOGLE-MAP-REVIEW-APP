@@ -121,7 +121,7 @@ const HELP_CATEGORIES = [
     articles: [
       {
         q: 'Choosing the right plan',
-        a: 'Free: 1 business, 50 reviews/month, manual replies — best for solo operators testing the waters. Starter ($49/mo): 1 business, 500 reviews, AI drafts — for single-location businesses. Pro ($99/mo): 3 businesses, unlimited reviews, brand voice, competitor intel — for multi-location or growing teams. Enterprise ($299/mo): unlimited businesses, agency mode, SSO, white-label — for agencies and chains.',
+        a: 'Free: 1 business, 50 reviews/month, manual replies — best for solo operators testing the waters. Starter ($49/mo): 1 business, 500 reviews, AI drafts — for single-location businesses. Pro ($99/mo): 3 businesses, unlimited reviews, brand voice, competitor intel — for multi-location or growing teams. Enterprise ($299/mo): unlimited businesses, agency mode, white-label, bulk actions across clients — for agencies and chains.',
       },
       {
         q: 'Upgrading or downgrading',

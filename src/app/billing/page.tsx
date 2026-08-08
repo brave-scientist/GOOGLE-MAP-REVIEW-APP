@@ -39,7 +39,7 @@ const PLANS = [
     name: 'Enterprise',
     price: 299,
     desc: 'For agencies & chains',
-    features: ['Unlimited businesses', 'Agency mode', 'SSO/SAML', 'White-label', 'Dedicated CSM', '99.9% SLA'],
+    features: ['Unlimited businesses', 'Agency mode', 'White-label', 'Dedicated CSM', '99.9% SLA', 'Bulk actions across clients'],
     current: false,
   },
 ]

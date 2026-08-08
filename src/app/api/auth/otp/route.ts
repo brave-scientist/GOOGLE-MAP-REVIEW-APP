@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Role } from '@prisma/client'
 import { createSession, SessionUser } from '@/lib/auth'
+import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +14,16 @@ function generateOTP(): string {
 }
 
 // POST /api/auth/otp — Send or verify OTP
+//
+// SEC-04: Rate-limited to prevent abuse:
+//   - Send:    max 3 per email per 10 minutes (prevents email bombing via OTP)
+//   - Verify:  max 5 per email per 10 minutes (prevents OTP brute-forcing —
+//              a 6-digit code has 1M combinations; 5 attempts in 10 min means
+//              even a sustained attacker needs ~14 days to brute-force, and
+//              the code rotates every 10 min anyway)
+//
+// Rate-limit key is the email (lowercased) so a single attacker cannot
+// rotate IPs to bypass — they'd need to control many email addresses.
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -23,16 +34,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
+    const normalizedEmail = email.trim().toLowerCase()
+
     if (action === 'send') {
+      // SEC-04: Rate-limit OTP send (3 per email per 10 min)
+      const rl = rateLimit(
+        `otp:send:${normalizedEmail}`,
+        RATE_LIMITS.otpSend.limit,
+        RATE_LIMITS.otpSend.windowMs,
+      )
+      if (!rl.allowed) {
+        return NextResponse.json(
+          {
+            error: 'Too many OTP requests. Please wait a few minutes before requesting another code.',
+            code: 'RATE_LIMITED',
+            retryAfter: Math.ceil((rl.resetAt - Date.now()) / 1000),
+          },
+          {
+            status: 429,
+            headers: {
+              'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+            },
+          },
+        )
+      }
+
       // Generate 6-digit OTP
       const code = generateOTP()
       const expires = Date.now() + 10 * 60 * 1000 // 10 minutes
 
       // Check if user exists
-      const existingUser = await db.user.findUnique({ where: { email } })
+      const existingUser = await db.user.findUnique({ where: { email: normalizedEmail } })
       const isNewUser = !existingUser
 
-      otpStore.set(email, {
+      otpStore.set(normalizedEmail, {
         code,
         expires,
         name: name || existingUser?.name || undefined,
@@ -42,7 +77,7 @@ export async function POST(request: NextRequest) {
 
       // In production, send the OTP via email (Resend)
       // For dev: log it server-side so it can be viewed in terminal
-      console.log(`[OTP] ${email}: ${code}`)
+      console.log(`[OTP] ${normalizedEmail}: ${code}`)
 
       return NextResponse.json({
         message: isNewUser
@@ -58,13 +93,37 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'OTP code is required' }, { status: 400 })
       }
 
-      const stored = otpStore.get(email)
+      // SEC-04: Rate-limit OTP verify (5 per email per 10 min) — applies
+      // REGARDLESS of whether the OTP exists, so an attacker can't probe
+      // which emails have pending OTPs by counting different error messages.
+      const rl = rateLimit(
+        `otp:verify:${normalizedEmail}`,
+        RATE_LIMITS.otpVerify.limit,
+        RATE_LIMITS.otpVerify.windowMs,
+      )
+      if (!rl.allowed) {
+        return NextResponse.json(
+          {
+            error: 'Too many verification attempts. Please wait a few minutes before trying again.',
+            code: 'RATE_LIMITED',
+            retryAfter: Math.ceil((rl.resetAt - Date.now()) / 1000),
+          },
+          {
+            status: 429,
+            headers: {
+              'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)),
+            },
+          },
+        )
+      }
+
+      const stored = otpStore.get(normalizedEmail)
       if (!stored) {
         return NextResponse.json({ error: 'No OTP found. Please request a new one.' }, { status: 400 })
       }
 
       if (Date.now() > stored.expires) {
-        otpStore.delete(email)
+        otpStore.delete(normalizedEmail)
         return NextResponse.json({ error: 'OTP expired. Please request a new one.' }, { status: 400 })
       }
 
@@ -73,10 +132,10 @@ export async function POST(request: NextRequest) {
       }
 
       // OTP verified — create or find user, create session
-      otpStore.delete(email)
+      otpStore.delete(normalizedEmail)
 
       let user = await db.user.findUnique({
-        where: { email },
+        where: { email: normalizedEmail },
         include: {
           memberships: {
             include: {
@@ -90,7 +149,7 @@ export async function POST(request: NextRequest) {
       if (!user) {
         const result = await db.$transaction(async (tx) => {
           const newUser = await tx.user.create({
-            data: { email, name: stored.name || email.split('@')[0] },
+            data: { email: normalizedEmail, name: stored.name || normalizedEmail.split('@')[0] },
           })
 
           const org = await tx.organization.create({
@@ -146,7 +205,7 @@ export async function POST(request: NextRequest) {
               action: 'user.signup',
               targetType: 'user',
               targetId: newUser.id,
-              metadata: JSON.stringify({ email, method: 'otp' }),
+              metadata: JSON.stringify({ email: normalizedEmail, method: 'otp' }),
             },
           })
 

@@ -16,24 +16,27 @@ import { InviteMemberModal } from '@/components/app/admin-modals'
 interface Integration {
   provider: string
   name: string
-  status: 'connected' | 'available'
+  status: 'connected' | 'available' | 'not_configured'
   desc: string
   icon: string
   category: 'review-source' | 'communication' | 'billing' | 'alerts'
   userFacing: boolean // false = managed by platform (admin-only)
 }
 
+// AUD-01: Initial state is the SAFE default — everything starts 'available'/'not_configured'.
+// The real statuses are fetched from /api/integrations on mount (see useEffect below)
+// so we never hardcode 'connected' for things that may not actually be connected.
 const INITIAL_INTEGRATIONS: Integration[] = [
-  { provider: 'google', name: 'Google Business Profile', status: 'connected', desc: 'Pull reviews from Google', icon: '🔍', category: 'review-source', userFacing: true },
-  { provider: 'facebook', name: 'Facebook Pages', status: 'connected', desc: 'Pull reviews from Facebook', icon: '📘', category: 'review-source', userFacing: true },
+  { provider: 'google', name: 'Google Business Profile', status: 'available', desc: 'Loading…', icon: '🔍', category: 'review-source', userFacing: true },
+  { provider: 'facebook', name: 'Facebook Pages', status: 'available', desc: 'Loading…', icon: '📘', category: 'review-source', userFacing: true },
   { provider: 'yelp', name: 'Yelp', status: 'available', desc: 'Yelp partnership API', icon: '⭐', category: 'review-source', userFacing: true },
   { provider: 'trustpilot', name: 'Trustpilot', status: 'available', desc: 'Trustpilot API', icon: '✓', category: 'review-source', userFacing: true },
   { provider: 'slack', name: 'Slack', status: 'available', desc: 'Real-time alerts in your Slack channels', icon: '💬', category: 'alerts', userFacing: true },
   { provider: 'teams', name: 'Microsoft Teams', status: 'available', desc: 'Alerts via Power Automate', icon: '👥', category: 'alerts', userFacing: true },
   // Platform-managed integrations (not user-configurable)
-  { provider: 'twilio', name: 'Twilio (SMS)', status: 'connected', desc: 'SMS delivery — managed by ReviewReply platform', icon: '📱', category: 'communication', userFacing: false },
-  { provider: 'resend', name: 'Resend (Email)', status: 'connected', desc: 'Email delivery — managed by ReviewReply platform', icon: '✉', category: 'communication', userFacing: false },
-  { provider: 'stripe', name: 'Stripe', status: 'connected', desc: 'Payment processing — managed by ReviewReply platform', icon: '💳', category: 'billing', userFacing: false },
+  { provider: 'twilio', name: 'Twilio (SMS)', status: 'not_configured', desc: 'Loading…', icon: '📱', category: 'communication', userFacing: false },
+  { provider: 'resend', name: 'Resend (Email)', status: 'not_configured', desc: 'Loading…', icon: '✉', category: 'communication', userFacing: false },
+  { provider: 'stripe', name: 'Stripe', status: 'not_configured', desc: 'Loading…', icon: '💳', category: 'billing', userFacing: false },
 ]
 
 export default function SettingsPage() {
@@ -41,6 +44,39 @@ export default function SettingsPage() {
   const [processingProvider, setProcessingProvider] = useState<string | null>(null)
   const [savingBusiness, setSavingBusiness] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+
+  // AUD-01: Fetch real integration statuses from the API on mount.
+  // Replaces the hardcoded 'connected' values in INITIAL_INTEGRATIONS.
+  useEffect(() => {
+    let cancelled = false
+    async function fetchIntegrations() {
+      try {
+        const res = await fetch('/api/integrations')
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        if (Array.isArray(data.integrations)) {
+          setIntegrations(prev =>
+            prev.map(int => {
+              const fresh = data.integrations.find(
+                (i: { provider: string; status?: string; desc?: string }) => i.provider === int.provider,
+              )
+              if (!fresh) return int
+              return {
+                ...int,
+                status: (fresh.status as Integration['status']) || int.status,
+                desc: fresh.desc || int.desc,
+              }
+            }),
+          )
+        }
+      } catch {
+        // Network error — leave the safe-default initial state in place
+      }
+    }
+    fetchIntegrations()
+    return () => { cancelled = true }
+  }, [])
 
   const handleToggleIntegration = async (int: Integration) => {
     // Google OAuth — redirect to the real OAuth flow
@@ -236,15 +272,24 @@ export default function SettingsPage() {
                     {platformIntegrations.map(int => (
                       <Card key={int.provider} className="p-3 glass-card">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center text-sm flex-shrink-0">
+                          <div className={cn(
+                            'w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0',
+                            int.status === 'connected' ? 'bg-green-500/10' : 'bg-muted/40',
+                          )}>
                             {int.icon}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-xs font-medium truncate">{int.name}</div>
-                            <Badge variant="outline" className="text-[9px] bg-green-500/10 text-green-600 border-green-500/30">
-                              <Check className="w-2.5 h-2.5 mr-0.5" />
-                              Active
-                            </Badge>
+                            {int.status === 'connected' ? (
+                              <Badge variant="outline" className="text-[9px] bg-green-500/10 text-green-600 border-green-500/30">
+                                <Check className="w-2.5 h-2.5 mr-0.5" />
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/30">
+                                Not configured
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </Card>
