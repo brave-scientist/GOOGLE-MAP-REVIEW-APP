@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { fetchGoogleReviews, googleStarRatingToInt, refreshAccessToken, isGoogleConfigured } from '@/lib/integrations/google-business-profile'
 import { getTokens, updateAccessToken } from '@/lib/oauth-store'
 import { ReviewSource, DraftStatus } from '@prisma/client'
+import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -12,7 +13,15 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // SEC-01: require auth + verify business belongs to caller's org
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   const { id } = await params
+
+  // SEC-01: verify the caller's org owns this business
+  const denied = assertBusinessOwnership(ctx, id)
+  if (denied) return denied
 
   if (!isGoogleConfigured()) {
     return NextResponse.json({
@@ -108,6 +117,7 @@ export async function POST(
 
       await db.auditLog.create({
         data: {
+          actorId: ctx.user.id,
           action: 'google.sync_reviews',
           targetType: 'business',
           targetId: id,

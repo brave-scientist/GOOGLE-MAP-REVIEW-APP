@@ -1,15 +1,18 @@
-import { NextResponse } from 'next/server'
-import { requirePlan } from '@/lib/plan-enforcement'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getTenantContext } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/agency — Fetch real client businesses from DB
 export async function GET(request: NextRequest) {
-  const authResult = await requirePlan(request, "ENTERPRISE")
-  if (authResult instanceof NextResponse) return authResult
+  // SEC-01: require auth + ENTERPRISE plan + org scoping
+  const ctx = await getTenantContext(request, 'ENTERPRISE')
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const businesses = await db.business.findMany({
+      where: { orgId: ctx.orgId },
       include: {
         reviews: {
           select: { rating: true, createdAt: true, draftStatus: true },
@@ -74,3 +77,5 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+

@@ -4,12 +4,17 @@ import { Channel, RequestStatus } from '@prisma/client'
 import { sendSMS, isTwilioConfigured } from '@/lib/integrations/twilio'
 import { sendEmail, isResendConfigured, generateReviewRequestEmail } from '@/lib/integrations/resend'
 import { filterOptedOut } from '@/lib/opt-out'
+import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60 // Allow up to 60s for batch sending
 
 // POST /api/campaigns/create — Create a new campaign and optionally send it
 export async function POST(request: NextRequest) {
+  // SEC-01: require auth + verify businessId belongs to caller's org
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const body = await request.json()
     const {
@@ -28,6 +33,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // SEC-01: verify the caller's org owns this business
+    const denied = assertBusinessOwnership(ctx, businessId)
+    if (denied) return denied
 
     const business = await db.business.findUnique({ where: { id: businessId } })
     if (!business) {

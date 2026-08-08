@@ -1,11 +1,17 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getTenantContext } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // SEC-01: scope every query to the user's org
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const campaigns = await db.campaign.findMany({
+      where: { businessId: { in: ctx.businessIds } },
       include: {
         business: { select: { name: true, industry: true } },
         _count: { select: { requests: true } },

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
+import { getTenantContext } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60 // Allow up to 60s for LLM analysis
+export const maxDuration = 60
 
 // GET /api/analytics — Compute sentiment + topic analytics
 // If ?reanalyze=true, re-runs LLM sentiment analysis on all reviews (slow but real)
@@ -13,16 +13,29 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const reanalyze = searchParams.get('reanalyze') === 'true'
 
-    // If reanalyze requested, run LLM on all reviews that need it
-    const authCheck = await requirePlan(request, "PRO")
-    if (authCheck instanceof NextResponse) return authCheck
+    // SEC-01: scope every query to the user's org (also enforces PRO plan)
+    const ctx = await getTenantContext(request, 'PRO')
+    if (ctx instanceof NextResponse) return ctx
+
+    if (ctx.businessIds.length === 0) {
+      return NextResponse.json({
+        topicAnalysis: [],
+        sourceBreakdown: [],
+        sentimentDistribution: { positive: 0, neutral: 0, negative: 0 },
+        avgResponseHours: 0,
+        totalReviewsAnalyzed: 0,
+        sentimentSource: reanalyze ? 'ai-computed' : 'cached',
+        aiSentimentCount: 0,
+      })
+    }
+
     if (reanalyze) {
-      await reanalyzeAllReviews()
+      await reanalyzeAllReviews(ctx.businessIds)
     }
 
     // Topic frequency + average sentiment per topic
     const allReviews = await db.review.findMany({
-      where: { topics: { not: null } },
+      where: { businessId: { in: ctx.businessIds }, topics: { not: null } },
       select: { id: true, topics: true, sentimentScore: true, rating: true },
     })
 
@@ -57,6 +70,7 @@ export async function GET(request: NextRequest) {
       by: ['source'],
       _count: true,
       _avg: { rating: true },
+      where: { businessId: { in: ctx.businessIds } },
     })
 
     // Sentiment distribution (computed from real scores)
@@ -70,7 +84,7 @@ export async function GET(request: NextRequest) {
 
     // Response time stats
     const repliedReviews = await db.review.findMany({
-      where: { repliedAt: { not: null } },
+      where: { businessId: { in: ctx.businessIds }, repliedAt: { not: null } },
       select: { createdAt: true, repliedAt: true },
     })
     const responseTimes = repliedReviews
@@ -82,7 +96,7 @@ export async function GET(request: NextRequest) {
 
     // Check if sentiment was computed by AI or is from seed
     const reviewsWithAiSentiment = await db.review.count({
-      where: { sentimentScore: { not: null } }
+      where: { businessId: { in: ctx.businessIds }, sentimentScore: { not: null } },
     })
 
     return NextResponse.json({
@@ -108,8 +122,9 @@ export async function GET(request: NextRequest) {
 }
 
 // Re-analyze all reviews using the LLM for real sentiment + topic extraction
-async function reanalyzeAllReviews() {
+async function reanalyzeAllReviews(businessIds: string[]) {
   const reviews = await db.review.findMany({
+    where: { businessId: { in: businessIds } },
     select: { id: true, text: true, rating: true },
   })
 

@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
+import { getTenantContext } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
 // POST /api/reports/create — Create a scheduled report
+// SEC-01: requires auth; reports are scoped to the caller's org via audit log.
+// No businessId is accepted from the body — reports are org-level.
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser(request)
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // SEC-01: require auth + org scoping
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
 
   try {
     const body = await request.json()
@@ -22,16 +25,17 @@ export async function POST(request: NextRequest) {
         id: `rpt_${Date.now().toString(36)}`,
         name,
         schedule, // daily | weekly | monthly
-        recipients: recipients || [user.email],
+        recipients: recipients || [ctx.user.email],
         format: format || 'email',
         channel: channel || 'email',
         status: 'active',
+        orgId: ctx.orgId, // SEC-01: stamp the orgId so the report is scoped
         createdAt: new Date().toISOString(),
       }
 
       await db.auditLog.create({
         data: {
-          actorId: user.id,
+          actorId: ctx.user.id,
           action: 'report.created',
           targetType: 'report',
           targetId: report.id,
@@ -52,8 +56,9 @@ export async function POST(request: NextRequest) {
 
 // PUT /api/reports/update — Update an existing report
 export async function PUT(request: NextRequest) {
-  const user = await getCurrentUser(request)
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // SEC-01: require auth
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
 
   try {
     const body = await request.json()
@@ -69,12 +74,13 @@ export async function PUT(request: NextRequest) {
       schedule: schedule || '(unchanged)',
       recipients: recipients || [],
       status: status || 'active',
+      orgId: ctx.orgId, // SEC-01: stamp the orgId
       updatedAt: new Date().toISOString(),
     }
 
     await db.auditLog.create({
       data: {
-        actorId: user.id,
+        actorId: ctx.user.id,
         action: 'report.updated',
         targetType: 'report',
         targetId: reportId,

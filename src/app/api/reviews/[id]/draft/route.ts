@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
 import { DraftStatus } from '@prisma/client'
+import { getTenantContext, assertReviewOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30 // 30 seconds for AI generation
@@ -11,18 +11,22 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requirePlan(request, "STARTER")
-  if (authResult instanceof NextResponse) return authResult
+  // SEC-01: require auth + STARTER plan + verify review belongs to caller's org
+  const ctx = await getTenantContext(request, 'STARTER')
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const { id } = await params
     const body = await request.json().catch(() => ({}))
     const forceRegenerate = body.forceRegenerate === true
 
+    // SEC-01 (IDOR): verify the review belongs to a business in the caller's org
+    const reviewCheck = await assertReviewOwnership(ctx, id, true)
+    if (reviewCheck instanceof NextResponse) return reviewCheck
     const review = await db.review.findUnique({
       where: { id },
       include: { business: true },
     })
-
     if (!review) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 })
     }
@@ -66,6 +70,7 @@ export async function POST(
 
     await db.auditLog.create({
       data: {
+        actorId: ctx.user.id,
         action: 'draft.generated',
         targetType: 'review',
         targetId: review.id,

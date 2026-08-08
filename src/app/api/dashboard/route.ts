@@ -1,21 +1,16 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getTenantContext } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
-  try {
-    const businesses = await db.business.findMany({
-      include: {
-        reviews: {
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    })
+export async function GET(request: NextRequest) {
+  // SEC-01: scope every query to the user's org
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
 
-    if (businesses.length === 0) {
+  try {
+    if (ctx.businessIds.length === 0) {
       return NextResponse.json({
         businesses: [],
         stats: { totalReviews: 0, avgRating: 0, pendingReplies: 0, conversionRate: 0 },
@@ -25,12 +20,31 @@ export async function GET() {
       })
     }
 
-    const totalReviews = await db.review.count()
-    const avgRatingAgg = await db.review.aggregate({ _avg: { rating: true } })
-    const pendingReplies = await db.review.count({ where: { draftStatus: 'PENDING' } })
+    const businesses = await db.business.findMany({
+      where: { id: { in: ctx.businessIds } },
+      include: {
+        reviews: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const totalReviews = await db.review.count({
+      where: { businessId: { in: ctx.businessIds } },
+    })
+    const avgRatingAgg = await db.review.aggregate({
+      _avg: { rating: true },
+      where: { businessId: { in: ctx.businessIds } },
+    })
+    const pendingReplies = await db.review.count({
+      where: { businessId: { in: ctx.businessIds }, draftStatus: 'PENDING' },
+    })
 
     const campaignStats = await db.campaign.aggregate({
       _sum: { sentCount: true, conversionCount: true },
+      where: { businessId: { in: ctx.businessIds } },
     })
     const conversionRate = campaignStats._sum.sentCount && campaignStats._sum.sentCount > 0
       ? Math.round((campaignStats._sum.conversionCount! / campaignStats._sum.sentCount) * 100)
@@ -40,6 +54,7 @@ export async function GET() {
       by: ['rating'],
       _count: true,
       orderBy: { rating: 'asc' },
+      where: { businessId: { in: ctx.businessIds } },
     })
     const ratingDistribution = [1, 2, 3, 4, 5].map(r => ({
       rating: r,
@@ -49,7 +64,10 @@ export async function GET() {
     const eightWeeksAgo = new Date()
     eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56)
     const recentReviewsData = await db.review.findMany({
-      where: { createdAt: { gte: eightWeeksAgo } },
+      where: {
+        businessId: { in: ctx.businessIds },
+        createdAt: { gte: eightWeeksAgo },
+      },
       select: { createdAt: true, sentimentScore: true, rating: true },
     })
     const weeks: { week: string; avgSentiment: number; reviewCount: number }[] = []
@@ -70,6 +88,7 @@ export async function GET() {
     }
 
     const recent = await db.review.findMany({
+      where: { businessId: { in: ctx.businessIds } },
       take: 8,
       orderBy: { createdAt: 'desc' },
       include: { business: { select: { name: true } } },

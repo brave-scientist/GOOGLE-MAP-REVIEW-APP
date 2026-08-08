@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
+import { requireAdmin } from '@/lib/admin-auth'
 import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // POST /api/admin/broadcast — Send an email to all users
+// SEC-02: requires platform admin
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser(request)
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // SEC-02: require admin auth (fails closed if ADMIN_EMAILS unset)
+  const adminCheck = await requireAdmin(request)
+  if (adminCheck instanceof NextResponse) {
+    return adminCheck
+  }
+  const user = adminCheck.user
 
   try {
     const body = await request.json()

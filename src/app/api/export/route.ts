@@ -1,20 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
+import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/export — Export reviews as CSV
 export async function GET(request: NextRequest) {
-  const authResult = await requirePlan(request, "STARTER")
-  if (authResult instanceof NextResponse) return authResult
+  // SEC-01: require auth + STARTER plan + org scoping
+  const ctx = await getTenantContext(request, 'STARTER')
+  if (ctx instanceof NextResponse) return ctx
   try {
     const { searchParams } = new URL(request.url)
-    const type = searchParams.get('type') || 'reviews' // reviews | campaigns | users
+    const type = searchParams.get('type') || 'reviews'
     const businessId = searchParams.get('businessId')
 
+    // SEC-01: if businessId specified, verify ownership
+    if (businessId && businessId !== 'all') {
+      const denied = assertBusinessOwnership(ctx, businessId)
+      if (denied) return denied
+    }
+
     if (type === 'reviews') {
-      const where = businessId && businessId !== 'all' ? { businessId } : {}
+      const where = businessId && businessId !== 'all'
+        ? { businessId }
+        : { businessId: { in: ctx.businessIds } }
       const reviews = await db.review.findMany({
         where,
         include: { business: { select: { name: true } } },
@@ -51,6 +60,7 @@ export async function GET(request: NextRequest) {
 
     if (type === 'campaigns') {
       const campaigns = await db.campaign.findMany({
+        where: { businessId: { in: ctx.businessIds } },
         include: { business: { select: { name: true } } },
         orderBy: { createdAt: 'desc' },
       })

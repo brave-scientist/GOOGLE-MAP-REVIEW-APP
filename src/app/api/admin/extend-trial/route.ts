@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getCurrentUser } from '@/lib/auth'
+import { requireAdmin } from '@/lib/admin-auth'
 
 export const dynamic = 'force-dynamic'
 
-// GET /api/admin/search-users?q= — Search users for trial extension
+// GET /api/admin/extend-trial — Search users for trial extension
+// SEC-02: requires platform admin
 export async function GET(request: NextRequest) {
-  const user = await getCurrentUser(request)
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // SEC-02: require admin auth (fails closed if ADMIN_EMAILS unset)
+  const adminCheck = await requireAdmin(request)
+  if (adminCheck instanceof NextResponse) {
+    return adminCheck
+  }
 
   const { searchParams } = new URL(request.url)
   const query = searchParams.get('q') || ''
@@ -49,9 +53,14 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/extend-trial — Extend a user's trial
+// SEC-02: requires platform admin
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser(request)
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // SEC-02: require admin auth (fails closed if ADMIN_EMAILS unset)
+  const adminCheck = await requireAdmin(request)
+  if (adminCheck instanceof NextResponse) {
+    return adminCheck
+  }
+  const user = adminCheck.user
 
   try {
     const body = await request.json()

@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Plan } from '@prisma/client'
+import { requireAdmin } from '@/lib/admin-auth'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin — Developer/owner dashboard stats
-// In production, this would check for owner role
+// SEC-02: requires platform admin (configured via ADMIN_EMAILS env var).
+// FAILS CLOSED if ADMIN_EMAILS is unset — denies everyone.
 export async function GET(request: NextRequest) {
+  // SEC-02: require admin auth
+  const adminCheck = await requireAdmin(request)
+  if (adminCheck instanceof NextResponse) {
+    return adminCheck
+  }
+
   try {
     // Get all users
     const totalUsers = await db.user.count()

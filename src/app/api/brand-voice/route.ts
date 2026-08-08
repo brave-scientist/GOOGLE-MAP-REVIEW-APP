@@ -1,22 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requirePlan } from '@/lib/plan-enforcement'
 import { db } from '@/lib/db'
+import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
-// GET /api/brand-voice — Get the brand voice profile for the first business
+// GET /api/brand-voice — Get the brand voice profile for a business
 export async function GET(request: NextRequest) {
-  const authResult = await requirePlan(request, "PRO")
-  if (authResult instanceof NextResponse) return authResult
+  // SEC-01: require auth + PRO plan + org scoping
+  const ctx = await getTenantContext(request, 'PRO')
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get('businessId')
 
-    let business: { id: string } | null
+    let business: { id: string } | null = null
+
     if (businessId) {
+      // SEC-01: verify ownership
+      const denied = assertBusinessOwnership(ctx, businessId)
+      if (denied) return denied
       business = await db.business.findUnique({ where: { id: businessId }, select: { id: true } })
     } else {
-      business = await db.business.findFirst({ select: { id: true } })
+      // No businessId specified — pick the first business in the user's org
+      business = await db.business.findFirst({
+        where: { id: { in: ctx.businessIds } },
+        select: { id: true },
+      })
     }
 
     if (!business) {
@@ -46,8 +56,10 @@ export async function GET(request: NextRequest) {
 
 // POST /api/brand-voice — Create or update the brand voice profile
 export async function POST(request: NextRequest) {
-  const authResult = await requirePlan(request, "PRO")
-  if (authResult instanceof NextResponse) return authResult
+  // SEC-01: require auth + PRO plan + verify businessId belongs to caller's org
+  const ctx = await getTenantContext(request, 'PRO')
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const body = await request.json()
     const { businessId, examples, toneGuidelines, signature, forbiddenPhrases } = body
@@ -55,6 +67,10 @@ export async function POST(request: NextRequest) {
     if (!businessId) {
       return NextResponse.json({ error: 'businessId is required' }, { status: 400 })
     }
+
+    // SEC-01: verify the caller's org owns this business
+    const denied = assertBusinessOwnership(ctx, businessId)
+    if (denied) return denied
 
     // Validate examples structure
     const validExamples = Array.isArray(examples) ? examples.filter(
@@ -81,6 +97,7 @@ export async function POST(request: NextRequest) {
     // Log the action
     await db.auditLog.create({
       data: {
+        actorId: ctx.user.id,
         action: 'brand_voice.updated',
         targetType: 'brand_voice',
         targetId: profile.id,

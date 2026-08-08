@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
 // POST /api/integrations — connect or disconnect an integration
+// SEC-01: requires auth; if businessId is supplied, verifies org ownership.
+//
+// NOTE: This route is currently a stub — it only writes an audit log and
+// returns a mock "connected" status without actually validating API keys
+// or storing real credentials. This is tracked as a Tier 1 issue (fake
+// "connected" status). For now, the SEC-01 fix is to require auth + scope
+// the audit log to the caller's org.
 export async function POST(request: NextRequest) {
+  // SEC-01: require auth
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const body = await request.json()
     const { provider, action, businessId } = body
@@ -18,19 +30,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // In production, this would:
-    // 1. For Google/Facebook: initiate OAuth flow, store tokens
-    // 2. For Twilio/Resend/Stripe: verify API keys, test connection
-    // 3. For Slack: OAuth via Slack app
-    // 4. Store integration config in DB
+    // SEC-01: if businessId is supplied, verify the caller's org owns it
+    if (businessId) {
+      const denied = assertBusinessOwnership(ctx, businessId)
+      if (denied) return denied
+    }
 
-    // For demo, just log the action and return success
     await db.auditLog.create({
       data: {
+        actorId: ctx.user.id,
         action: `integration.${action === 'connect' ? 'connected' : 'disconnected'}`,
         targetType: 'integration',
         targetId: provider,
-        metadata: JSON.stringify({ provider, action, businessId }),
+        metadata: JSON.stringify({
+          provider,
+          action,
+          businessId: businessId || null,
+          orgId: ctx.orgId,
+        }),
       },
     })
 
@@ -56,10 +73,23 @@ export async function POST(request: NextRequest) {
 }
 
 // GET /api/integrations — list integration status
+// SEC-01: requires auth; if businessId is supplied, verifies org ownership.
+//
+// NOTE: This route returns mock statuses (Tier 1 issue). The SEC-01 fix
+// here is just auth + ownership scoping.
 export async function GET(request: NextRequest) {
+  // SEC-01: require auth
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get('businessId')
+
+    if (businessId) {
+      const denied = assertBusinessOwnership(ctx, businessId)
+      if (denied) return denied
+    }
 
     // In production, fetch from DB
     // For demo, return mock statuses

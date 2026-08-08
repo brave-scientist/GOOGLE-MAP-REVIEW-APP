@@ -1,28 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { ReviewSource, DraftStatus } from '@prisma/client'
+import { getTenantContext } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
+  // SEC-01: scope every query to the user's org
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const { searchParams } = new URL(request.url)
-    const status = searchParams.get('status') // all | pending | replied | escalated
-    const rating = searchParams.get('rating') // all | positive | negative | 1-5
-    const source = searchParams.get('source') // all | google | facebook | yelp
+    const status = searchParams.get('status')
+    const rating = searchParams.get('rating')
+    const source = searchParams.get('source')
     const businessId = searchParams.get('businessId')
     const search = searchParams.get('q')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
 
-    const where: Record<string, unknown> = {}
+    // SEC-01: hard-scope to businesses in the user's org.
+    // If the caller passes businessId, verify it's in ctx.businessIds.
+    let scopedBusinessIds: string[] = ctx.businessIds
+    if (businessId && businessId !== 'all') {
+      if (!ctx.businessIds.includes(businessId)) {
+        return NextResponse.json(
+          { error: 'Access denied', code: 'BUSINESS_NOT_OWNED' },
+          { status: 403 },
+        )
+      }
+      scopedBusinessIds = [businessId]
+    }
+
+    const where: Record<string, unknown> = {
+      businessId: { in: scopedBusinessIds },
+    }
 
     if (status === 'pending') {
       where.draftStatus = DraftStatus.PENDING
     } else if (status === 'replied') {
       where.draftStatus = DraftStatus.POSTED
     } else if (status === 'escalated') {
-      // Reviews with low rating + no reply yet
       where.AND = [{ rating: { lte: 2 } }, { repliedAt: null }]
     }
 
@@ -47,10 +66,6 @@ export async function GET(request: NextRequest) {
       if (sourceMap[source]) {
         where.source = sourceMap[source]
       }
-    }
-
-    if (businessId && businessId !== 'all') {
-      where.businessId = businessId
     }
 
     if (search) {
