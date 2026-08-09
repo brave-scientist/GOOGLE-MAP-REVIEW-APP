@@ -68,8 +68,9 @@ export default function WidgetsPage() {
   const [minRating, setMinRating] = useState(4)
   const [copied, setCopied] = useState(false)
 
-  // Generate real embed code pointing to the actual /widget.js route
-  const embedCode = `<script src="${typeof window !== 'undefined' ? window.location.origin : 'https://app.reviewreply.com'}/widget.js?business=Bamboo+Garden&theme=${selectedTheme}&minRating=${minRating}&limit=5" async></script>`
+  // Generate real embed code pointing to the actual /widget.js route.
+  // Includes the selected type and theme so the rendered widget matches the preview.
+  const embedCode = `<script src="${typeof window !== 'undefined' ? window.location.origin : 'https://app.reviewreply.com'}/widget.js?business=Bamboo+Garden&type=${selectedType}&theme=${selectedTheme}&minRating=${minRating}&limit=5" async></script>`
 
   const copyCode = () => {
     navigator.clipboard.writeText(embedCode)

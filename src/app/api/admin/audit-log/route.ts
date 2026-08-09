@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 //
 // Query params:
 //   page      — 1-indexed page number (default 1)
-//   limit     — page size, max 100 (default 50)
+//   limit     — page size, capped at 200 (default 50)
 //   action    — filter by action substring (case-insensitive contains)
 //   targetType— filter by exact targetType
 //   actorId   — filter by exact actorId
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50')))
+    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '50')))
     const action = searchParams.get('action') || undefined
     const targetType = searchParams.get('targetType') || undefined
     const actorId = searchParams.get('actorId') || undefined
