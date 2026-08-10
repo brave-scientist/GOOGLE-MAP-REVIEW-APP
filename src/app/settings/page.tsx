@@ -44,6 +44,65 @@ export default function SettingsPage() {
   const [processingProvider, setProcessingProvider] = useState<string | null>(null)
   const [savingBusiness, setSavingBusiness] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [fbPagePicker, setFbPagePicker] = useState<{ businessId: string; pages: Array<{ id: string; name: string; category: string }> } | null>(null)
+  const [fbSelecting, setFbSelecting] = useState(false)
+
+  // Facebook page-picker: check URL for ?facebook_pick_page=1 on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('facebook_pick_page') === '1') {
+      const businessId = params.get('businessId')
+      const pagesParam = params.get('pages')
+      if (businessId && pagesParam) {
+        try {
+          const pages = JSON.parse(decodeURIComponent(pagesParam))
+          setFbPagePicker({ businessId, pages })
+          // Clean the URL so this doesn't re-trigger on refresh
+          window.history.replaceState({}, '', '/settings')
+        } catch {
+          // Malformed pages param — ignore
+        }
+      }
+    }
+  }, [])
+
+  const handleSelectFbPage = async (pageId: string, pageName: string) => {
+    if (!fbPagePicker) return
+    setFbSelecting(true)
+    try {
+      const res = await fetch('/api/oauth/facebook/select-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessId: fbPagePicker.businessId, pageId }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Facebook Page "${pageName}" connected!`)
+        setFbPagePicker(null)
+        // Refresh integration statuses
+        const intRes = await fetch('/api/integrations')
+        if (intRes.ok) {
+          const intData = await intRes.json()
+          if (Array.isArray(intData.integrations)) {
+            setIntegrations(prev =>
+              prev.map(int => {
+                const fresh = intData.integrations.find((i: { provider: string; status?: string; desc?: string }) => i.provider === int.provider)
+                if (!fresh) return int
+                return { ...int, status: (fresh.status as Integration['status']) || int.status, desc: fresh.desc || int.desc }
+              }),
+            )
+          }
+        }
+      } else {
+        toast.error('Failed to connect Facebook Page', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setFbSelecting(false)
+    }
+  }
 
   // AUD-01: Fetch real integration statuses from the API on mount.
   // Replaces the hardcoded 'connected' values in INITIAL_INTEGRATIONS.
@@ -92,6 +151,22 @@ export default function SettingsPage() {
         }
       } catch {
         toast.error('Failed to start Google OAuth')
+        return
+      }
+    }
+
+    // Facebook OAuth — redirect to the real OAuth flow
+    if (int.provider === 'facebook' && int.status !== 'connected') {
+      try {
+        const dashRes = await fetch('/api/dashboard')
+        const dashData = await dashRes.json()
+        const businessId = dashData.businesses?.[0]?.id
+        if (businessId) {
+          window.location.href = `/api/oauth/facebook?businessId=${businessId}`
+          return
+        }
+      } catch {
+        toast.error('Failed to start Facebook OAuth')
         return
       }
     }
@@ -436,6 +511,43 @@ export default function SettingsPage() {
       </main>
       <MobileNav />
       <InviteMemberModal open={inviteOpen} onOpenChange={setInviteOpen} />
+
+      {/* Facebook Page Picker — shown when user has multiple FB Pages after OAuth */}
+      {fbPagePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6">
+            <h3 className="font-display font-bold text-lg mb-2">Select a Facebook Page</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              You manage {fbPagePicker.pages.length} Facebook Pages. Choose which one to connect for review syncing.
+            </p>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {fbPagePicker.pages.map(page => (
+                <button
+                  key={page.id}
+                  onClick={() => handleSelectFbPage(page.id, page.name)}
+                  disabled={fbSelecting}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all text-left disabled:opacity-50"
+                >
+                  <div className="w-9 h-9 rounded-md bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                    {page.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{page.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{page.category}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setFbPagePicker(null)}
+              disabled={fbSelecting}
+              className="w-full mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

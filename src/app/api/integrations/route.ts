@@ -5,6 +5,7 @@ import { hasTokens } from '@/lib/oauth-store'
 import { isTwilioConfigured } from '@/lib/integrations/twilio'
 import { isResendConfigured } from '@/lib/integrations/resend'
 import { isGoogleConfigured } from '@/lib/integrations/google-business-profile'
+import { isFacebookConfigured } from '@/lib/integrations/facebook-graph'
 
 export const dynamic = 'force-dynamic'
 
@@ -138,6 +139,7 @@ export async function GET(request: NextRequest) {
     // Google Business Profile API itself (separate from per-business OAuth)
     // — surfaced for the UI's "Google configured but not connected" hint
     const googleApiConfigured = isGoogleConfigured()
+    const facebookApiConfigured = isFacebookConfigured()
 
     return NextResponse.json({
       integrations: [
@@ -158,7 +160,11 @@ export async function GET(request: NextRequest) {
           provider: 'facebook',
           name: 'Facebook Pages',
           status: facebookConnected ? 'connected' : 'available',
-          desc: facebookConnected ? 'Pulling reviews from Facebook' : 'Facebook OAuth not yet implemented',
+          desc: facebookConnected
+            ? 'Pulling reviews from Facebook'
+            : facebookApiConfigured
+              ? 'Facebook API configured — click Connect to authorize'
+              : 'Facebook API not configured (set FACEBOOK_APP_ID/SECRET in .env)',
           icon: '📘',
           category: 'review-source',
           userFacing: true,
