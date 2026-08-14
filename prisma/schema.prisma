@@ -72,6 +72,7 @@ model Business {
   brandVoiceProfile BrandVoiceProfile?
   oauthTokens       OAuthToken[]
   reviewPlatformLinks ReviewPlatformLink[]
+  reviewUsSends     ReviewUsSend[]
 }
 
 model Review {
@@ -281,4 +282,45 @@ model ReviewPlatformLink {
   business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, enabled])
+}
+
+// ─────────────────────────────────────────────────────
+// Review Us Page — bulk-send records (separate from Campaign)
+// ─────────────────────────────────────────────────────
+// Each send records: which business, when, which channel, how many recipients.
+// Individual recipient records are stored in ReviewUsSendRecipient.
+// This is intentionally separate from Campaign/ReviewRequest — different feature,
+// different data, different lifecycle.
+model ReviewUsSend {
+  id              String   @id @default(cuid())
+  businessId      String
+  channel         String
+  messageTemplate String?
+  reviewUsUrl     String
+  recipientCount  Int      @default(0)
+  sentCount       Int      @default(0)
+  skippedOptOutCount Int   @default(0)
+  failedCount     Int      @default(0)
+  sentAt          DateTime @default(now())
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  recipients      ReviewUsSendRecipient[]
+
+  @@index([businessId, sentAt])
+}
+
+model ReviewUsSendRecipient {
+  id              String   @id @default(cuid())
+  reviewUsSendId  String
+  customerName    String
+  customerContact String
+  channel         String
+  status          String   @default("pending")
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  error           String?
+
+  reviewUsSend     ReviewUsSend @relation(fields: [reviewUsSendId], references: [id], onDelete: Cascade)
+
+  @@index([reviewUsSendId])
 }

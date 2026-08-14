@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Inbox, Star, Send, BarChart3, Code2, FileText,
-  Settings, Sparkles, Building2, CreditCard, Shield, Target, Crown,
+  Settings, Sparkles, Building2, CreditCard, Shield, Target, Crown, Link2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +14,7 @@ const navItems = [
   { href: '/inbox', label: 'Inbox', icon: Inbox, badge: '8' },
   { href: '/reviews', label: 'Reviews', icon: Star },
   { href: '/campaigns', label: 'Campaigns', icon: Send },
+  { href: '/review-us-page', label: 'Review Us Page', icon: Link2 },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/competitors', label: 'Competitors', icon: Target },
   { href: '/widgets', label: 'Widgets', icon: Code2 },
