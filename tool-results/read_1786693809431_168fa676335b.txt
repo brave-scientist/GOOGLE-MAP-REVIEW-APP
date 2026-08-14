@@ -1,0 +1,768 @@
+     1→# GLM 5.2 AUDIT PROMPT — Full Multilayer E2E Application Audit
+     2→# ReviewReply-Lite — Commercial Launch Readiness Assessment
+     3→#
+     4→# Instructions for GLM 5.2:
+     5→# This is a READ + TEST + REPORT session. You are acting as a senior QA engineer
+     6→# conducting a full pre-launch audit. You will read every file, run every terminal
+     7→# check, trace every route, test every interactive element, and produce a single
+     8→# structured audit report as your final output.
+     9→#
+    10→# Operating rules for this session:
+    11→# - Work through all 18 layers in order without stopping between layers.
+    12→# - Do not ask for confirmation or approval between layers — proceed continuously
+    13→#   from Layer 1 all the way through to the final AUDIT-REPORT.md write and commit.
+    14→# - "Layer N complete" is not a stopping point. Move immediately to Layer N+1.
+    15→# - Auto-approved for this session: all file reads, terminal commands (curl, grep,
+    16→#   find, pnpm build, tsc), test runs, and writing/committing AUDIT-REPORT.md.
+    17→# - NOT approved: editing any application source file during this session.
+    18→#   This session is audit-only. Find, document, and classify findings.
+    19→#   Do not fix anything. Fixes happen in a separate dedicated session after
+    20→#   the founder reviews this report.
+    21→# - If you approach your context window limit before finishing all 18 layers,
+    22→#   write whatever you have to AUDIT-REPORT.md immediately, note exactly which
+    23→#   layer you stopped at and what the next unfinished check was, commit it, and
+    24→#   stop. Do not summarise loosely — be precise about where you are so the next
+    25→#   session resumes from the exact right place.
+    26→# - GLM 5.2 specific note: day/layer numbers are sequence markers, not pause points.
+    27→#   Do not stop after completing a layer and wait for a "continue" instruction.
+    28→#   The instruction to continue through all layers is given here, once, and applies
+    29→#   to the entire session.
+    30→#
+    31→# Before starting Layer 1: start the dev server with `pnpm dev` and confirm
+    32→# the app is responding at http://localhost:3001 before proceeding.
+    33→# Final deliverable: AUDIT-REPORT.md in the project root, committed to git.
+    34→
+    35→---
+    36→
+    37→## AUDIT SCOPE
+    38→
+    39→You are auditing the following layers, in this order:
+    40→
+    41→1. File system & code structure integrity
+    42→2. Build & compilation health  
+    43→3. Environment & configuration
+    44→4. Public marketing routes (unauthenticated)
+    45→5. Authentication flows
+    46→6. Onboarding flow
+    47→7. Core app routes (authenticated)
+    48→8. Every interactive element on every page
+    49→9. Every navigation link and internal route
+    50→10. Every API endpoint
+    51→11. Data flow & state management
+    52→12. Mock-mode integrity
+    53→13. Mobile & responsive layout
+    54→14. Performance & load behaviour
+    55→15. Security surface check
+    56→16. Commercial launch readiness verdict
+    57→
+    58→For each finding, classify it as:
+    59→- 🔴 BLOCKER — must fix before any real user touches this (broken flow, data loss, security issue)
+    60→- 🟡 MAJOR — significantly damages UX or conversion, fix before commercial launch
+    61→- 🟠 MINOR — noticeable issue but doesn't break core flows, fix within first week post-launch
+    62→- 🔵 POLISH — cosmetic or minor UX improvement, fix when time permits
+    63→- ✅ PASS — working correctly, no action needed
+    64→
+    65→---
+    66→
+    67→## LAYER 1 — File System & Code Structure Integrity
+    68→
+    69→Run these checks and record findings:
+    70→
+    71→```bash
+    72→# 1.1 — Verify the exact folder structure matches Implementation-Plan.md Section 1
+    73→# List all files in app/ and lib/ recursively
+    74→find app -type f | sort
+    75→find lib -type f | sort
+    76→find components -type f | sort
+    77→find scripts -type f | sort
+    78→```
+    79→
+    80→Check and answer each question:
+    81→- Does `lib/types.ts` exist and export all interfaces from Product-Roadmap.md Section 2?
+    82→- Does `lib/auth.ts` exist with a `getSession()` function?
+    83→- Does `lib/db.ts` exist and implement the dual data-layer (LocalStore + SupabaseStore)?
+    84→- Does `lib/supabase/supabase-store.ts` exist?
+    85→- Do all 6 integration files exist: `lib/integrations/google-business-profile.ts`, `lib/integrations/facebook-graph.ts`, `lib/integrations/twilio.ts`, `lib/integrations/resend.ts`, `lib/integrations/stripe.ts`, `lib/integrations/mock-data.ts`?
+    86→- Does `lib/ai/draft-reply.ts` exist?
+    87→- Do all 3 Inngest job files exist: `lib/inngest/poll-reviews.ts`, `lib/inngest/generate-reply-draft.ts`, `lib/inngest/send-review-request.ts`?
+    88→- Does `lib/parsing/paste-list-parser.ts` exist?
+    89→- Does `MOCK-TO-REAL.md` exist in the project root?
+    90→- Does `Decision-Log.md` exist and have entries?
+    91→- Does `supabase/migrations/0001_init.sql` exist?
+    92→- Does `supabase/migrations/0002_agency_support.sql` exist?
+    93→- Does `.env.example` exist with all required keys from Implementation-Plan.md Section 2?
+    94→- Does `.vscode/settings.json` exist with CSS validator disabled?
+    95→- Do all marketing routes exist: `app/(marketing)/page.tsx`, `/login`, `/signup`, `/terms`, `/privacy`, `/vs/birdeye`, `/vs/podium`?
+    96→- Do all app routes exist: `app/(app)/dashboard/page.tsx`, `/reviews`, `/requests`, `/settings`, `/billing`, `/onboarding`?
+    97→- Do all API routes exist per the Implementation-Plan route list?
+    98→- Does `app/r/[token]/page.tsx` exist for click tracking?
+    99→
+   100→Record every missing file as 🔴 BLOCKER if it's a core route or integration, 🟡 MAJOR if it's a supporting component.
+   101→
+   102→---
+   103→
+   104→## LAYER 2 — Build & Compilation Health
+   105→
+   106→```bash
+   107→# 2.1 — TypeScript check — zero errors required
+   108→npx tsc --noEmit 2>&1
+   109→
+   110→# 2.2 — Full production build
+   111→pnpm build 2>&1
+   112→
+   113→# 2.3 — Check for any console.error or unhandled promise rejections in dev mode
+   114→# Start dev server and check terminal output for any startup errors
+   115→pnpm dev 2>&1 &
+   116→sleep 8
+   117→```
+   118→
+   119→Questions to answer:
+   120→- Does `tsc --noEmit` complete with zero errors?
+   121→- Does `pnpm build` complete successfully with all routes compiled?
+   122→- How many routes does the build report? (Should be 24 minimum per the build summary)
+   123→- Are there any warnings in the build output that could indicate runtime issues?
+   124→- Are there any `any` type usages that bypass type safety in critical paths (auth, billing, data)?
+   125→
+   126→Record each error as 🔴 BLOCKER, each warning as 🟡 MAJOR or 🟠 MINOR depending on context.
+   127→
+   128→---
+   129→
+   130→## LAYER 3 — Environment & Configuration
+   131→
+   132→Open and read `.env.example`. Then read `.env.local` (if present — do not log its contents to any output file, just verify the keys exist).
+   133→
+   134→Check and answer:
+   135→- Is `USE_MOCKS=true` set correctly in `.env.local`?
+   136→- Is `NEXT_PUBLIC_APP_URL=http://localhost:3001` set?
+   137→- Are all required env variable keys present in `.env.example` matching Implementation-Plan.md Section 2?
+   138→- Are there any keys in `.env.local` that are NOT in `.env.example` (undocumented secrets)?
+   139→- Is `.env.local` correctly listed in `.gitignore`?
+   140→- Is there any hardcoded `localhost:3000` remaining anywhere in the codebase?
+   141→
+   142→```bash
+   143→# Check for any remaining localhost:3000 references
+   144→grep -r "localhost:3000" . --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" 2>/dev/null
+   145→```
+   146→
+   147→- Is `package.json` dev script set to `--port 3001`?
+   148→- Does `.vscode/settings.json` have `css.validate: false`?
+   149→
+   150→---
+   151→
+   152→## LAYER 4 — Public Marketing Routes (Unauthenticated)
+   153→
+   154→For each route below, open it (use curl or document the check), and answer every question.
+   155→
+   156→### 4.1 — Homepage: http://localhost:3001/
+   157→
+   158→Navigation audit:
+   159→- [ ] Does the page load without a blank screen or error?
+   160→- [ ] Is the sticky header present and visible?
+   161→- [ ] Logo renders correctly with the brass diamond mark?
+   162→- [ ] Nav links visible on desktop: "How it works", "Features", "Pricing", "FAQ"?
+   163→- [ ] Nav links hidden on mobile viewport (≤860px)?
+   164→- [ ] "Log in" ghost button in header — does it link to /login?
+   165→- [ ] "Start free trial" brass button in header — does it link to /pricing section or /signup?
+   166→- [ ] Clicking logo — does it link to /?
+   167→
+   168→Hero section:
+   169→- [ ] Eyebrow label renders?
+   170→- [ ] Headline renders with brass accent text?
+   171→- [ ] Subheadline renders?
+   172→- [ ] "Start your 14-day free trial" button — where does it link? Is the target correct?
+   173→- [ ] "See how it works" button — does it scroll to #how section?
+   174→- [ ] Hero note text renders?
+   175→- [ ] Demo card renders correctly?
+   176→- [ ] Typewriter animation starts automatically?
+   177→- [ ] Typewriter animation loops correctly after completing?
+   178→- [ ] "✓ Posted to Google" check appears after typing completes?
+   179→- [ ] Demo card is responsive — does it stack below text on mobile?
+   180→
+   181→Scroll animations (if implemented):
+   182→- [ ] Do reveal animations fire on scroll?
+   183→- [ ] Do they fire on first load for hero elements?
+   184→- [ ] Do any elements stay invisible (stuck in opacity:0) due to animation not firing?
+   185→
+   186→Logo carousel (if implemented):
+   187→- [ ] Does the carousel render with business logos?
+   188→- [ ] Does it auto-scroll continuously?
+   189→- [ ] Does scrolling pause on hover?
+   190→- [ ] Are the gradient fade masks on left/right edges present?
+   191→- [ ] Is the loop seamless (no jump at the seam)?
+   192→
+   193→Activity ticker (if implemented):
+   194→- [ ] Does it appear after ~8 seconds?
+   195→- [ ] Does it auto-dismiss after ~5 seconds?
+   196→- [ ] Is the X dismiss button functional?
+   197→- [ ] Does it show the next notification after ~30 seconds?
+   198→
+   199→Problem/Stats section:
+   200→- [ ] Three stat cards render?
+   201→- [ ] Do stat counters animate on scroll?
+   202→- [ ] Are placeholder tags visible for stats that need real sourced figures?
+   203→
+   204→How it works section (#how):
+   205→- [ ] Four step cards render?
+   206→- [ ] Step numbers, titles, descriptions all present?
+   207→- [ ] Anchor link from "See how it works" button correctly scrolls here?
+   208→
+   209→Before/After section (if implemented):
+   210→- [ ] Two tabs render: "Without ReviewReply-Lite" and "With ReviewReply-Lite"?
+   211→- [ ] Default tab is "Without"?
+   212→- [ ] Clicking "With" tab switches content?
+   213→- [ ] Transition is smooth?
+   214→- [ ] All 5 steps visible in each tab?
+   215→
+   216→Live demo section (if implemented):
+   217→- [ ] Star rating picker renders and is clickable (1-5 stars)?
+   218→- [ ] Business type dropdown renders with all 5 options?
+   219→- [ ] Review textarea pre-fills with contextual example?
+   220→- [ ] "Generate Reply" button triggers typewriter animation?
+   221→- [ ] Reply output matches the correct template for the selected rating + type?
+   222→- [ ] NO network requests fire when "Generate Reply" is clicked? (Check DevTools → Network)
+   223→- [ ] "Post to Google" non-functional button shows tooltip directing to signup?
+   224→
+   225→Features section:
+   226→- [ ] Three feature rows render?
+   227→- [ ] Images/mockup placeholders render (not broken img tags)?
+   228→- [ ] Placeholder tags visible on mock screenshots?
+   229→- [ ] Feature list items render with arrow markers?
+   230→- [ ] Alternating layout correct (left/right/left) on desktop?
+   231→- [ ] Stacks to single column on mobile?
+   232→
+   233→Competitor comparison section (if implemented):
+   234→- [ ] Comparison table/grid renders?
+   235→- [ ] ReviewReply-Lite column is highlighted?
+   236→- [ ] Pricing figures are correct: $29/mo Starter, $59/mo Pro?
+   237→- [ ] Competitor pricing figures are accurate (not fabricated)?
+   238→
+   239→Pricing section:
+   240→- [ ] Both cards render: Starter ($29/mo) and Pro ($59/mo)?
+   241→- [ ] Starter feature list accurate per locked spec?
+   242→- [ ] Pro feature list accurate per locked spec?
+   243→- [ ] "Most Popular" badge on Pro card?
+   244→- [ ] Overage pricing note ($0.05/request) visible below cards?
+   245→- [ ] Monthly/annual toggle renders (if implemented)?
+   246→- [ ] Both "Start free trial" buttons present?
+   247→- [ ] Where do the trial buttons link? Record the URL.
+   248→
+   249→Review platform badges (if implemented):
+   250→- [ ] G2, Capterra, Trustpilot, ProductHunt badge placeholders render?
+   251→- [ ] Each badge links to the correct external URL?
+   252→- [ ] No broken SVG icons?
+   253→
+   254→Testimonials section:
+   255→- [ ] Testimonial cards render (even if placeholder content)?
+   256→- [ ] Carousel auto-rotates if carousel is implemented?
+   257→- [ ] Dot navigation present and functional?
+   258→- [ ] Placeholder comment exists in JSX marking these as demo content?
+   259→
+   260→FAQ section:
+   261→- [ ] All FAQ items render?
+   262→- [ ] Clicking a question expands the answer?
+   263→- [ ] Clicking an open question collapses it?
+   264→- [ ] Opening one FAQ collapses any previously open one?
+   265→- [ ] All 8 questions present (5 original + 3 added in enhancement pass)?
+   266→
+   267→Final CTA section:
+   268→- [ ] Renders correctly?
+   269→- [ ] Button links to pricing section or signup?
+   270→
+   271→Footer:
+   272→- [ ] Four columns render on desktop?
+   273→- [ ] Two columns on tablet, single on mobile?
+   274→- [ ] All nav links in footer are functional (not broken hrefs)?
+   275→- [ ] Terms of Service link goes to /terms?
+   276→- [ ] Privacy Policy link goes to /privacy?
+   277→- [ ] "/vs/birdeye" link goes to /vs/birdeye?
+   278→- [ ] "/vs/podium" link goes to /vs/podium?
+   279→- [ ] Support email placeholder visible and tagged?
+   280→- [ ] Copyright year is 2026?
+   281→
+   282→### 4.2 — Terms of Service: http://localhost:3001/terms
+   283→- [ ] Page loads without 404?
+   284→- [ ] Has content (even placeholder)?
+   285→- [ ] Has a back/home link?
+   286→- [ ] Renders correctly on mobile?
+   287→
+   288→### 4.3 — Privacy Policy: http://localhost:3001/privacy
+   289→- [ ] Page loads without 404?
+   290→- [ ] Has content (even placeholder)?
+   291→- [ ] Has a back/home link?
+   292→- [ ] Renders correctly on mobile?
+   293→
+   294→### 4.4 — Birdeye comparison: http://localhost:3001/vs/birdeye
+   295→- [ ] Page loads without 404?
+   296→- [ ] Accurate Birdeye pricing (~$299/mo)?
+   297→- [ ] Accurate contract information (annual required)?
+   298→- [ ] Comparison table present with correct data?
+   299→- [ ] ReviewReply-Lite pricing correct ($29/mo)?
+   300→- [ ] "$270/mo cheaper" callout present?
+   301→- [ ] CTA button to signup present?
+   302→- [ ] No fabricated competitor claims?
+   303→
+   304→### 4.5 — Podium comparison: http://localhost:3001/vs/podium
+   305→- [ ] Page loads without 404?
+   306→- [ ] Accurate Podium pricing (~$289/mo)?
+   307→- [ ] Comparison table present?
+   308→- [ ] "$260/mo cheaper" callout present?
+   309→- [ ] CTA button present?
+   310→- [ ] No fabricated competitor claims?
+   311→
+   312→---
+   313→
+   314→## LAYER 5 — Authentication Flows
+   315→
+   316→### 5.1 — Login page: http://localhost:3001/login
+   317→- [ ] Page loads without 404?
+   318→- [ ] Page matches the pine-green design system (not a generic grey form)?
+   319→- [ ] Logo and value prop line visible at top?
+   320→- [ ] Email/password fields render?
+   321→- [ ] "Continue with Google" button renders with Google logo?
+   322→- [ ] "Continue with phone number" option renders?
+   323→- [ ] In mock mode: any email/password combination logs in successfully?
+   324→- [ ] In mock mode: Google button logs in immediately as demo user?
+   325→- [ ] In mock mode: phone number flow shows OTP step?
+   326→- [ ] In mock mode: any 6-digit OTP on phone flow logs in successfully?
+   327→- [ ] After successful login, where does the user land? (Should be /dashboard)
+   328→- [ ] Is there a link to signup from the login page?
+   329→- [ ] "Forgot password" link present? (Even if non-functional in mock mode)
+   330→- [ ] Form submits on Enter key?
+   331→- [ ] Loading state shown while login processes?
+   332→- [ ] Error state shown for failed login attempt (in mock mode, simulate with intentional failure if possible)?
+   333→
+   334→### 5.2 — Signup page: http://localhost:3001/signup
+   335→- [ ] Page loads without 404?
+   336→- [ ] Email/password signup fields render?
+   337→- [ ] Google OAuth signup button renders?
+   338→- [ ] Phone signup option renders?
+   339→- [ ] In mock mode: signup creates a session and redirects to /onboarding?
+   340→- [ ] Is there a link to login from the signup page?
+   341→- [ ] Terms of Service checkbox or acknowledgement text present? (Required before collecting real user data)
+   342→- [ ] Password strength indicator or minimum length hint?
+   343→
+   344→### 5.3 — Session persistence
+   345→- [ ] After login, refreshing the page keeps the user logged in?
+   346→- [ ] After login, navigating directly to /dashboard works without redirect to /login?
+   347→- [ ] Navigating to /login while already logged in — where does it go? (Should redirect to /dashboard)
+   348→
+   349→### 5.4 — Logout
+   350→- [ ] Is there a logout option anywhere in the app? (Settings or nav menu)
+   351→- [ ] Does logout clear the session?
+   352→- [ ] After logout, does navigating to /dashboard redirect to /login?
+   353→
+   354→---
+   355→
+   356→## LAYER 6 — Onboarding Flow: http://localhost:3001/onboarding
+   357→
+   358→- [ ] Page loads without 404?
+   359→- [ ] Step 1 visible: business name input, category dropdown, timezone field?
+   360→- [ ] Category dropdown has all 6 options: restaurant, salon, dental, retail, contractor, other?
+   361→- [ ] Timezone auto-detected from browser?
+   362→- [ ] Step 2 visible: brand voice textarea?
+   363→- [ ] Brand voice placeholder text matches spec: "Tell us how you talk to customers..."?
+   364→- [ ] Step 3 (or separate step): "Connect Google Business Profile" button?
+   365→- [ ] In mock mode: clicking Connect Google shows a mock location picker (not a real OAuth redirect)?
+   366→- [ ] Mock location picker shows plausible location options to select?
+   367→- [ ] Step for Facebook Page connection present?
+   368→- [ ] Facebook connection marked as optional?
+   369→- [ ] Progress indicator visible (step 1 of N)?
+   370→- [ ] Can the user go back to a previous step?
+   371→- [ ] Completing all steps redirects to /dashboard?
+   372→- [ ] If user skips onboarding and goes directly to /dashboard, is there a guided checklist visible?
+   373→- [ ] Onboarding is not shown again after completion (on next login)?
+   374→- [ ] What happens if the user closes the browser mid-onboarding and comes back?
+   375→
+   376→---
+   377→
+   378→## LAYER 7 — Dashboard: http://localhost:3001/dashboard
+   379→
+   380→Navigation shell:
+   381→- [ ] Authenticated layout renders (sidebar or top nav)?
+   382→- [ ] All nav items present: Dashboard, Reviews, Requests, Settings, Billing?
+   383→- [ ] Active nav item is highlighted?
+   384→- [ ] User email or name visible in the nav?
+   385→- [ ] Logout button accessible from nav?
+   386→- [ ] Nav collapses or adapts correctly on mobile?
+   387→
+   388→Dashboard content:
+   389→- [ ] Page loads with seeded mock data (not empty state)?
+   390→- [ ] Business name displayed correctly?
+   391→- [ ] Key stats visible: total reviews, average rating, requests sent, replies posted?
+   392→- [ ] Review velocity sparkline chart renders (if implemented)?
+   393→- [ ] Negative review alert banner renders if there are unanswered 1-2 star reviews?
+   394→- [ ] Alert banner "Reply now →" link navigates to the reviews page filtered to negative?
+   395→- [ ] Recent activity feed or recent reviews list visible?
+   396→- [ ] Each item in recent list is clickable and goes to the correct detail?
+   397→- [ ] Empty state renders correctly if all reviews are replied (no broken layout)?
+   398→
+   399→---
+   400→
+   401→## LAYER 8 — Reviews Page: http://localhost:3001/reviews
+   402→
+   403→- [ ] Page loads without 404?
+   404→- [ ] Review list renders with seeded mock reviews?
+   405→- [ ] Each review card shows: source icon (Google/Facebook), star rating, reviewer name, review text, date, status badge?
+   406→- [ ] Reviews sorted newest first by default?
+   407→- [ ] Filter by source (Google/Facebook) works?
+   408→- [ ] Filter by status (new/replied/ignored) works?
+   409→- [ ] Filter by star rating works?
+   410→- [ ] For each review with status 'draft_generated':
+   411→  - [ ] AI draft text visible in an editable textarea?
+   412→  - [ ] Draft text follows the correct tone rules (warm for 5-star, resolution-focused for 1-2 star)?
+   413→  - [ ] "Post Reply" button present?
+   414→  - [ ] "Regenerate" button present?
+   415→  - [ ] Clicking "Post Reply" marks review as replied and updates status badge?
+   416→  - [ ] Clicking "Regenerate" replaces draft text with a new variation?
+   417→  - [ ] Edited text in textarea is preserved if user types in it before posting?
+   418→  - [ ] Posted reply shows the actual posted text, not the original draft?
+   419→- [ ] For reviews with status 'replied': shows the posted reply text?
+   420→- [ ] For reviews with status 'new': shows a "Generate draft" button?
+   421→- [ ] For reviews with status 'ignored': shows an "Unignore" or "Reply" option?
+   422→- [ ] "Ignore" action available on reviews (mark as acknowledged without replying)?
+   423→- [ ] Pagination or infinite scroll if more than N reviews?
+   424→- [ ] Empty state if no reviews exist (correct message, not broken layout)?
+   425→- [ ] Loading state while reviews fetch?
+   426→
+   427→---
+   428→
+   429→## LAYER 9 — Requests Page: http://localhost:3001/requests
+   430→
+   431→- [ ] Page loads without 404? (This was a 🔴 BLOCKER in the previous session — verify fixed)
+   432→- [ ] Quick-add form visible at the top of the page?
+   433→- [ ] Quick-add form has: name field (required), phone field (required), email field (optional)?
+   434→- [ ] Quick-add form is mobile-friendly with large touch targets?
+   435→- [ ] Submitting quick-add with valid name + phone immediately queues a send?
+   436→- [ ] After quick-add submit: new customer appears in the request list with status "queued" or "sent"?
+   437→- [ ] Submitting quick-add with empty name shows validation error?
+   438→- [ ] Submitting quick-add with empty phone shows validation error?
+   439→- [ ] Submitting quick-add with invalid phone format shows validation error?
+   440→- [ ] Paste-a-list section present below quick-add?
+   441→- [ ] Paste-a-list textarea accepts multi-line input?
+   442→- [ ] "Parse" button triggers parsing of pasted text?
+   443→- [ ] Parsed preview shows a table of extracted contacts?
+   444→- [ ] Loosely formatted input parses correctly (test with: "Jane Smith, 555-1234" and "Jane Smith - 555-1234" and "Jane 5551234")?
+   445→- [ ] Unparseable lines shown separately with an error indicator?
+   446→- [ ] "Send to All" button on parsed preview queues all valid contacts?
+   447→- [ ] CSV upload section present (collapsed or secondary)?
+   448→- [ ] CSV upload accepts a .csv file?
+   449→- [ ] CSV upload shows a preview before sending?
+   450→- [ ] Running request list visible showing all past requests?
+   451→- [ ] Each request shows: customer name, channel (SMS/email), status badge, sent time?
+   452→- [ ] Status badges: queued, sent, failed, clicked — all styled distinctly?
+   453→- [ ] Click tracking: is there a column or indicator for "clicked" status?
+   454→- [ ] Message template editor accessible from this page or from Settings?
+   455→- [ ] What happens when the monthly request limit (100 Starter / 300 Pro) is reached? Is there an upgrade prompt?
+   456→- [ ] Empty state if no requests sent yet (not a broken layout)?
+   457→
+   458→---
+   459→
+   460→## LAYER 10 — Settings Page: http://localhost:3001/settings
+   461→
+   462→- [ ] Page loads without 404?
+   463→- [ ] Business name editable?
+   464→- [ ] Business category editable?
+   465→- [ ] Timezone editable?
+   466→- [ ] Brand voice notes editable and saveable?
+   467→- [ ] "Save" button present — does it actually persist changes?
+   468→- [ ] After saving and refreshing, are changes retained?
+   469→- [ ] Auto-post toggle present?
+   470→- [ ] Auto-post toggle default is OFF?
+   471→- [ ] Auto-post toggle state persists after page refresh?
+   472→- [ ] When auto-post is ON: is it clear that only 4-5 star reviews auto-post?
+   473→- [ ] Notification preferences: email on new review toggle?
+   474→- [ ] Notification preferences: daily digest toggle?
+   475→- [ ] Google Business Profile connection status shown?
+   476→- [ ] Facebook Page connection status shown?
+   477→- [ ] Disconnect/reconnect options for each platform?
+   478→- [ ] Message template editor present (for review request messages)?
+   479→- [ ] Template supports merge fields: {customer_name}, {business_name}, {review_link}?
+   480→- [ ] Template changes saveable?
+   481→- [ ] Danger zone / account deletion option? (Even if just a placeholder with a "contact support" instruction)
+   482→
+   483→---
+   484→
+   485→## LAYER 11 — Billing Page: http://localhost:3001/billing
+   486→
+   487→- [ ] Page loads without 404? (This was a 🔴 BLOCKER — verify fixed)
+   488→- [ ] Current plan name displayed (Starter or Pro)?
+   489→- [ ] Current plan price displayed ($29 or $59)?
+   490→- [ ] Next billing date displayed?
+   491→- [ ] Trial status displayed if in trial period?
+   492→- [ ] Review request usage: X of 100 used (Starter) or X of 300 used (Pro) this month?
+   493→- [ ] "Upgrade to Pro" button visible on Starter plan?
+   494→- [ ] Clicking upgrade — what happens in mock mode? (Should simulate upgrade, not crash)
+   495→- [ ] "Update payment method" button present?
+   496→- [ ] "View invoices" section or button present?
+   497→- [ ] Self-serve cancel button present?
+   498→- [ ] Cancel does NOT require a support ticket — it should be completable in the UI?
+   499→- [ ] Clicking cancel — what happens in mock mode? Shows confirmation dialog?
+   500→- [ ] After simulated cancellation, does subscription status update to "canceled"?
+   501→- [ ] Overage pricing ($0.05/request) mentioned on this page?
+   502→
+   503→---
+   504→
+   505→## LAYER 12 — API Endpoint Audit
+   506→
+   507→For each API endpoint, make a request (use curl or fetch from browser DevTools) and verify:
+   508→
+   509→```bash
+   510→BASE="http://localhost:3001"
+   511→
+   512→# Auth
+   513→curl -s -o /dev/null -w "%{http_code}" $BASE/api/auth
+   514→
+   515→# Businesses
+   516→curl -s -o /dev/null -w "%{http_code}" $BASE/api/businesses
+   517→
+   518→# Reviews (need a business ID — use the seeded mock business ID)
+   519→# First get the business ID from the dashboard or database
+   520→BIDS=$(curl -s $BASE/api/businesses | grep -o '"id":"[^"]*"' | head -1)
+   521→echo "Business IDs found: $BIDS"
+   522→
+   523→# Review requests
+   524→curl -s -o /dev/null -w "%{http_code}" -X POST $BASE/api/businesses/mock-biz-id/review-requests/quick-add \
+   525→  -H "Content-Type: application/json" \
+   526→  -d '{"name":"Test Customer","phone":"555-0100"}'
+   527→
+   528→# Billing
+   529→curl -s -o /dev/null -w "%{http_code}" $BASE/api/billing/checkout
+   530→curl -s -o /dev/null -w "%{http_code}" $BASE/api/billing/manage
+   531→
+   532→# Inngest
+   533→curl -s -o /dev/null -w "%{http_code}" $BASE/api/inngest
+   534→
+   535→# Click tracking redirect
+   536→curl -s -o /dev/null -w "%{http_code}" $BASE/r/fake-token-123
+   537→```
+   538→
+   539→For each endpoint, record:
+   540→- HTTP status code returned
+   541→- Whether it returns the expected response shape
+   542→- Whether unauthenticated requests are correctly rejected (401/403) for protected endpoints
+   543→- Whether the endpoint crashes (500) on any basic input
+   544→
+   545→---
+   546→
+   547→## LAYER 13 — Data Flow & State Management
+   548→
+   549→Trace these complete data flows end-to-end and verify each step:
+   550→
+   551→### Flow A — New review appears and gets a reply posted
+   552→1. Trigger the mock poll-reviews Inngest job via `GET /api/dev/trigger` (or however it's triggered manually)
+   553→2. Verify new mock reviews appear in the reviews table (check the reviews page)
+   554→3. Verify AI draft is generated for new reviews (check draft_generated status)
+   555→4. Verify owner notification would fire (check console log for email mock)
+   556→5. Post a reply via the UI
+   557→6. Verify review status changes to 'replied'
+   558→7. Verify the posted reply text appears on the review card
+   559→8. Verify the reply appears in review_replies table (check via API or LocalStore file)
+   560→
+   561→### Flow B — Quick-add customer → SMS send
+   562→1. Submit quick-add form with test name + phone
+   563→2. Verify review_requests row created with status 'queued'
+   564→3. Verify send job fires (check console log for Twilio mock message)
+   565→4. Verify status updates to 'sent'
+   566→5. Navigate to /r/[token] (use the token from the request) 
+   567→6. Verify status updates to 'clicked'
+   568→7. Verify redirect goes to the Google review URL (or a placeholder)
+   569→
+   570→### Flow C — Signup → Onboarding → Dashboard with data
+   571→1. Clear session (logout)
+   572→2. Signup as a new mock user
+   573→3. Complete onboarding (connect mock business, set brand voice)
+   574→4. Verify dashboard loads with the correct business data
+   575→5. Verify the Inngest poll job can be triggered for the new business
+   576→6. Verify reviews appear after polling
+   577→
+   578→### Flow D — Billing lifecycle
+   579→1. Start on free trial (check billing page shows trial status)
+   580→2. Simulate trial end / upgrade to Pro (use billing page UI)
+   581→3. Verify plan shows as Pro on billing page
+   582→4. Verify Pro features are now accessible (Facebook reviews section, SMS requests)
+   583→5. Simulate cancellation
+   584→6. Verify subscription status shows canceled
+   585→7. Verify appropriate access restriction (or grace period message)
+   586→
+   587→---
+   588→
+   589→## LAYER 14 — Mock-Mode Integrity Check
+   590→
+   591→Read `MOCK-TO-REAL.md` fully. Then verify:
+   592→
+   593→- [ ] Every file listed in MOCK-TO-REAL.md actually exists at the path listed?
+   594→- [ ] Every env variable listed in MOCK-TO-REAL.md is present in `.env.example`?
+   595→- [ ] Setting `USE_MOCKS=false` and leaving other env vars blank — does the app fail gracefully (clear error message) rather than crash silently?
+   596→- [ ] Is there any place in the code where a real API call is made even when `USE_MOCKS=true`? (Grep for any fetch() or axios calls outside of lib/integrations/ and lib/ai/)
+   597→- [ ] Does the seed script work cleanly on a fresh database? (`pnpm tsx scripts/seed.ts` on empty DB)
+   598→- [ ] Are all 3 businesses seeded?
+   599→- [ ] Are 48 reviews seeded (16 per business)?
+   600→- [ ] Do seeded reviews span all ratings 1-5?
+   601→- [ ] Do seeded reviews span both Google and Facebook sources?
+   602→
+   603→```bash
+   604→# Check for any direct API calls outside the integration layer
+   605→grep -r "fetch(" app/ lib/ --include="*.ts" --include="*.tsx" | grep -v "lib/integrations" | grep -v "lib/ai" | grep -v "node_modules"
+   606→```
+   607→
+   608→---
+   609→
+   610→## LAYER 15 — Mobile & Responsive Layout
+   611→
+   612→Check these viewports in browser DevTools (record pass/fail for each):
+   613→
+   614→Viewports to test: 375px (iPhone SE), 390px (iPhone 14), 768px (iPad), 1024px (iPad landscape), 1440px (desktop)
+   615→
+   616→For each viewport, check:
+   617→- [ ] No horizontal scroll on any page
+   618→- [ ] Navigation adapts correctly (hamburger or hidden links on mobile)
+   619→- [ ] Hero section stacks correctly
+   620→- [ ] All grids collapse to appropriate column counts
+   621→- [ ] All buttons are tap-friendly (minimum 44px height)
+   622→- [ ] Text is readable (no overflow or clipping)
+   623→- [ ] Demo card in hero is visible and not cut off
+   624→- [ ] Pricing cards stack on mobile
+   625→- [ ] FAQ accordion works on touch
+   626→- [ ] Live demo section usable on mobile
+   627→- [ ] Footer readable on mobile
+   628→- [ ] Activity ticker doesn't cover critical content on mobile
+   629→
+   630→```bash
+   631→# Check for any fixed pixel widths that might cause mobile issues
+   632→grep -r "width: [0-9]*px" app/ components/ --include="*.tsx" --include="*.css" | grep -v "min-width\|max-width\|border\|height\|line-height"
+   633→```
+   634→
+   635→---
+   636→
+   637→## LAYER 16 — Performance & Load Behaviour
+   638→
+   639→```bash
+   640→# Check bundle sizes from build output
+   641→pnpm build 2>&1 | grep -E "Route|Size|First Load"
+   642→```
+   643→
+   644→Check and record:
+   645→- [ ] Is any route's First Load JS over 300KB? (Flag as 🟡 MAJOR — affects mobile load time)
+   646→- [ ] Is any route's First Load JS over 500KB? (Flag as 🔴 BLOCKER — will significantly hurt conversion)
+   647→- [ ] Are images using Next.js `<Image>` component for optimisation, or raw `<img>` tags?
+   648→- [ ] Are any external fonts loading from Google Fonts with proper `display=swap`?
+   649→- [ ] Does the landing page have a visible loading flash (FOUC) before styles apply?
+   650→- [ ] Does the demo card typewriter animation start without a visible delay?
+   651→
+   652→---
+   653→
+   654→## LAYER 17 — Security Surface Check
+   655→
+   656→This is a mock-mode build so full security audit is not needed, but check these basics:
+   657→
+   658→```bash
+   659→# Check for any secrets accidentally in code
+   660→grep -r "sk_live\|sk_test\|ANTHROPIC\|TWILIO\|RESEND" app/ lib/ --include="*.ts" --include="*.tsx" | grep -v ".env"
+   661→
+   662→# Check .gitignore covers sensitive files
+   663→cat .gitignore | grep -E "\.env|secrets|\.key"
+   664→```
+   665→
+   666→- [ ] No real API keys hardcoded anywhere in source files?
+   667→- [ ] `.env.local` is in `.gitignore`?
+   668→- [ ] API routes that modify data (POST/PUT/DELETE) check for authentication before processing?
+   669→- [ ] The `/api/dev/trigger` endpoint (manual Inngest trigger) — is it protected or open? An open dev trigger endpoint on a production server would be a 🔴 BLOCKER.
+   670→- [ ] Customer contact data (phone, email) — is it excluded from any console.log statements? (Check lib/inngest/send-review-request.ts specifically)
+   671→- [ ] Review reply posting — does it verify the business_id belongs to the authenticated user before posting? (Prevent one user from posting to another user's Google listing)
+   672→
+   673→---
+   674→
+   675→## LAYER 18 — Commercial Launch Readiness Verdict
+   676→
+   677→After completing all layers above, compile your findings and answer these questions definitively:
+   678→
+   679→### Q1: Is this app ready for commercial launch today?
+   680→Answer YES or NO. If NO, list the specific 🔴 BLOCKER issues that must be resolved first.
+   681→
+   682→### Q2: What are the top 5 most critical issues found, in priority order?
+   683→For each: issue description, severity, which layer it was found in, proposed fix.
+   684→
+   685→### Q3: What is missing that was specified in Product-Roadmap.md but not built?
+   686→List every feature or acceptance criterion from Product-Roadmap.md that is absent or broken.
+   687→
+   688→### Q4: What was built that was NOT specified (scope creep or agent additions)?
+   689→List anything in the codebase that wasn't in the spec — this isn't automatically bad, but it should be documented.
+   690→
+   691→### Q5: What are the top 3 UX issues most likely to cause a new user to abandon during onboarding?
+   692→Be specific — "user gets confused at step X because Y" not "onboarding could be improved."
+   693→
+   694→### Q6: What is the estimated effort to fix all BLOCKER and MAJOR issues?
+   695→Rough estimate in development sessions (each session = one Cline autonomous run of ~2-4 hours equivalent).
+   696→
+   697→### Q7: What are the 3 highest-impact improvements that could be made post-launch with minimum effort?
+   698→Things that would meaningfully improve conversion or retention but aren't launch-blocking.
+   699→
+   700→### Q8: Is the MOCK-TO-REAL.md file complete and accurate enough to hand to a developer who hasn't seen this codebase before?
+   701→YES / NO / PARTIALLY — explain what's missing if not YES.
+   702→
+   703→### Q9: Does the app's visual design match the approved landing-page.html reference?
+   704→Compare key elements: color palette, typography, component styles. Note any significant drift.
+   705→
+   706→### Q10: Overall launch readiness score
+   707→Score from 1-10 where:
+   708→- 1-3 = significant rebuild required before any real user should see this
+   709→- 4-6 = core flows work but multiple important gaps remain
+   710→- 7-8 = ready for beta with known issues to fix during beta
+   711→- 9-10 = ready for commercial launch
+   712→
+   713→---
+   714→
+   715→## FINAL DELIVERABLE — Write AUDIT-REPORT.md
+   716→
+   717→Create `AUDIT-REPORT.md` in the project root with this exact structure:
+   718→
+   719→```markdown
+   720→# ReviewReply-Lite — Full Application Audit Report
+   721→**Date:** [today's date]
+   722→**Auditor:** GLM 5.2 (automated audit session)
+   723→**App version:** v0.1.0-mock
+   724→**Audit scope:** Full multilayer E2E, 18 layers
+   725→
+   726→## Executive Summary
+   727→[2-3 sentence summary of overall state]
+   728→
+   729→## Commercial Launch Readiness: [YES / NO / CONDITIONAL]
+   730→[One paragraph verdict]
+   731→
+   732→## Overall Score: [X/10]
+   733→
+   734→## Blocker Issues (must fix before launch)
+   735→[List all 🔴 findings]
+   736→
+   737→## Major Issues (fix before commercial launch)
+   738→[List all 🟡 findings]
+   739→
+   740→## Minor Issues (fix within first week post-launch)
+   741→[List all 🟠 findings]
+   742→
+   743→## Polish Items (fix when time permits)
+   744→[List all 🔵 findings]
+   745→
+   746→## Layer-by-Layer Findings
+   747→[Full findings for each of the 18 layers]
+   748→
+   749→## Q&A Verdict (answers to all 10 commercial launch questions)
+   750→[Full answers to Q1-Q10]
+   751→
+   752→## Recommended Fix Priority Order
+   753→[Numbered list: fix this first, then this, then this...]
+   754→
+   755→## Estimated Sessions to Launch-Ready
+   756→[X autonomous Cline fix sessions estimated]
+   757→```
+   758→
+   759→Do not write any application code during this session.
+   760→Do not make any fixes during this session.
+   761→Write only the audit report.
+   762→Commit the report:
+   763→
+   764→```bash
+   765→git add AUDIT-REPORT.md
+   766→git commit -m "[Audit] Full multilayer E2E audit — commercial launch readiness assessment"
+   767→git push origin main
+   768→```
