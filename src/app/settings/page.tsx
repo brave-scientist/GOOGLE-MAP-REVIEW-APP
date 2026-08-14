@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2 } from 'lucide-react'
+import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { InviteMemberModal } from '@/components/app/admin-modals'
+import { ReviewUsTab } from '@/components/app/review-us-tab'
 
 interface Integration {
   provider: string
@@ -137,6 +138,26 @@ export default function SettingsPage() {
     return () => { cancelled = true }
   }, [])
 
+  // Fetch the first business ID for the Review Us tab (and OAuth state param)
+  const [firstBusinessId, setFirstBusinessId] = useState<string>('')
+  useEffect(() => {
+    let cancelled = false
+    async function fetchBusinessId() {
+      try {
+        const res = await fetch('/api/dashboard')
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        const bizId = data.businesses?.[0]?.id
+        if (bizId) setFirstBusinessId(bizId)
+      } catch {
+        // ignore — Review Us tab will show empty state
+      }
+    }
+    fetchBusinessId()
+    return () => { cancelled = true }
+  }, [])
+
   const handleToggleIntegration = async (int: Integration) => {
     // Google OAuth — redirect to the real OAuth flow
     if (int.provider === 'google' && int.status !== 'connected') {
@@ -228,6 +249,10 @@ export default function SettingsPage() {
               <TabsTrigger value="integrations" className="text-xs">
                 <Plug className="w-3.5 h-3.5 mr-1.5" />
                 Integrations
+              </TabsTrigger>
+              <TabsTrigger value="review-us" className="text-xs">
+                <Star className="w-3.5 h-3.5 mr-1.5" />
+                Review Us Page
               </TabsTrigger>
               <TabsTrigger value="billing" className="text-xs">
                 <CreditCard className="w-3.5 h-3.5 mr-1.5" />
@@ -375,6 +400,10 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value="review-us">
+              <ReviewUsTab businessId={firstBusinessId} />
             </TabsContent>
 
             <TabsContent value="billing">

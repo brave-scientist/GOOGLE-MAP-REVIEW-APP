@@ -58,6 +58,7 @@ model Business {
   timezone     String   @default("America/New_York")
   googleLocationId String?
   facebookPageId  String?
+  slug         String?  @unique  // for public /review-us/[slug] pages
   avgRating    Float    @default(0)
   reviewCount  Int      @default(0)
   createdAt    DateTime @default(now())
@@ -70,6 +71,7 @@ model Business {
   replyTemplates ReplyTemplate[]
   brandVoiceProfile BrandVoiceProfile?
   oauthTokens       OAuthToken[]
+  reviewPlatformLinks ReviewPlatformLink[]
 }
 
 model Review {
@@ -256,4 +258,27 @@ model OAuthToken {
 
   @@unique([businessId, provider])
   @@index([businessId])
+}
+
+// ─────────────────────────────────────────────────────
+// Review Us Page — link-generation feature (no API sync)
+// ─────────────────────────────────────────────────────
+// Each row stores a business's specific review-submission URL on a platform.
+// This is NOT a sync integration — it's just a URL the customer gets sent to.
+// The catalog of available platforms lives in src/lib/review-platforms.ts.
+model ReviewPlatformLink {
+  id            String   @id @default(cuid())
+  businessId    String
+  platformId    String?  // matches the `id` field in the catalog; null if custom
+  customName    String?  // name for custom platforms (when platformId is null)
+  customIconUrl String?  // optional icon for custom platforms
+  url           String   // the business's specific review-submission URL on this platform
+  enabled       Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, enabled])
 }

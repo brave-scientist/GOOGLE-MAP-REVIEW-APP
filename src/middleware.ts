@@ -29,7 +29,8 @@ const PUBLIC_API_ROUTES = [
   '/api/contact',
   '/api/unsubscribe',
   '/api/webhooks/twilio',
-  '/api/health', // Public — for UptimeRobot / load balancer health checks
+  '/api/health',          // Public — for UptimeRobot / load balancer health checks
+  '/api/review-us',       // Public — Review Us page fetches links by slug
 ]
 
 function isPublicRoute(pathname: string): boolean {
@@ -37,6 +38,7 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/blog/')) return true
   if (pathname.startsWith('/help/')) return true
   if (pathname.startsWith('/r/')) return true
+  if (pathname.startsWith('/review-us/')) return true  // public Review Us page
   if (pathname.startsWith('/unsubscribe')) return true
   if (pathname === '/widget.js') return true
   if (pathname.startsWith('/_next')) return true
