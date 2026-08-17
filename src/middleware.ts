@@ -41,6 +41,7 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/review-us/')) return true  // public Review Us page
   if (pathname.startsWith('/unsubscribe')) return true
   if (pathname === '/widget.js') return true
+  if (pathname.startsWith('/google') && pathname.endsWith('.html')) return true
   if (pathname.startsWith('/_next')) return true
   if (pathname.startsWith('/favicon')) return true
   return false
@@ -147,6 +148,6 @@ function getRateLimitConfigWithIP(pathname: string, ip: string): { limit: number
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|logo.svg|robots.txt|sitemap.xml).*)',
+    '/((?!_next/static|_next/image|favicon.ico|logo.svg|robots.txt|sitemap.xml|google[a-z0-9]+\\.html).*)',
   ],
 }
