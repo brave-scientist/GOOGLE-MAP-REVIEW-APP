@@ -41,16 +41,16 @@ const nextConfig: NextConfig = {
           ...(process.env.NODE_ENV === 'production'
             ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" }]
             : []),
-          // Content-Security-Policy — allows self, Google Fonts, and inline styles/styles (needed for Next.js)
+          // Content-Security-Policy — allows self, Google Fonts, GTM/GA, and inline styles/scripts
           {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com data:",
-              "img-src 'self' data: https: blob:",
-              "connect-src 'self' https://oauth2.googleapis.com",
+              "img-src 'self' data: https: blob: https://www.googletagmanager.com https://www.google-analytics.com",
+              "connect-src 'self' https://oauth2.googleapis.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com",
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
