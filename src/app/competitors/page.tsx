@@ -43,25 +43,51 @@ export default function CompetitorsPage() {
 
   const fetchCompetitors = async () => {
     try {
-      const res = await fetch('/api/competitors')
-      const data = await res.json()
-      // Add "you" entry at the top
+      const [compRes, dashRes] = await Promise.all([
+        fetch('/api/competitors'),
+        fetch('/api/dashboard').catch(() => null),
+      ])
+
+      const compData = await compRes.json()
+      const dashData = dashRes && dashRes.ok ? await dashRes.json() : null
+
+      const primaryBiz = dashData?.businesses?.[0]
       const youEntry: Competitor = {
         id: 'you',
-        name: 'Bamboo Garden (You)',
-        rating: 4.6,
-        ratingTrend: 0.3,
-        reviews: 247,
-        reviewVelocity: 12,
-        responseRate: 87,
+        name: primaryBiz?.name ? `${primaryBiz.name} (You)` : 'Your Business (You)',
+        rating: primaryBiz?.avgRating ? Math.round(primaryBiz.avgRating * 10) / 10 : 4.6,
+        ratingTrend: 0.2,
+        reviews: primaryBiz?.reviewCount ?? 150,
+        reviewVelocity: Math.max(1, Math.round((primaryBiz?.reviewCount || 150) / 20)),
+        responseRate: dashData?.metrics?.responseRate ? Math.round(dashData.metrics.responseRate) : 85,
         sentimentScore: 0.72,
         isYou: true,
       }
-      setCompetitors([youEntry, ...(data.competitors || [])])
+
+      setCompetitors([youEntry, ...(compData.competitors || [])])
     } catch (e) {
-      console.error(e)
+      console.error('Failed to fetch competitors:', e)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteCompetitor = async (comp: Competitor) => {
+    if (comp.isYou) return
+    if (!confirm(`Are you sure you want to stop tracking "${comp.name}"?`)) return
+    try {
+      const res = await fetch(`/api/competitors?id=${comp.id}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Competitor "${comp.name}" removed`)
+        setCompetitors(prev => prev.filter(c => c.id !== comp.id))
+      } else {
+        toast.error('Failed to remove competitor', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
     }
   }
 
@@ -193,12 +219,26 @@ export default function CompetitorsPage() {
                         )}>
                           {c.name.split(' ').map(w => w[0]).slice(0, 2).join('')}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium truncate flex items-center gap-1.5">
                             {c.name}
                             {c.isYou && <Badge variant="outline" className="text-[9px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">You</Badge>}
                           </div>
                         </div>
+                        {!c.isYou && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Delete competitor"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteCompetitor(c)
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </div>
                       <div className="col-span-2 text-center">
                         <div className="flex items-center justify-center gap-1">

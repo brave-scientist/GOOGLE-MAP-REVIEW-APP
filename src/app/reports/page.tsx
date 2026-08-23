@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { NewReportModal, EditReportModal } from '@/components/app/admin-modals'
 import { Card } from '@/components/ui/card'
@@ -9,14 +9,106 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   FileText, Clock, Download, Plus, Mail, Calendar, TrendingUp, Star,
-  Users, MessageSquare, Target, BarChart3, Send,
+  Users, MessageSquare, Target, BarChart3, Send, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
+interface ScheduledReportItem {
+  id: string
+  name: string
+  schedule: string
+  recipients: string[]
+  format: string
+  status: string
+  lastSentAt?: string | null
+  createdAt: string
+}
+
 export default function ReportsPage() {
+  const [reports, setReports] = useState<ScheduledReportItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [newReportOpen, setNewReportOpen] = useState(false)
-  const [editReport, setEditReport] = useState<{ name: string; schedule: string } | null>(null)
+  const [editReport, setEditReport] = useState<{ id: string; name: string; schedule: string; status: string; recipients: string[]; format: string } | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+
+  const fetchReports = async () => {
+    try {
+      const res = await fetch('/api/reports')
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.reports)) {
+        setReports(data.reports)
+      }
+    } catch (e) {
+      console.error('Failed to fetch reports:', e)
+      toast.error('Failed to load reports')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchReports()
+  }, [])
+
+  const handleToggleStatus = async (report: ScheduledReportItem) => {
+    const newStatus = report.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
+    setActionLoading(report.id)
+    try {
+      const res = await fetch('/api/reports/create', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportId: report.id,
+          status: newStatus,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Report ${newStatus === 'ACTIVE' ? 'resumed' : 'paused'}!`)
+        setReports(prev => prev.map(r => r.id === report.id ? { ...r, status: newStatus } : r))
+      } else {
+        toast.error('Failed to update status', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleDeleteReport = async (report: ScheduledReportItem) => {
+    if (!confirm(`Are you sure you want to delete report "${report.name}"?`)) return
+    setActionLoading(report.id)
+    try {
+      const res = await fetch(`/api/reports/${report.id}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Report "${report.name}" deleted`)
+        setReports(prev => prev.filter(r => r.id !== report.id))
+      } else {
+        toast.error('Failed to delete report', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const formatLastSent = (iso?: string | null) => {
+    if (!iso) return 'Never'
+    const diff = Date.now() - new Date(iso).getTime()
+    const mins = Math.floor(diff / 60000)
+    const hrs = Math.floor(diff / 3600000)
+    const days = Math.floor(diff / 86400000)
+    if (mins < 60) return `${mins}m ago`
+    if (hrs < 24) return `${hrs}h ago`
+    if (days < 7) return `${days}d ago`
+    return new Date(iso).toLocaleDateString()
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -31,7 +123,7 @@ export default function ReportsPage() {
             <TabsList className="glass-card">
               <TabsTrigger value="scheduled" className="text-xs">
                 <Calendar className="w-3.5 h-3.5 mr-1.5" />
-                Scheduled
+                Scheduled ({reports.length})
               </TabsTrigger>
               <TabsTrigger value="executive" className="text-xs">
                 <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
@@ -63,90 +155,126 @@ export default function ReportsPage() {
                   </div>
                 </Card>
 
-                <div className="space-y-3">
-                  {[
-                    {
-                      name: 'Daily Review Digest',
-                      schedule: 'Every day at 9:00 AM',
-                      recipients: ['sarah@bamboogarden.com'],
-                      format: 'Email',
-                      lastSent: '2 hours ago',
-                      status: 'active',
-                      type: 'daily',
-                    },
-                    {
-                      name: 'Weekly Performance Summary',
-                      schedule: 'Every Monday at 9:00 AM',
-                      recipients: ['sarah@bamboogarden.com', 'manager@bamboogarden.com'],
-                      format: 'PDF + Email',
-                      lastSent: '3 days ago',
-                      status: 'active',
-                      type: 'weekly',
-                    },
-                    {
-                      name: 'Monthly Executive Report',
-                      schedule: '1st of every month at 9:00 AM',
-                      recipients: ['sarah@bamboogarden.com', 'board@bamboogarden.com'],
-                      format: 'PDF',
-                      lastSent: '12 days ago',
-                      status: 'active',
-                      type: 'monthly',
-                    },
-                    {
-                      name: 'Negative Review Alert',
-                      schedule: 'Real-time (rating ≤ 2)',
-                      recipients: ['sarah@bamboogarden.com', '+1 415-555-1000'],
-                      format: 'SMS + Email',
-                      lastSent: '5 hours ago',
-                      status: 'active',
-                      type: 'alert',
-                    },
-                  ].map(r => (
-                    <Card key={r.name} className="p-5 glass-card hover:border-[var(--brass)]/30 transition-all">
-                      <div className="flex items-start justify-between gap-3 flex-wrap">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div className={cn(
-                            'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-                            r.type === 'alert' ? 'bg-red-500/10' : 'bg-[var(--brass)]/10'
-                          )}>
-                            {r.type === 'alert' ? <MessageSquare className="w-5 h-5 text-red-500" /> : <FileText className="w-5 h-5 text-[var(--brass)]" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <h3 className="font-display font-bold">{r.name}</h3>
-                              <Badge variant="outline" className="text-[9px] capitalize bg-green-500/10 text-green-600 border-green-500/30">
-                                {r.status}
-                              </Badge>
-                              {r.type === 'alert' && (
-                                <Badge variant="outline" className="text-[9px] bg-red-500/10 text-red-600 border-red-500/30">
-                                  Real-time
-                                </Badge>
+                {loading ? (
+                  <Card className="p-12 glass-card text-center">
+                    <Loader2 className="w-8 h-8 text-[var(--brass)] mx-auto mb-3 animate-spin" />
+                    <p className="text-sm text-muted-foreground">Loading scheduled reports...</p>
+                  </Card>
+                ) : reports.length === 0 ? (
+                  <Card className="p-12 glass-card text-center">
+                    <FileText className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
+                    <h3 className="font-display font-bold mb-1">No scheduled reports configured</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Create your first automated email or PDF digest to keep track of review activity.
+                    </p>
+                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => setNewReportOpen(true)}>
+                      <Plus className="w-4 h-4 mr-1" />
+                      Create first report
+                    </Button>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {reports.map(r => (
+                      <Card key={r.id} className="p-5 glass-card hover:border-[var(--brass)]/30 transition-all">
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <div className={cn(
+                              'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
+                              r.schedule === 'REALTIME_ALERT' ? 'bg-red-500/10' : 'bg-[var(--brass)]/10'
+                            )}>
+                              {r.schedule === 'REALTIME_ALERT' ? (
+                                <MessageSquare className="w-5 h-5 text-red-500" />
+                              ) : (
+                                <FileText className="w-5 h-5 text-[var(--brass)]" />
                               )}
                             </div>
-                            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                              <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {r.schedule}</span>
-                              <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {r.recipients.length} recipient{r.recipients.length > 1 ? 's' : ''}</span>
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Last sent: {r.lastSent}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <h3 className="font-display font-bold">{r.name}</h3>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    'text-[9px] capitalize',
+                                    r.status === 'ACTIVE'
+                                      ? 'bg-green-500/10 text-green-600 border-green-500/30'
+                                      : 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+                                  )}
+                                >
+                                  {r.status}
+                                </Badge>
+                                <Badge variant="outline" className="text-[9px] font-mono">
+                                  {r.schedule}
+                                </Badge>
+                                <Badge variant="outline" className="text-[9px]">
+                                  {r.format === 'EMAIL_HTML' ? 'Email' : r.format === 'PDF_ATTACHMENT' ? 'PDF' : 'Email + PDF'}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <Mail className="w-3 h-3" />
+                                  {r.recipients.length} recipient{r.recipients.length > 1 ? 's' : ''} ({r.recipients.slice(0, 2).join(', ')}{r.recipients.length > 2 ? ` +${r.recipients.length - 2}` : ''})
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  Last sent: {formatLastSent(r.lastSentAt)}
+                                </span>
+                              </div>
                             </div>
                           </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={actionLoading === r.id}
+                              onClick={() => handleToggleStatus(r)}
+                            >
+                              {r.status === 'ACTIVE' ? 'Pause' : 'Resume'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setEditReport({
+                                id: r.id,
+                                name: r.name,
+                                schedule: r.schedule,
+                                status: r.status,
+                                recipients: r.recipients,
+                                format: r.format,
+                              })}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                              disabled={actionLoading === r.id}
+                              onClick={() => handleDeleteReport(r)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.info('Sending test report...')}>
-                            <Send className="w-3 h-3 mr-1" />
-                            Test
-                          </Button>
-                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditReport({ name: r.name, schedule: 'weekly' })}>
-                            Edit
-                          </Button>
-                        </div>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </div>
             </TabsContent>
 
             <TabsContent value="executive">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="font-display font-bold">Executive Analytics</h3>
+                  <p className="text-xs text-muted-foreground">Aggregated cross-location performance insights</p>
+                </div>
+                <Badge variant="outline" className="text-[10px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
+                  Stage 3 Roadmap Preview
+                </Badge>
+              </div>
+
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
                 {[
                   { label: 'Total Reviews', value: '1,247', change: '+12%', icon: Star },
@@ -171,7 +299,7 @@ export default function ReportsPage() {
                 <div className="flex items-center justify-between mb-5">
                   <div>
                     <h3 className="font-display font-bold">Review Velocity</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">Reviews received per week · last 12 weeks</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Reviews received per week · sample trajectory</p>
                   </div>
                   <Badge variant="outline" className="text-[10px] font-mono text-green-500 border-green-500/30">
                     <TrendingUp className="w-3 h-3 mr-1" />
@@ -191,93 +319,56 @@ export default function ReportsPage() {
                   ))}
                 </div>
               </Card>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <Card className="p-5 glass-card">
-                  <h3 className="font-display font-bold mb-4">Top Performing Locations</h3>
-                  <div className="space-y-2">
-                    {[
-                      { name: 'Bamboo Garden Downtown', rating: 4.8, reviews: 342, trend: '+15%' },
-                      { name: 'Smile Studio Dental', rating: 4.7, reviews: 287, trend: '+12%' },
-                      { name: 'Bamboo Garden Uptown', rating: 4.5, reviews: 234, trend: '+8%' },
-                      { name: 'Urban Cuts Barbershop', rating: 4.4, reviews: 198, trend: '+5%' },
-                    ].map((b, i) => (
-                      <div key={b.name} className="flex items-center gap-3 p-2.5 rounded-lg bg-accent/20">
-                        <div className="text-xs font-mono text-muted-foreground w-4">{i + 1}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">{b.name}</div>
-                          <div className="text-[10px] text-muted-foreground">{b.reviews} reviews</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="flex items-center gap-1">
-                            <Star className="w-3 h-3 text-[var(--brass)] fill-[var(--brass)]" />
-                            <span className="text-xs font-bold">{b.rating}</span>
-                          </div>
-                          <div className="text-[10px] text-green-500 font-mono">{b.trend}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-
-                <Card className="p-5 glass-card">
-                  <h3 className="font-display font-bold mb-4">Recent Highlights</h3>
-                  <div className="space-y-3">
-                    {[
-                      { type: 'milestone', text: 'Bamboo Garden Downtown hit 4.8★ average', time: '2h ago', icon: Star },
-                      { type: 'response', text: '87% response rate this week (target: 80%)', time: '5h ago', icon: MessageSquare },
-                      { type: 'campaign', text: 'Post-visit campaign generated 12 new reviews', time: '1d ago', icon: Send },
-                      { type: 'sentiment', text: 'Food sentiment up 0.15 this month', time: '2d ago', icon: TrendingUp },
-                    ].map((h, i) => (
-                      <div key={i} className="flex items-start gap-3 p-2.5 rounded-lg bg-accent/20">
-                        <div className="w-7 h-7 rounded-md bg-[var(--brass)]/10 flex items-center justify-center flex-shrink-0">
-                          <h.icon className="w-3.5 h-3.5 text-[var(--brass)]" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs">{h.text}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{h.time}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              </div>
             </TabsContent>
 
             <TabsContent value="history">
               <Card className="p-5 glass-card">
-                <h3 className="font-display font-bold mb-4">Report History</h3>
-                <div className="space-y-2">
-                  {[
-                    { name: 'Daily Review Digest', date: 'Aug 6, 2026 · 9:00 AM', size: '142 KB', type: 'Email' },
-                    { name: 'Negative Review Alert', date: 'Aug 6, 2026 · 4:23 AM', size: '—', type: 'SMS' },
-                    { name: 'Daily Review Digest', date: 'Aug 5, 2026 · 9:00 AM', size: '138 KB', type: 'Email' },
-                    { name: 'Weekly Performance Summary', date: 'Aug 4, 2026 · 9:00 AM', size: '2.4 MB', type: 'PDF' },
-                    { name: 'Daily Review Digest', date: 'Aug 4, 2026 · 9:00 AM', size: '145 KB', type: 'Email' },
-                    { name: 'Monthly Executive Report', date: 'Aug 1, 2026 · 9:00 AM', size: '4.8 MB', type: 'PDF' },
-                  ].map((r, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent/30 transition-colors">
-                      <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">{r.name}</div>
-                        <div className="text-[10px] text-muted-foreground">{r.date}</div>
-                      </div>
-                      <Badge variant="outline" className="text-[9px]">{r.type}</Badge>
-                      <span className="text-[10px] text-muted-foreground font-mono w-16 text-right">{r.size}</span>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => toast.info('Downloading report...')}>
-                        <Download className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-display font-bold">Report Dispatch Activity</h3>
+                    <p className="text-xs text-muted-foreground">Recent dispatch status for configured scheduled reports</p>
+                  </div>
                 </div>
+
+                {reports.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground text-xs">
+                    No scheduled reports configured. Set up a schedule to begin tracking dispatch activity.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {reports.map(r => (
+                      <div key={r.id} className="flex items-center gap-3 p-3 rounded-lg bg-accent/20">
+                        <FileText className="w-4 h-4 text-[var(--brass)] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate flex items-center gap-2">
+                            <span>{r.name}</span>
+                            <Badge variant="outline" className="text-[9px] font-mono">{r.schedule}</Badge>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {r.lastSentAt ? `Last dispatched: ${new Date(r.lastSentAt).toLocaleString()}` : 'Never dispatched yet'} · {r.recipients.length} recipient(s)
+                          </div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={r.status === 'ACTIVE' ? 'text-green-600 bg-green-500/10' : 'text-amber-600 bg-amber-500/10'}
+                        >
+                          {r.status}
+                        </Badge>
+                      </div>
+                    ))}
+                    <div className="p-3 mt-4 rounded-lg bg-muted/20 border border-border/30 text-xs text-muted-foreground text-center">
+                      Detailed event logs and delivery timestamps are persisted in <a href="/settings" className="text-[var(--brass)] hover:underline">Settings &gt; Audit Log</a>.
+                    </div>
+                  </div>
+                )}
               </Card>
             </TabsContent>
           </Tabs>
         </div>
       </main>
       <MobileNav />
-      <NewReportModal open={newReportOpen} onOpenChange={setNewReportOpen} />
-      <EditReportModal open={!!editReport} onOpenChange={(v) => { if (!v) setEditReport(null) }} report={editReport} />
+      <NewReportModal open={newReportOpen} onOpenChange={setNewReportOpen} onSuccess={fetchReports} />
+      <EditReportModal open={!!editReport} onOpenChange={(v) => { if (!v) setEditReport(null) }} report={editReport} onSuccess={fetchReports} />
     </div>
   )
 }

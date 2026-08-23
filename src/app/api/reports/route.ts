@@ -155,7 +155,14 @@ export async function POST(request: NextRequest) {
     const parsedFormat = parseFormat(format ?? 'EMAIL_HTML')
     if (!parsedFormat) {
       return NextResponse.json(
-        { error: 'Invalid format. Allowed values: EMAIL_HTML, PDF_ATTACHMENT, BOTH' },
+        { error: 'Invalid format. Allowed values: EMAIL_HTML', code: 'INVALID_FORMAT' },
+        { status: 400 },
+      )
+    }
+
+    if (parsedFormat === ReportFormat.PDF_ATTACHMENT || parsedFormat === ReportFormat.BOTH) {
+      return NextResponse.json(
+        { error: 'PDF formats are currently deferred to Stage 3. Please select EMAIL_HTML.', code: 'UNSUPPORTED_FORMAT' },
         { status: 400 },
       )
     }
@@ -269,6 +276,12 @@ export async function PATCH(request: NextRequest) {
       const parsedFmt = parseFormat(format)
       if (!parsedFmt) {
         return NextResponse.json({ error: 'Invalid format value' }, { status: 400 })
+      }
+      if (parsedFmt === ReportFormat.PDF_ATTACHMENT || parsedFmt === ReportFormat.BOTH) {
+        return NextResponse.json(
+          { error: 'PDF formats are currently deferred to Stage 3. Please select EMAIL_HTML.', code: 'UNSUPPORTED_FORMAT' },
+          { status: 400 },
+        )
       }
       updateData.format = parsedFmt
     }

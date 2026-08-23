@@ -1,27 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { downgradeExpiredTrials } from '@/lib/plan-enforcement'
+import { enforceCronAuth } from '@/lib/cron-auth'
 
 export const dynamic = 'force-dynamic'
 
 async function handleDowngrade(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET
-
-  // INFRA-002: Fail closed if CRON_SECRET is not configured or in production
-  if (!cronSecret) {
-    if (process.env.NODE_ENV === 'production') {
-      console.error('CRON_SECRET is not configured in production. Rejecting cron invocation.')
-      return NextResponse.json(
-        { error: 'Cron service unconfigured: CRON_SECRET required' },
-        { status: 500 }
-      )
-    }
-  }
-
-  // Verify Authorization Bearer header
-  const authHeader = request.headers.get('authorization')
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized: Invalid or missing bearer token' }, { status: 401 })
-  }
+  // Enforce fail-closed Bearer auth in all environments
+  const authError = enforceCronAuth(request)
+  if (authError) return authError
 
   try {
     const result = await downgradeExpiredTrials()

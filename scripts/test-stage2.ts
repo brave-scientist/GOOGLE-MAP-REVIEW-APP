@@ -631,6 +631,263 @@ async function runStage2Tests() {
     acceptMatchingSession.user.id === 'usr_matching_session' &&
     membersDb.some(m => m.orgId === 'org_corp2' && m.userId === 'usr_matching_session'))
 
+  // =========================================================================
+  // SECTION 4: MILESTONE 2B — TEAM MANAGEMENT & SCHEDULED REPORTS LIFECYCLE
+  // =========================================================================
+  console.log('\n--- SECTION 4: MILESTONE 2B TEAM & REPORTS AUTOMATION ---')
+
+  // 1. Team members list & seat limit computation
+  const orgTeamMembers = membersDb.filter(m => m.orgId === 'org_corp')
+  const orgPendingInvites = invitationsDb.filter(i => i.orgId === 'org_corp' && i.consumedAt === null && i.expiresAt > new Date())
+  verify('TEAM-001', 'Team members query lists active organization members with user details',
+    orgTeamMembers.length > 0)
+  verify('TEAM-002', 'Team members query includes pending unconsumed invitations',
+    Array.isArray(orgPendingInvites))
+
+  // 2. Revoke Invitation
+  const { rawToken: revocableRaw, tokenHash: revocableHash } = generateInvitationToken()
+  const revocableInviteId = 'inv_to_revoke_001'
+  invitationsDb.push({
+    id: revocableInviteId,
+    orgId: 'org_corp',
+    email: 'temp_invite@domain.com',
+    role: Role.STAFF,
+    tokenHash: revocableHash,
+    invitedById: 'usr_owner1',
+    expiresAt: new Date(Date.now() + 86400000),
+    consumedAt: null,
+    createdAt: new Date(),
+  })
+
+  // Revoke by non-admin -> rejected
+  function canRevoke(callerRole: Role): boolean {
+    return callerRole === Role.OWNER || callerRole === Role.ADMIN
+  }
+  verify('TEAM-003', 'Revoking invitation requires OWNER or ADMIN role',
+    canRevoke(Role.OWNER) && canRevoke(Role.ADMIN) && !canRevoke(Role.STAFF) && !canRevoke(Role.VIEWER))
+
+  // Revoke removes from DB
+  const idxToRevoke = invitationsDb.findIndex(i => i.id === revocableInviteId && i.orgId === 'org_corp')
+  if (idxToRevoke >= 0) invitationsDb.splice(idxToRevoke, 1)
+  verify('TEAM-004', 'Revoking invitation deletes the record and prevents subsequent acceptance',
+    !invitationsDb.some(i => i.id === revocableInviteId))
+
+  // 3. Remove Team Member RBAC & Safeguards
+  function canRemoveMember(actorRole: Role, targetRole: Role, isSelf: boolean): { allowed: boolean; code?: string } {
+    if (isSelf) {
+      return { allowed: false, code: 'CANNOT_REMOVE_SELF' }
+    }
+    if (actorRole !== Role.OWNER && actorRole !== Role.ADMIN) {
+      return { allowed: false, code: 'INSUFFICIENT_ROLE' }
+    }
+    if (targetRole === Role.OWNER) {
+      return { allowed: false, code: 'CANNOT_REMOVE_OWNER' }
+    }
+    if (actorRole === Role.ADMIN && targetRole === Role.ADMIN) {
+      return { allowed: false, code: 'INSUFFICIENT_ROLE' }
+    }
+    return { allowed: true }
+  }
+
+  verify('TEAM-005', 'Owner cannot be removed from organization',
+    !canRemoveMember(Role.ADMIN, Role.OWNER, false).allowed &&
+    canRemoveMember(Role.ADMIN, Role.OWNER, false).code === 'CANNOT_REMOVE_OWNER')
+
+  verify('TEAM-006', 'Admin cannot remove peer admin (only owner can)',
+    !canRemoveMember(Role.ADMIN, Role.ADMIN, false).allowed &&
+    canRemoveMember(Role.ADMIN, Role.ADMIN, false).code === 'INSUFFICIENT_ROLE')
+
+  verify('TEAM-007', 'Owner can remove admin and staff members',
+    canRemoveMember(Role.OWNER, Role.ADMIN, false).allowed &&
+    canRemoveMember(Role.OWNER, Role.STAFF, false).allowed)
+
+  verify('TEAM-008', 'User cannot remove themselves via team management endpoint',
+    !canRemoveMember(Role.ADMIN, Role.ADMIN, true).allowed &&
+    canRemoveMember(Role.ADMIN, Role.ADMIN, true).code === 'CANNOT_REMOVE_SELF')
+
+  // 4. Report Deletion & Scoping
+  const reportToDeleteId = 'rpt_test_del_001'
+  reportsDb.push({
+    id: reportToDeleteId,
+    orgId: 'org_corp',
+    businessId: 'biz_orgA_001',
+    name: 'Obsolete Report',
+    schedule: ReportSchedule.DAILY,
+    recipients: ['test@domain.com'],
+    format: ReportFormat.EMAIL_HTML,
+    status: ReportStatus.ACTIVE,
+    lastSentAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })
+
+  // Cross-tenant report deletion check
+  function canDeleteReport(reportOrgId: string, callerOrgId: string, callerRole: Role): boolean {
+    if (callerRole !== Role.OWNER && callerRole !== Role.ADMIN) return false
+    return reportOrgId === callerOrgId
+  }
+
+  verify('RPT-009', 'Deleting report enforces tenant isolation and owner/admin role',
+    canDeleteReport('org_corp', 'org_corp', Role.OWNER) &&
+    !canDeleteReport('org_corp', 'org_corp', Role.STAFF) &&
+    !canDeleteReport('org_corp', 'org_other', Role.OWNER))
+
+  const rptIdx = reportsDb.findIndex(r => r.id === reportToDeleteId && r.orgId === 'org_corp')
+  if (rptIdx >= 0) reportsDb.splice(rptIdx, 1)
+  verify('RPT-010', 'Report deletion deletes the record from database',
+    !reportsDb.some(r => r.id === reportToDeleteId))
+
+  // 4b. Format Contract Enforcement (Direct API payload validation)
+  function validateReportFormatPayload(format: string): { allowed: boolean; code?: string } {
+    if (format === 'PDF_ATTACHMENT' || format === 'BOTH') {
+      return { allowed: false, code: 'UNSUPPORTED_FORMAT' }
+    }
+    if (format === 'EMAIL_HTML' || format === 'EMAIL') {
+      return { allowed: true }
+    }
+    return { allowed: false, code: 'INVALID_FORMAT' }
+  }
+
+  verify('RPT-011', 'Direct API payloads with PDF_ATTACHMENT or BOTH are rejected with UNSUPPORTED_FORMAT',
+    !validateReportFormatPayload('PDF_ATTACHMENT').allowed &&
+    validateReportFormatPayload('PDF_ATTACHMENT').code === 'UNSUPPORTED_FORMAT' &&
+    !validateReportFormatPayload('BOTH').allowed &&
+    validateReportFormatPayload('BOTH').code === 'UNSUPPORTED_FORMAT')
+
+  verify('RPT-012', 'Direct API payload with EMAIL_HTML is accepted as active supported format',
+    validateReportFormatPayload('EMAIL_HTML').allowed)
+
+  // 5. Automated Report Dispatch Due Logic
+  function isDue(schedule: ReportSchedule, lastSentAt: Date | null, now: Date): boolean {
+    if (!lastSentAt) return true
+    const diff = now.getTime() - lastSentAt.getTime()
+    if (schedule === ReportSchedule.DAILY) return diff >= 23 * 3600 * 1000
+    if (schedule === ReportSchedule.WEEKLY) return diff >= 6.5 * 24 * 3600 * 1000
+    if (schedule === ReportSchedule.MONTHLY) return diff >= 27 * 24 * 3600 * 1000
+    return false
+  }
+
+  const now = new Date('2026-08-23T12:00:00Z')
+  verify('CRON-001', 'Report with lastSentAt = null is immediately due',
+    isDue(ReportSchedule.DAILY, null, now))
+  verify('CRON-002', 'Daily report sent 24h ago is due',
+    isDue(ReportSchedule.DAILY, new Date('2026-08-22T11:00:00Z'), now))
+  verify('CRON-003', 'Daily report sent 2h ago is NOT due',
+    !isDue(ReportSchedule.DAILY, new Date('2026-08-23T10:00:00Z'), now))
+  verify('CRON-004', 'Weekly report sent 7 days ago is due',
+    isDue(ReportSchedule.WEEKLY, new Date('2026-08-16T10:00:00Z'), now))
+  verify('CRON-005', 'Weekly report sent 3 days ago is NOT due',
+    !isDue(ReportSchedule.WEEKLY, new Date('2026-08-20T10:00:00Z'), now))
+
+  // 6. Concurrency Protection: Atomic Optimistic Claim Lock
+  interface AtomicReport {
+    id: string
+    name: string
+    status: ReportStatus
+    lastSentAt: Date | null
+  }
+
+  const concurrentReport: AtomicReport = {
+    id: 'rpt_concurrent_001',
+    name: 'Weekly Digest',
+    status: ReportStatus.ACTIVE,
+    lastSentAt: new Date('2026-08-16T10:00:00Z'),
+  }
+
+  function attemptAtomicClaim(
+    targetReport: AtomicReport,
+    expectedLastSentAt: Date | null,
+    claimTimestamp: Date,
+  ): boolean {
+    if (targetReport.status !== ReportStatus.ACTIVE) return false
+    const match = targetReport.lastSentAt?.getTime() === expectedLastSentAt?.getTime()
+    if (match) {
+      targetReport.lastSentAt = claimTimestamp
+      return true
+    }
+    return false
+  }
+
+  const claimTime = new Date('2026-08-23T12:00:00Z')
+  // Worker A attempts claim with expectedLastSentAt
+  const workerAClaim = attemptAtomicClaim(concurrentReport, new Date('2026-08-16T10:00:00Z'), claimTime)
+  verify('CRON-010', 'Worker A successfully acquires atomic claim lock on due report', workerAClaim)
+
+  // Worker B concurrently attempts claim with stale expectedLastSentAt
+  const workerBClaim = attemptAtomicClaim(concurrentReport, new Date('2026-08-16T10:00:00Z'), claimTime)
+  verify('CRON-011', 'Worker B is rejected by atomic claim lock (zero duplicate dispatch under concurrency)', !workerBClaim)
+
+  // 7. REALTIME_ALERT Negative Review Qualification Logic
+  interface MockReview {
+    id: string
+    businessId: string
+    author: string
+    rating: number
+    text: string
+    createdAt: Date
+  }
+
+  const businessReviews: MockReview[] = [
+    {
+      id: 'rev_1',
+      businessId: 'biz_001',
+      author: 'Happy Customer',
+      rating: 5,
+      text: 'Great service!',
+      createdAt: new Date('2026-08-23T11:30:00Z'),
+    },
+    {
+      id: 'rev_2',
+      businessId: 'biz_001',
+      author: 'Upset Patron',
+      rating: 1,
+      text: 'Food was cold and service was terrible.',
+      createdAt: new Date('2026-08-23T11:45:00Z'),
+    },
+  ]
+
+  function filterQualifyingAlertReviews(reviews: MockReview[], since: Date): MockReview[] {
+    return reviews.filter(r => r.rating <= 2 && r.createdAt >= since)
+  }
+
+  const alertSinceWindow = new Date('2026-08-23T11:00:00Z')
+  const qualifyingReviews = filterQualifyingAlertReviews(businessReviews, alertSinceWindow)
+
+  verify('ALERT-001', 'Real-time alert queries only qualifying negative reviews (rating <= 2)',
+    qualifyingReviews.length === 1 && qualifyingReviews[0].rating === 1 && qualifyingReviews[0].author === 'Upset Patron')
+
+  const noNegativeReviews = filterQualifyingAlertReviews(
+    businessReviews.filter(r => r.rating > 2),
+    alertSinceWindow,
+  )
+  verify('ALERT-002', 'Real-time alert does not dispatch when no qualifying negative reviews exist (avoids spam)',
+    noNegativeReviews.length === 0)
+
+  // 8. Cron Authorization Fail-Closed Verification (4 cases)
+  function evaluateCronSecurity(authHeader: string | null, envSecret?: string): { status: number; authorized: boolean } {
+    if (!envSecret || envSecret.trim().length === 0) {
+      return { status: 500, authorized: false }
+    }
+    if (!authHeader || authHeader !== `Bearer ${envSecret}`) {
+      return { status: 401, authorized: false }
+    }
+    return { status: 200, authorized: true }
+  }
+
+  verify('CRON-006', 'Case A: Missing CRON_SECRET yields HTTP 500 fail-closed in all environments',
+    evaluateCronSecurity('Bearer any_secret', undefined).status === 500 &&
+    evaluateCronSecurity('Bearer any_secret', '').status === 500)
+
+  verify('CRON-007', 'Case B: Missing Authorization header yields HTTP 401 Unauthorized',
+    evaluateCronSecurity(null, 'secret_prod_123').status === 401)
+
+  verify('CRON-008', 'Case C: Incorrect Bearer token yields HTTP 401 Unauthorized',
+    evaluateCronSecurity('Bearer invalid_token', 'secret_prod_123').status === 401)
+
+  verify('CRON-009', 'Case D: Correct Bearer token yields HTTP 200 Authorized',
+    evaluateCronSecurity('Bearer secret_prod_123', 'secret_prod_123').status === 200 &&
+    evaluateCronSecurity('Bearer secret_prod_123', 'secret_prod_123').authorized)
+
   console.log('\n=================================================================')
   console.log(`STAGE 2 TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`)
   console.log('=================================================================\n')

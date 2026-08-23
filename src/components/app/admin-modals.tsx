@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -187,7 +187,11 @@ export function BroadcastModal({ open, onOpenChange }: { open: boolean; onOpenCh
 // ============================================================
 // 3. Invite Member Modal
 // ============================================================
-export function InviteMemberModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function InviteMemberModal({ open, onOpenChange, onSuccess }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSuccess?: () => void
+}) {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState('STAFF')
   const [loading, setLoading] = useState(false)
@@ -206,6 +210,7 @@ export function InviteMemberModal({ open, onOpenChange }: { open: boolean; onOpe
         toast.success('Member invited!', { description: data.message })
         onOpenChange(false)
         setEmail('')
+        onSuccess?.()
       } else {
         toast.error('Failed', { description: data.error })
       }
@@ -255,11 +260,15 @@ export function InviteMemberModal({ open, onOpenChange }: { open: boolean; onOpe
 // ============================================================
 // 4. New Report Modal
 // ============================================================
-export function NewReportModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function NewReportModal({ open, onOpenChange, onSuccess }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSuccess?: () => void
+}) {
   const [name, setName] = useState('')
-  const [schedule, setSchedule] = useState('weekly')
+  const [schedule, setSchedule] = useState('WEEKLY')
   const [recipients, setRecipients] = useState('')
-  const [format, setFormat] = useState('email')
+  const [format, setFormat] = useState('EMAIL_HTML')
   const [loading, setLoading] = useState(false)
 
   const handleCreate = async () => {
@@ -282,6 +291,7 @@ export function NewReportModal({ open, onOpenChange }: { open: boolean; onOpenCh
         onOpenChange(false)
         setName('')
         setRecipients('')
+        onSuccess?.()
       } else {
         toast.error('Failed', { description: data.error })
       }
@@ -309,9 +319,10 @@ export function NewReportModal({ open, onOpenChange }: { open: boolean; onOpenCh
             <Select value={schedule} onValueChange={setSchedule}>
               <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="daily">Daily — every morning at 9 AM</SelectItem>
-                <SelectItem value="weekly">Weekly — every Monday at 9 AM</SelectItem>
-                <SelectItem value="monthly">Monthly — 1st of each month</SelectItem>
+                <SelectItem value="DAILY">Daily — every morning</SelectItem>
+                <SelectItem value="WEEKLY">Weekly — every Monday</SelectItem>
+                <SelectItem value="MONTHLY">Monthly — 1st of each month</SelectItem>
+                <SelectItem value="REALTIME_ALERT">Real-time alert (rating ≤ 2)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -324,8 +335,9 @@ export function NewReportModal({ open, onOpenChange }: { open: boolean; onOpenCh
             <Select value={format} onValueChange={setFormat}>
               <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="email">Email (summary in body)</SelectItem>
-                <SelectItem value="pdf">PDF attachment</SelectItem>
+                <SelectItem value="EMAIL_HTML">Email (HTML digest)</SelectItem>
+                <SelectItem value="PDF_ATTACHMENT" disabled>PDF attachment (Stage 3)</SelectItem>
+                <SelectItem value="BOTH" disabled>Email + PDF (Stage 3)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -345,41 +357,51 @@ export function NewReportModal({ open, onOpenChange }: { open: boolean; onOpenCh
 // ============================================================
 // 5. Edit Report Modal
 // ============================================================
-export function EditReportModal({ open, onOpenChange, report }: {
+export function EditReportModal({ open, onOpenChange, report, onSuccess }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  report: { name: string; schedule: string } | null
+  report: { id: string; name: string; schedule: string; status: string; recipients?: string[]; format?: string } | null
+  onSuccess?: () => void
 }) {
   const [name, setName] = useState('')
-  const [schedule, setSchedule] = useState('weekly')
-  const [status, setStatus] = useState('active')
+  const [schedule, setSchedule] = useState('WEEKLY')
+  const [status, setStatus] = useState('ACTIVE')
+  const [recipients, setRecipients] = useState('')
+  const [format, setFormat] = useState('EMAIL_HTML')
   const [loading, setLoading] = useState(false)
 
-  // Sync form when report changes
-  useState(() => {
+  // Sync form when report opens/changes
+  useEffect(() => {
     if (report) {
-      setName(report.name)
-      setSchedule(report.schedule)
+      setName(report.name || '')
+      setSchedule(report.schedule || 'WEEKLY')
+      setStatus(report.status || 'ACTIVE')
+      setRecipients(Array.isArray(report.recipients) ? report.recipients.join(', ') : '')
+      setFormat(report.format || 'EMAIL_HTML')
     }
-  })
+  }, [report, open])
 
   const handleUpdate = async () => {
+    if (!report?.id) return
     setLoading(true)
     try {
       const res = await fetch('/api/reports/create', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          reportId: `rpt_${Date.now()}`,
+          reportId: report.id,
           name,
           schedule,
           status,
+          format,
+          recipients: recipients ? recipients.split(',').map((r: string) => r.trim()) : undefined,
         }),
       })
       const data = await res.json()
       if (res.ok) {
         toast.success('Report updated!', { description: data.message })
         onOpenChange(false)
+        onSuccess?.()
       } else {
         toast.error('Failed', { description: data.error })
       }
@@ -407,9 +429,25 @@ export function EditReportModal({ open, onOpenChange, report }: {
             <Select value={schedule} onValueChange={setSchedule}>
               <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
+                <SelectItem value="DAILY">Daily</SelectItem>
+                <SelectItem value="WEEKLY">Weekly</SelectItem>
+                <SelectItem value="MONTHLY">Monthly</SelectItem>
+                <SelectItem value="REALTIME_ALERT">Real-time alert</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="edt-recipients">Recipients (comma-separated)</Label>
+            <Input id="edt-recipients" value={recipients} onChange={e => setRecipients(e.target.value)} className="mt-1.5 glass-card" />
+          </div>
+          <div>
+            <Label>Format</Label>
+            <Select value={format} onValueChange={setFormat}>
+              <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="EMAIL_HTML">Email (HTML digest)</SelectItem>
+                <SelectItem value="PDF_ATTACHMENT" disabled>PDF attachment (Stage 3)</SelectItem>
+                <SelectItem value="BOTH" disabled>Email + PDF (Stage 3)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -418,15 +456,16 @@ export function EditReportModal({ open, onOpenChange, report }: {
             <Select value={status} onValueChange={setStatus}>
               <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="paused">Paused</SelectItem>
+                <SelectItem value="ACTIVE">Active</SelectItem>
+                <SelectItem value="PAUSED">Paused</SelectItem>
+                <SelectItem value="ARCHIVED">Archived</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleUpdate} disabled={loading}>
+          <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleUpdate} disabled={loading || !name}>
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Edit3 className="w-4 h-4 mr-2" />}
             Save Changes
           </Button>

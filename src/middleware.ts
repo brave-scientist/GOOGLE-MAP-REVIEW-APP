@@ -7,6 +7,9 @@ const PUBLIC_ROUTES = [
   '/',
   '/login',
   '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/invite/accept',
   '/privacy',
   '/terms',
   '/about',
@@ -18,7 +21,9 @@ const PUBLIC_ROUTES = [
   '/refund',
 ]
 
-// API routes that DON'T require authentication
+// API routes that DON'T require session authentication
+// Note: Webhooks (Stripe, Twilio) validate cryptographic signatures.
+// Cron endpoints independently enforce Bearer CRON_SECRET auth.
 const PUBLIC_API_ROUTES = [
   '/api/auth/login',
   '/api/auth/signup',
@@ -26,9 +31,16 @@ const PUBLIC_API_ROUTES = [
   '/api/auth/otp',
   '/api/auth/google',
   '/api/auth/me',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+  '/api/team/invite/verify',
+  '/api/team/invite/accept',
   '/api/contact',
   '/api/unsubscribe',
   '/api/webhooks/twilio',
+  '/api/webhooks/stripe',
+  '/api/cron/downgrade-trials',
+  '/api/cron/reports',
   '/api/health',          // Public — for UptimeRobot / load balancer health checks
   '/api/review-us',       // Public — Review Us page fetches links by slug
 ]

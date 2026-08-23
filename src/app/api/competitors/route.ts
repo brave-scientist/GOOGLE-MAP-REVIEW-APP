@@ -261,10 +261,10 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url)
-    let id = searchParams.get('id')
+    let id = searchParams.get('id') || searchParams.get('competitorId')
     if (!id) {
       const body = await request.json().catch(() => ({}))
-      id = body?.id
+      id = body?.id || body?.competitorId
     }
 
     if (!id) {
