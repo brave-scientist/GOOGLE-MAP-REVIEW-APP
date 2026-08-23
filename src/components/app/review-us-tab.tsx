@@ -409,7 +409,7 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
                       {link.enabled ? 'ON' : 'OFF'}
                     </button>
                     <button
-                      onClick={() => removeLink(link.platformId, index)}
+                      onClick={() => removeLink(link.platformId ?? null, index)}
                       className="p-1 rounded hover:bg-red-500/10 text-red-500 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

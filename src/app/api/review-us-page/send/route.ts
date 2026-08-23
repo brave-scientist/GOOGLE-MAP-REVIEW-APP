@@ -9,41 +9,36 @@ import { generateBusinessSlug } from '@/lib/review-platforms'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+import { z } from 'zod'
+
+const SendReviewUsSchema = z.object({
+  businessId: z.string().min(1, 'businessId is required'),
+  channel: z.enum(['sms', 'email']),
+  messageTemplate: z.string().optional(),
+  recipients: z.array(
+    z.object({
+      name: z.string().optional().default('Customer'),
+      contact: z.union([z.string(), z.number()]).transform(c => String(c)),
+    })
+  ).min(1, 'At least one recipient is required'),
+})
+
 // POST /api/review-us-page/send — bulk-send the Review Us Page link to customers
-//
-// SEC-01: requires auth + verifies business ownership.
-// This is a SEPARATE flow from /api/campaigns/create — does NOT touch the Campaign
-// or ReviewRequest tables. Uses its own ReviewUsSend + ReviewUsSendRecipient tables.
-//
-// Reuses the same Twilio/Resend send functions and the same opt-out filter as campaigns,
-// but sends the /review-us/[slug] URL instead of a campaign-specific review link.
 export async function POST(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
   try {
-    const body = await request.json()
-    const { businessId, channel, messageTemplate, recipients } = body as {
-      businessId: string
-      channel: 'sms' | 'email'
-      messageTemplate?: string
-      recipients: Array<{ name: string; contact: string }>
+    const body = await request.json().catch(() => ({}))
+    const parseResult = SendReviewUsSchema.safeParse(body)
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: parseResult.error.issues[0]?.message || 'Invalid payload' },
+        { status: 400 }
+      )
     }
 
-    if (!businessId) {
-      return NextResponse.json({ error: 'businessId is required' }, { status: 400 })
-    }
-
-    const denied = assertBusinessOwnership(ctx, businessId)
-    if (denied) return denied
-
-    if (!channel || !['sms', 'email'].includes(channel)) {
-      return NextResponse.json({ error: 'channel must be "sms" or "email"' }, { status: 400 })
-    }
-
-    if (!recipients || recipients.length === 0) {
-      return NextResponse.json({ error: 'At least one recipient is required' }, { status: 400 })
-    }
+    const { businessId, channel, messageTemplate, recipients } = parseResult.data
 
     // Verify the business has a slug set (needed for the Review Us URL)
     const business = await db.business.findUnique({

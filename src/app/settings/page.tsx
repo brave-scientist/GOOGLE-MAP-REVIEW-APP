@@ -563,6 +563,7 @@ function BrandVoiceTab() {
     toneGuidelines: string
     signature: string
     forbiddenPhrases: string
+    updatedAt?: string | Date
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

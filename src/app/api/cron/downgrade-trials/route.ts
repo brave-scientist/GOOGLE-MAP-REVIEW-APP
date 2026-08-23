@@ -3,17 +3,24 @@ import { downgradeExpiredTrials } from '@/lib/plan-enforcement'
 
 export const dynamic = 'force-dynamic'
 
-// POST /api/cron/downgrade-trials — Downgrade orgs with expired trials to FREE
-// Can be called by a cron job (e.g. Vercel Cron, or external scheduler)
-// Protect with a secret header in production
-export async function POST(request: NextRequest) {
-  // Simple auth: check for a cron secret header
+async function handleDowngrade(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const authHeader = request.headers.get('authorization')
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  // INFRA-002: Fail closed if CRON_SECRET is not configured or in production
+  if (!cronSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('CRON_SECRET is not configured in production. Rejecting cron invocation.')
+      return NextResponse.json(
+        { error: 'Cron service unconfigured: CRON_SECRET required' },
+        { status: 500 }
+      )
     }
+  }
+
+  // Verify Authorization Bearer header
+  const authHeader = request.headers.get('authorization')
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized: Invalid or missing bearer token' }, { status: 401 })
   }
 
   try {
@@ -29,4 +36,14 @@ export async function POST(request: NextRequest) {
     console.error('Trial downgrade error:', error)
     return NextResponse.json({ error: 'Failed to downgrade trials' }, { status: 500 })
   }
+}
+
+// GET /api/cron/downgrade-trials (Vercel Cron invokes via GET)
+export async function GET(request: NextRequest) {
+  return handleDowngrade(request)
+}
+
+// POST /api/cron/downgrade-trials (External schedulers invoke via POST)
+export async function POST(request: NextRequest) {
+  return handleDowngrade(request)
 }

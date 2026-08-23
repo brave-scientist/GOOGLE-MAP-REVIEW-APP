@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Role } from '@prisma/client'
 import { createSession, SessionUser } from '@/lib/auth'
+import bcrypt from 'bcryptjs'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,9 +16,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const normalizedEmail = email.trim().toLowerCase()
+
     // Find user
     const user = await db.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
       include: {
         memberships: {
           include: {
@@ -28,9 +31,8 @@ export async function POST(request: NextRequest) {
     })
 
     if (!user) {
-      // For demo: auto-create a demo account if email matches demo pattern
-      if (email === 'owner@bamboogarden.com') {
-        // Find existing seeded data
+      // For demo: auto-create a demo account if email matches demo pattern and seeded
+      if (normalizedEmail === 'owner@bamboogarden.com') {
         const seededUser = await db.user.findFirst({
           where: { email: 'owner@bamboogarden.com' },
           include: {
@@ -50,6 +52,7 @@ export async function POST(request: NextRequest) {
             orgId: seededUser.memberships[0]?.org.id || null,
             orgName: seededUser.memberships[0]?.org.name || null,
             orgPlan: seededUser.memberships[0]?.org.plan || null,
+            sessionVersion: seededUser.sessionVersion ?? 1,
           }
           const response = NextResponse.json({ user: sessionUser, redirectTo: '/dashboard' })
           await createSession(response, sessionUser)
@@ -62,18 +65,54 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify password (demo: compare hashes)
-    const expectedHash = `demo_hash_${Buffer.from(password).toString('base64').slice(0, 32)}`
-    if (user.passwordHash && user.passwordHash !== expectedHash) {
-      // For demo accounts without password, allow any password
-      if (!user.passwordHash) {
-        // OK, proceed
-      } else {
-        return NextResponse.json(
-          { error: 'Incorrect password' },
-          { status: 401 }
-        )
+    // SEC-001: Reject password login if passwordHash is null (e.g. OTP-only or Google-only accounts)
+    if (!user.passwordHash) {
+      await db.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: 'user.login_failed',
+          targetType: 'user',
+          targetId: user.id,
+          metadata: JSON.stringify({ reason: 'null_password_hash', method: 'password' }),
+        },
+      })
+      return NextResponse.json(
+        { error: 'Password authentication not configured for this account. Please sign in with Email OTP or Google.' },
+        { status: 401 }
+      )
+    }
+
+    // Verify password with legacy migration support
+    let passwordValid = false
+    if (user.passwordHash.startsWith('demo_hash_')) {
+      const expectedLegacy = `demo_hash_${Buffer.from(password).toString('base64').slice(0, 32)}`
+      if (user.passwordHash === expectedLegacy) {
+        passwordValid = true
+        // Seamlessly upgrade legacy hash to bcrypt in background
+        const upgradedHash = await bcrypt.hash(password, 10)
+        await db.user.update({
+          where: { id: user.id },
+          data: { passwordHash: upgradedHash, updatedAt: new Date() },
+        })
       }
+    } else {
+      passwordValid = await bcrypt.compare(password, user.passwordHash)
+    }
+
+    if (!passwordValid) {
+      await db.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: 'user.login_failed',
+          targetType: 'user',
+          targetId: user.id,
+          metadata: JSON.stringify({ reason: 'invalid_password', method: 'password' }),
+        },
+      })
+      return NextResponse.json(
+        { error: 'Incorrect password' },
+        { status: 401 }
+      )
     }
 
     const membership = user.memberships[0]
@@ -85,9 +124,10 @@ export async function POST(request: NextRequest) {
       orgId: membership?.org.id || null,
       orgName: membership?.org.name || null,
       orgPlan: membership?.org.plan || null,
+      sessionVersion: user.sessionVersion ?? 1,
     }
 
-    // Log login
+    // Log successful login
     await db.auditLog.create({
       data: {
         actorId: user.id,

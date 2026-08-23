@@ -119,12 +119,12 @@ function Nav({ scrolled, onMobileMenuToggle, mobileMenuOpen }: {
           </div>
 
           <div className="hidden lg:flex items-center gap-2">
-            <Link href="/dashboard">
+            <Link href="/login">
               <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
                 Log in
               </Button>
             </Link>
-            <Link href="/dashboard">
+            <Link href="/signup">
               <Button size="sm" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer font-medium">
                 Get Started
                 <ArrowRight className="ml-1 w-3.5 h-3.5" />
@@ -156,10 +156,10 @@ function Nav({ scrolled, onMobileMenuToggle, mobileMenuOpen }: {
             </Link>
           ))}
           <div className="mt-3 pt-3 border-t border-border flex flex-col gap-2">
-            <Link href="/dashboard" onClick={onMobileMenuToggle}>
+            <Link href="/login" onClick={onMobileMenuToggle}>
               <Button variant="ghost" size="sm" className="w-full">Log in</Button>
             </Link>
-            <Link href="/dashboard" onClick={onMobileMenuToggle}>
+            <Link href="/signup" onClick={onMobileMenuToggle}>
               <Button size="sm" className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">
                 Get Started
                 <ArrowRight className="ml-1 w-3.5 h-3.5" />
@@ -200,7 +200,7 @@ function Hero() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-3 mb-8">
-            <Link href="/dashboard">
+            <Link href="/signup">
               <Button size="lg" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer font-medium px-7 h-12 text-base group">
                 Start free trial
                 <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
@@ -407,7 +407,7 @@ function CountUp({ value }: { value: string }) {
 // ─────────────────────────────────────────────────────────
 function BentoFeatures() {
   return (
-    <section id="features solutions" className="py-24 sm:py-32">
+    <section id="features" className="py-24 sm:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="max-w-2xl mb-16">
           <p className="text-xs uppercase tracking-widest text-[var(--brass)] font-mono mb-3">Features</p>
@@ -827,7 +827,7 @@ function HowItWorks() {
     },
   ]
   return (
-    <section className="py-24 sm:py-32">
+    <section id="solutions" className="py-24 sm:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="text-center max-w-2xl mx-auto mb-16">
           <p className="text-xs uppercase tracking-widest text-[var(--brass)] font-mono mb-3">How It Works</p>
@@ -1118,17 +1118,19 @@ function Pricing({ billingCycle, onCycleChange }: {
                   <p className="text-xs text-[var(--brass)] mt-1">Billed annually</p>
                 )}
               </div>
-              <Button
-                className={cn(
-                  'w-full mb-6',
-                  tier.highlight
-                    ? 'bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer'
-                    : 'glass-card hover:bg-accent'
-                )}
-                variant={tier.highlight ? 'default' : 'outline'}
-              >
-                {tier.cta}
-              </Button>
+              <Link href="/signup" className="w-full mb-6">
+                <Button
+                  className={cn(
+                    'w-full',
+                    tier.highlight
+                      ? 'bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer'
+                      : 'glass-card hover:bg-accent'
+                  )}
+                  variant={tier.highlight ? 'default' : 'outline'}
+                >
+                  {tier.cta}
+                </Button>
+              </Link>
               <ul className="space-y-2.5 flex-1">
                 {tier.features.map(f => (
                   <li key={f} className="flex items-start gap-2 text-sm">
@@ -1202,7 +1204,7 @@ function FinalCTA() {
           Join growing businesses using ReviewReply to win local search, build trust, and turn every customer into a five-star advocate.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link href="/dashboard">
+          <Link href="/signup">
             <Button size="lg" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer font-medium px-8 h-12 text-base group">
               Start free trial
               <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-0.5 transition-transform" />

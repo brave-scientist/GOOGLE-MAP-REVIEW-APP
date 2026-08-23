@@ -101,6 +101,7 @@ export default function AdminDashboardPage() {
 }
 
 function AdminContent({ data }: { data: AdminData }) {
+  const router = useRouter()
   const [extendTrialOpen, setExtendTrialOpen] = useState(false)
   const [broadcastOpen, setBroadcastOpen] = useState(false)
   const { overview, planBreakdown, trialOrgs, recentSignups, usage, signupsByDay, recentActivity } = data

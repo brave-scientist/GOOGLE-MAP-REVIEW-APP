@@ -134,7 +134,7 @@ async function main() {
   })
 
   // Create businesses
-  const businesses = []
+  const businesses: any[] = []
   for (let i = 0; i < 4; i++) {
     const biz = await prisma.business.create({
       data: {
@@ -226,7 +226,7 @@ async function main() {
             status,
             message: 'Hi! Thanks for visiting. Would you mind leaving us a quick review?',
             sentAt: randomDate(30),
-            deliveredAt: status !== RequestStatus.PENDING ? randomDate(29) : null,
+            deliveredAt: randomDate(29),
             clickedAt: status === RequestStatus.CLICKED || status === RequestStatus.CONVERTED ? randomDate(28) : null,
             convertedAt: status === RequestStatus.CONVERTED ? randomDate(27) : null,
             campaignId: campaign.id,

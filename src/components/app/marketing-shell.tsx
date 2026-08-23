@@ -14,7 +14,13 @@ export function MarketingNav() {
           <span className="font-display font-bold tracking-tight">ReviewReply</span>
         </Link>
         <div className="hidden md:flex items-center gap-1">
-          {['Features', 'Pricing', 'About', 'Blog', 'Help'].map(item => (
+          <Link href="/#features" className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors">
+            Features
+          </Link>
+          <Link href="/#pricing" className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors">
+            Pricing
+          </Link>
+          {['About', 'Blog', 'Help'].map(item => (
             <Link key={item} href={`/${item.toLowerCase()}`} className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors">
               {item}
             </Link>

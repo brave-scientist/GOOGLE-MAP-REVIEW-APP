@@ -46,6 +46,53 @@ const PLANS = [
 
 export default function BillingPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly')
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null)
+  const [portalLoading, setPortalLoading] = useState(false)
+
+  const handleCheckout = async (planName: string) => {
+    if (planName === 'Free') return
+    const planKey = planName.toUpperCase()
+    setLoadingPlan(planName)
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: planKey, billingCycle }),
+      })
+      const data = await res.json()
+      if (res.ok && data.url) {
+        toast.success(`Redirecting to ${planName} checkout...`)
+        window.location.href = data.url
+      } else {
+        toast.error('Checkout failed', { description: data.error || 'Could not initiate checkout' })
+      }
+    } catch {
+      toast.error('Network error', { description: 'Could not connect to checkout service' })
+    } finally {
+      setLoadingPlan(null)
+    }
+  }
+
+  const handleManageSubscription = async () => {
+    setPortalLoading(true)
+    try {
+      const res = await fetch('/api/billing/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await res.json()
+      if (res.ok && data.url) {
+        toast.info('Opening customer portal...')
+        window.location.href = data.url
+      } else {
+        toast.error('Portal unavailable', { description: data.error || 'Could not open billing portal' })
+      }
+    } catch {
+      toast.error('Network error', { description: 'Could not connect to portal service' })
+    } finally {
+      setPortalLoading(false)
+    }
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -95,9 +142,22 @@ export default function BillingPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="h-8" onClick={() => toast.info('Opening customer portal...')}>Manage subscription</Button>
-                    <Button size="sm" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8" onClick={() => toast.success('Redirecting to checkout...', { description: 'Enterprise plan · $299/month' })}>
-                      Upgrade to Enterprise
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      disabled={portalLoading}
+                      onClick={handleManageSubscription}
+                    >
+                      {portalLoading ? 'Opening...' : 'Manage subscription'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8"
+                      disabled={loadingPlan === 'Enterprise'}
+                      onClick={() => handleCheckout('Enterprise')}
+                    >
+                      {loadingPlan === 'Enterprise' ? 'Redirecting...' : 'Upgrade to Enterprise'}
                       <ArrowRight className="w-3.5 h-3.5 ml-1" />
                     </Button>
                   </div>
@@ -168,10 +228,10 @@ export default function BillingPage() {
                             ? 'bg-purple-600 text-white hover:bg-purple-700'
                             : 'bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]'
                         )}
-                        disabled={plan.current}
-                        onClick={() => !plan.current && toast.success(`Upgrading to ${plan.name}...`, { description: 'Redirecting to checkout' })}
+                        disabled={plan.current || loadingPlan === plan.name}
+                        onClick={() => !plan.current && handleCheckout(plan.name)}
                       >
-                        {plan.current ? 'Current plan' : `Upgrade to ${plan.name}`}
+                        {plan.current ? 'Current plan' : loadingPlan === plan.name ? 'Redirecting...' : `Upgrade to ${plan.name}`}
                       </Button>
                       <ul className="space-y-2 flex-1">
                         {plan.features.map(f => (

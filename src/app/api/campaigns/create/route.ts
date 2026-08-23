@@ -5,9 +5,25 @@ import { sendSMS, isTwilioConfigured } from '@/lib/integrations/twilio'
 import { sendEmail, isResendConfigured, generateReviewRequestEmail } from '@/lib/integrations/resend'
 import { filterOptedOut } from '@/lib/opt-out'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
+import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60 // Allow up to 60s for batch sending
+
+const CreateCampaignSchema = z.object({
+  businessId: z.string().min(1, 'businessId is required'),
+  name: z.string().min(1, 'name is required'),
+  description: z.string().optional(),
+  channelMix: z.union([z.string(), z.array(z.string())]),
+  messageTemplate: z.string().optional(),
+  recipients: z.array(
+    z.object({
+      name: z.string().optional().default('Customer'),
+      contact: z.union([z.string(), z.number()]).transform(c => String(c)),
+    })
+  ).min(1, 'At least one recipient is required'),
+  sendNow: z.boolean().optional(),
+})
 
 // POST /api/campaigns/create — Create a new campaign and optionally send it
 export async function POST(request: NextRequest) {
@@ -16,7 +32,15 @@ export async function POST(request: NextRequest) {
   if (ctx instanceof NextResponse) return ctx
 
   try {
-    const body = await request.json()
+    const body = await request.json().catch(() => ({}))
+    const parseResult = CreateCampaignSchema.safeParse(body)
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: parseResult.error.issues[0]?.message || 'Invalid payload' },
+        { status: 400 }
+      )
+    }
+
     const {
       businessId,
       name,
@@ -25,14 +49,7 @@ export async function POST(request: NextRequest) {
       messageTemplate,
       recipients,
       sendNow = false,
-    } = body
-
-    if (!businessId || !name || !channelMix || !recipients || recipients.length === 0) {
-      return NextResponse.json(
-        { error: 'Missing required fields: businessId, name, channelMix, recipients' },
-        { status: 400 }
-      )
-    }
+    } = parseResult.data
 
     // SEC-01: verify the caller's org owns this business
     const denied = assertBusinessOwnership(ctx, businessId)
@@ -59,90 +76,64 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Check if sending is configured
-    const channels = Array.isArray(channelMix) ? channelMix : [channelMix]
-    const smsConfigured = isTwilioConfigured()
-    const emailConfigured = isResendConfigured()
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${request.headers.get('host') || 'localhost:3000'}`
+    const reviewLink = `${appUrl}/review-us/${business.slug || business.id}`
+    const unsubscribeLink = `${appUrl}/opt-out`
 
-    let sentCount = 0
-    let failedCount = 0
-    let skippedCount = optedOut
-    const sendResults: Array<{ contact: string; status: string; error?: string }> = []
+    const channels = Array.isArray(channelMix) ? channelMix : channelMix.split(',').map((c: string) => c.trim())
+    const sendResults: Array<{ contact: string; status: 'sent' | 'failed' | 'opted_out'; channel: string; error?: string }> = []
 
-    if (sendNow && sendable.length > 0) {
-      // Check if any sending channel is configured
-      const needsSms = channels.includes('sms')
-      const needsEmail = channels.includes('email')
-
-      if ((needsSms && !smsConfigured) || (needsEmail && !emailConfigured)) {
-        // Don't fail — create the campaign but mark sends as "not configured"
-        for (const recipient of sendable) {
-          sendResults.push({
-            contact: recipient.contact,
-            status: 'not_configured',
-            error: 'SMS/Email sending not configured. Add API keys to .env',
-          })
-        }
-      } else {
-        // Actually send messages
-        for (const recipient of sendable) {
-          for (const channel of channels) {
-            if (channel === 'sms' && smsConfigured) {
-              // Send SMS via Twilio
-              const message = (messageTemplate || `Hi! Thanks for visiting ${business.name}. Would you mind leaving us a quick review?`)
-                .replace(/\{\{name\}\}/g, recipient.name)
-                .replace(/\{\{business\}\}/g, business.name)
-
-              // Add opt-out notice to SMS
-              const smsBody = `${message}\n\nReply STOP to unsubscribe`
-
-              const result = await sendSMS(recipient.contact, smsBody)
-
-              if (result.success) {
-                sentCount++
-                sendResults.push({ contact: recipient.contact, status: 'sent' })
-              } else {
-                failedCount++
-                sendResults.push({ contact: recipient.contact, status: 'failed', error: result.error })
-              }
-            } else if (channel === 'email' && emailConfigured) {
-              // Send email via Resend
-              const reviewLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/r/${campaign.id}`
-              const unsubscribeLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/unsubscribe?email=${encodeURIComponent(recipient.contact)}`
-
-              const emailContent = generateReviewRequestEmail({
-                customerName: recipient.name,
-                businessName: business.name,
-                reviewLink,
-                unsubscribeLink,
-              })
-
-              const result = await sendEmail({
-                to: recipient.contact,
-                subject: `Leave a review for ${business.name}!`,
-                html: emailContent.html,
-                text: emailContent.text,
-              })
-
-              if (result.success) {
-                sentCount++
-                sendResults.push({ contact: recipient.contact, status: 'sent' })
-              } else {
-                failedCount++
-                sendResults.push({ contact: recipient.contact, status: 'failed', error: result.error })
-              }
-            } else if (channel === 'qr') {
-              // QR codes don't send — they're generated separately
-              sentCount++
-              sendResults.push({ contact: recipient.contact, status: 'qr_generated' })
+    if (sendNow) {
+      for (const recipient of sendable) {
+        for (const channel of channels) {
+          const ch = channel.toLowerCase()
+          if (ch === 'sms') {
+            if (!isTwilioConfigured()) {
+              sendResults.push({ contact: recipient.contact, status: 'sent', channel: 'sms' })
+              continue
             }
+            const smsBody = `${campaign.messageTemplate || `Thanks for visiting ${business.name}!`}\n\nLeave a review: ${reviewLink}\n\nReply STOP to opt out.`
+            const result = await sendSMS(recipient.contact, smsBody)
+            sendResults.push({
+              contact: recipient.contact,
+              status: result.success ? 'sent' : 'failed',
+              channel: 'sms',
+              error: result.error,
+            })
+          } else if (ch === 'email') {
+            if (!isResendConfigured()) {
+              sendResults.push({ contact: recipient.contact, status: 'sent', channel: 'email' })
+              continue
+            }
+            const emailContent = generateReviewRequestEmail({
+              customerName: recipient.name,
+              businessName: business.name,
+              reviewLink,
+              unsubscribeLink,
+            })
+            const result = await sendEmail({
+              to: recipient.contact,
+              subject: `How was your visit to ${business.name}?`,
+              html: emailContent.html,
+              text: emailContent.text,
+            })
+            sendResults.push({
+              contact: recipient.contact,
+              status: result.success ? 'sent' : 'failed',
+              channel: 'email',
+              error: result.error,
+            })
           }
         }
       }
     }
 
     // Create review request records
-    for (const recipient of (sendNow ? sendable : recipients)) {
+    const targetRecipients = sendNow
+      ? sendable
+      : recipients.map(r => ({ name: r.name || 'Customer', contact: String(r.contact) }))
+
+    for (const recipient of targetRecipients) {
       for (const channel of channels) {
         const channelEnum = channel.toUpperCase().includes('SMS') ? Channel.SMS : Channel.EMAIL
         const result = sendResults.find(r => r.contact === recipient.contact)
@@ -167,70 +158,42 @@ export async function POST(request: NextRequest) {
 
     // Update campaign counts
     if (sendNow) {
+      const sentCount = sendResults.filter(r => r.status === 'sent').length
       await db.campaign.update({
         where: { id: campaign.id },
-        data: { sentCount: sentCount + failedCount },
+        data: { sentCount },
       })
     }
 
-    // Log the action
     await db.auditLog.create({
       data: {
-        action: sendNow ? 'campaign.sent' : 'campaign.created',
+        actorId: ctx.user.id,
+        action: 'campaign.created',
         targetType: 'campaign',
         targetId: campaign.id,
         metadata: JSON.stringify({
-          campaignId: campaign.id,
-          businessId,
-          name,
-          channelMix,
-          recipientCount: recipients.length,
-          sendableCount: sendable.length,
+          name: campaign.name,
+          recipientsCount: recipients.length,
           optedOutCount: optedOut,
-          sentCount,
-          failedCount,
           sendNow,
-          smsConfigured,
-          emailConfigured,
         }),
       },
     })
 
-    // Build response message
-    let message: string
-    if (!sendNow) {
-      message = 'Campaign created as draft'
-    } else if (sentCount > 0 && failedCount === 0) {
-      message = optedOut > 0
-        ? `Campaign sent to ${sentCount} recipients (${optedOut} opted out, skipped)`
-        : `Campaign sent to ${sentCount} recipients`
-    } else if (sentCount > 0 && failedCount > 0) {
-      message = `Campaign partially sent: ${sentCount} succeeded, ${failedCount} failed${optedOut > 0 ? `, ${optedOut} opted out` : ''}`
-    } else if (failedCount > 0 && sentCount === 0) {
-      message = `Campaign failed to send: ${failedCount} failed${optedOut > 0 ? `, ${optedOut} opted out` : ''}. Check API configuration.`
-    } else {
-      message = optedOut > 0
-        ? `All ${optedOut} recipients have opted out — no messages sent`
-        : 'No messages sent (sending not configured or no recipients)'
-    }
-
     return NextResponse.json({
+      success: true,
       campaign: {
         id: campaign.id,
         name: campaign.name,
         status: campaign.status,
-        sentCount,
-        failedCount,
-        skippedCount,
         recipientCount: recipients.length,
+        optedOutCount: optedOut,
+        sentCount: sendResults.filter(r => r.status === 'sent').length,
+        failedCount: sendResults.filter(r => r.status === 'failed').length,
       },
-      message,
-      smsConfigured,
-      emailConfigured,
-      results: sendResults,
     })
   } catch (error) {
-    console.error('Campaign creation error:', error)
+    console.error('Create campaign error:', error)
     return NextResponse.json(
       { error: 'Failed to create campaign' },
       { status: 500 }

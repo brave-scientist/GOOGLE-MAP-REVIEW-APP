@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Role, Plan } from '@prisma/client'
 import { createSession, SessionUser } from '@/lib/auth'
+import bcrypt from 'bcryptjs'
 
 // POST /api/auth/signup
 export async function POST(request: NextRequest) {
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const normalizedEmail = email.trim().toLowerCase()
+
     if (password.length < 8) {
       return NextResponse.json(
         { error: 'Password must be at least 8 characters' },
@@ -23,7 +26,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const existing = await db.user.findUnique({ where: { email } })
+    if (password.length > 72) {
+      return NextResponse.json(
+        { error: 'Password cannot exceed 72 characters' },
+        { status: 400 }
+      )
+    }
+
+    const existing = await db.user.findUnique({ where: { email: normalizedEmail } })
     if (existing) {
       return NextResponse.json(
         { error: 'An account with this email already exists. Please log in.' },
@@ -31,11 +41,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const passwordHash = `demo_hash_${Buffer.from(password).toString('base64').slice(0, 32)}`
+    const passwordHash = await bcrypt.hash(password, 10)
 
     const result = await db.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { email, name, passwordHash },
+        data: {
+          email: normalizedEmail,
+          name,
+          passwordHash,
+          sessionVersion: 1,
+        },
       })
 
       const org = await tx.organization.create({
@@ -93,7 +108,7 @@ export async function POST(request: NextRequest) {
           action: 'user.signup',
           targetType: 'user',
           targetId: user.id,
-          metadata: JSON.stringify({ email, businessName }),
+          metadata: JSON.stringify({ email: normalizedEmail, businessName }),
         },
       })
 
@@ -108,6 +123,7 @@ export async function POST(request: NextRequest) {
       orgId: result.org.id,
       orgName: result.org.name,
       orgPlan: result.org.plan,
+      sessionVersion: result.user.sessionVersion,
     }
 
     const response = NextResponse.json({

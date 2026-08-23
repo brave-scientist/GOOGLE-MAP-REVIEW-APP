@@ -30,18 +30,16 @@ export default async function ReviewRequestPage({
     }).catch(() => null)
 
     if (campaign) {
-      // Use the campaign's first review request, or create a click record on the campaign
-      reviewRequest = campaign.requests[0] as typeof reviewRequest
-      if (!reviewRequest) {
+      if (campaign.requests.length === 0) {
         // No review request — just redirect to the business's review page
         const reviewUrl = campaign.business?.googleLocationId
           ? `https://search.google.com/local/writereview?placeid=${campaign.business.googleLocationId}`
           : `https://www.google.com/search?q=${encodeURIComponent(campaign.business?.name || '')}+reviews`
         redirect(reviewUrl)
       }
-      // Attach business if not already included
-      if (reviewRequest && !reviewRequest.business) {
-        (reviewRequest as { business: typeof campaign.business }).business = campaign.business
+      reviewRequest = {
+        ...campaign.requests[0],
+        business: campaign.business,
       }
     }
   }

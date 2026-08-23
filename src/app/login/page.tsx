@@ -231,9 +231,9 @@ export default function LoginPage() {
               <div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
-                  <button type="button" onClick={() => setMode('otp')} className="text-xs text-[var(--brass)] hover:underline">
+                  <Link href="/forgot-password" className="text-xs text-[var(--brass)] hover:underline">
                     Forgot password?
-                  </button>
+                  </Link>
                 </div>
                 <Input
                   id="password"

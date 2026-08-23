@@ -28,14 +28,18 @@ interface Client {
 }
 
 interface AgencyData {
-  clients: Client[]
-  stats: {
+  clients?: Client[]
+  stats?: {
     totalClients: number
     totalMRR: number
     avgHealth: number
     atRisk: number
     totalReviews: number
   }
+  error?: string
+  code?: string
+  requiredPlan?: string
+  currentPlan?: string
 }
 
 export default function AgencyPage() {

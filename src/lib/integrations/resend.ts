@@ -102,3 +102,55 @@ You received this email because you visited ${businessName}. To unsubscribe, vis
 
   return { html, text }
 }
+
+// Generate and send password reset email
+export async function sendPasswordResetEmail(email: string, resetUrl: string): Promise<{ success: boolean; error?: string }> {
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 20px; background: #f9f9f9;">
+  <div style="background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e5e5e5;">
+    <h1 style="font-size: 20px; color: #1a1a1a; margin: 0 0 16px 0;">Reset Your Password</h1>
+    <p style="font-size: 15px; color: #4a4a4a; line-height: 1.6; margin: 0 0 24px 0;">
+      We received a request to reset your password for your ReviewReply account. Click the button below to choose a new password. This link is valid for 1 hour.
+    </p>
+    <a href="${resetUrl}" style="display: inline-block; background: #97781B; color: #ffffff; text-decoration: none; padding: 12px 32px; border-radius: 8px; font-size: 15px; font-weight: 600; margin: 0 0 24px 0;">
+      Reset Password →
+    </a>
+    <p style="font-size: 13px; color: #777777; line-height: 1.5; margin: 0 0 16px 0;">
+      If you did not request a password reset, you can safely ignore this email. Your password will not change.
+    </p>
+    <p style="font-size: 12px; color: #999999; line-height: 1.5; margin: 24px 0 0 0; padding-top: 16px; border-top: 1px solid #f0f0f0;">
+      ReviewReply Enterprise Security
+    </p>
+  </div>
+</body>
+</html>`
+
+  const text = `Reset Your Password
+
+We received a request to reset your password for your ReviewReply account. Visit the following link to choose a new password (valid for 1 hour):
+
+${resetUrl}
+
+If you did not request a password reset, you can safely ignore this email.`
+
+  if (!isResendConfigured()) {
+    console.log(`[DEV] Password reset link for ${email}: ${resetUrl}`)
+    return { success: true }
+  }
+
+  const result = await sendEmail({
+    to: email,
+    subject: 'Reset your ReviewReply password',
+    html,
+    text,
+  })
+
+  return { success: result.success, error: result.error }
+}
+

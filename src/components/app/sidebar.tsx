@@ -1,13 +1,24 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Inbox, Star, Send, BarChart3, Code2, FileText,
   Settings, Sparkles, Building2, CreditCard, Shield, Target, Crown, Link2,
+  LogOut, User as UserIcon, ChevronDown, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { toast } from 'sonner'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -21,6 +32,97 @@ const navItems = [
   { href: '/reports', label: 'Reports', icon: FileText },
   { href: '/agency', label: 'Agency', icon: Building2 },
 ]
+
+export function UserProfileDropdown({ isCollapsed = false }: { isCollapsed?: boolean }) {
+  const router = useRouter()
+  const [user, setUser] = useState<{ name: string | null; email: string; orgPlan: string | null } | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.user) {
+          setUser(data.user)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleLogout = async () => {
+    setLoading(true)
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+      toast.success('Signed out successfully')
+      router.push('/login')
+      router.refresh()
+    } catch {
+      router.push('/login')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const displayName = user?.name || user?.email?.split('@')[0] || 'My Account'
+  const initials = displayName
+    .split(' ')
+    .map(p => p[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-sidebar-accent transition-colors text-left group">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center text-white text-xs font-bold shadow-sm flex-shrink-0">
+            {initials || <UserIcon className="w-4 h-4" />}
+          </div>
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium truncate group-hover:text-foreground">{displayName}</div>
+              <div className="text-[10px] text-muted-foreground truncate">{user?.email || 'Loading...'}</div>
+            </div>
+          )}
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground ml-auto group-hover:text-foreground flex-shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56 glass-card">
+        <DropdownMenuLabel className="font-normal">
+          <div className="flex flex-col space-y-1">
+            <p className="text-xs font-medium leading-none">{displayName}</p>
+            <p className="text-[11px] leading-none text-muted-foreground truncate">{user?.email}</p>
+            {user?.orgPlan && (
+              <div className="pt-1">
+                <Badge variant="outline" className="text-[9px] uppercase tracking-wider font-mono border-[var(--brass)]/40 text-[var(--brass)] bg-[var(--brass)]/10">
+                  {user.orgPlan} Plan
+                </Badge>
+              </div>
+            )}
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => router.push('/settings')} className="cursor-pointer text-xs">
+          <Settings className="w-3.5 h-3.5 mr-2" />
+          Settings
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push('/billing')} className="cursor-pointer text-xs">
+          <CreditCard className="w-3.5 h-3.5 mr-2" />
+          Billing & Plans
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={handleLogout}
+          disabled={loading}
+          className="cursor-pointer text-xs text-red-500 hover:text-red-600 hover:bg-red-500/10 focus:text-red-600 focus:bg-red-500/10"
+        >
+          {loading ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <LogOut className="w-3.5 h-3.5 mr-2" />}
+          Sign Out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 export function AppSidebar() {
   const pathname = usePathname()
@@ -143,8 +245,13 @@ export function AppSidebar() {
         </Link>
       </nav>
 
-      {/* Upgrade card */}
+      {/* User Profile & Logout section */}
       <div className="p-3 border-t border-sidebar-border">
+        <UserProfileDropdown />
+      </div>
+
+      {/* Upgrade card */}
+      <div className="p-3 pt-0">
         <div className="rounded-lg p-3 bg-gradient-to-br from-[var(--brass)]/10 to-transparent border border-[var(--brass)]/20">
           <div className="flex items-center gap-2 mb-1.5">
             <Sparkles className="w-3.5 h-3.5 text-[var(--brass)]" />
@@ -174,7 +281,7 @@ export function AppTopbar({ title, description }: { title: string; description?:
           <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight">{title}</h1>
           {description && <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">{description}</p>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => router.push('/agency')}
             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-accent transition-colors border border-border"
@@ -190,6 +297,9 @@ export function AppTopbar({ title, description }: { title: string; description?:
             <span className="hidden sm:inline">New campaign</span>
             <span className="sm:hidden">New</span>
           </button>
+          <div className="hidden sm:block">
+            <UserProfileDropdown isCollapsed />
+          </div>
         </div>
       </div>
     </header>

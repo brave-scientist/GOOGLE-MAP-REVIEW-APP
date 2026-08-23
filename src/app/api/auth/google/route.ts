@@ -182,7 +182,7 @@ async function createOrLoginUser(email: string, name: string, picture: string | 
         role: Role.OWNER,
         org: result.org,
       }],
-    } as typeof user
+    } as unknown as typeof user
   }
 
   const membership = user!.memberships[0]
@@ -194,6 +194,7 @@ async function createOrLoginUser(email: string, name: string, picture: string | 
     orgId: membership?.org.id || null,
     orgName: membership?.org.name || null,
     orgPlan: membership?.org.plan || null,
+    sessionVersion: user!.sessionVersion ?? 1,
   }
 
   await db.auditLog.create({
