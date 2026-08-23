@@ -23,6 +23,8 @@ model Organization {
   updatedAt               DateTime     @updatedAt
   businesses              Business[]
   members                 OrgMember[]
+  scheduledReports        ScheduledReport[]
+  teamInvitations         TeamInvitation[]
 }
 
 model OrgMember {
@@ -49,6 +51,7 @@ model User {
   memberships        OrgMember[]
   businesses         Business[]           // businesses they own
   passwordResetTokens PasswordResetToken[]
+  sentInvitations    TeamInvitation[]
 }
 
 model PasswordResetToken {
@@ -98,6 +101,8 @@ model Business {
   oauthTokens         OAuthToken[]
   reviewPlatformLinks ReviewPlatformLink[]
   reviewUsSends       ReviewUsSend[]
+  competitors         Competitor[]
+  scheduledReports    ScheduledReport[]
 }
 
 model Review {
@@ -367,3 +372,101 @@ model ReviewUsSendRecipient {
 
   @@index([reviewUsSendId])
 }
+
+// ─────────────────────────────────────────────────────
+// DB-002: Competitor Intelligence Persistence
+// ─────────────────────────────────────────────────────
+model Competitor {
+  id             String               @id @default(cuid())
+  businessId     String
+  name           String
+  googleMapsUrl  String?
+  placeId        String?
+  rating         Float                @default(0.0)
+  reviewCount    Int                  @default(0)
+  responseRate   Float                @default(0.0)
+  sentimentScore Float?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  snapshots      CompetitorSnapshot[]
+
+  business       Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+model CompetitorSnapshot {
+  id             String     @id @default(cuid())
+  competitorId   String
+  rating         Float
+  reviewCount    Int
+  sentimentScore Float?
+  capturedAt     DateTime   @default(now())
+
+  competitor     Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@index([competitorId, capturedAt])
+}
+
+// ─────────────────────────────────────────────────────
+// DB-003: Scheduled Reports Persistence
+// ─────────────────────────────────────────────────────
+model ScheduledReport {
+  id          String         @id @default(cuid())
+  orgId       String
+  businessId  String?
+  name        String
+  schedule    ReportSchedule
+  recipients  String         // JSON array of recipient emails/contacts
+  format      ReportFormat
+  status      ReportStatus   @default(ACTIVE)
+  lastSentAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  org         Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  business    Business?      @relation(fields: [businessId], references: [id])
+
+  @@index([orgId, status])
+  @@index([businessId])
+}
+
+enum ReportSchedule {
+  DAILY
+  WEEKLY
+  MONTHLY
+  REALTIME_ALERT
+}
+
+enum ReportFormat {
+  EMAIL_HTML
+  PDF_ATTACHMENT
+  BOTH
+}
+
+enum ReportStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+// ─────────────────────────────────────────────────────
+// AUTH-003: Cryptographic Team Invitations
+// ─────────────────────────────────────────────────────
+model TeamInvitation {
+  id          String       @id @default(cuid())
+  orgId       String
+  email       String
+  role        Role         @default(STAFF)
+  tokenHash   String       @unique
+  invitedById String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy   User         @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([orgId, email])
+}
+
