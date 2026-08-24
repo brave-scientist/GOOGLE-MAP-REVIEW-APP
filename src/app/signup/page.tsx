@@ -104,7 +104,7 @@ export default function SignupPage() {
                     id="name"
                     placeholder="Sarah Chen"
                     value={form.name}
-                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                     required
                     className="mt-1.5 glass-card"
                   />
@@ -116,7 +116,7 @@ export default function SignupPage() {
                     type="email"
                     placeholder="you@business.com"
                     value={form.email}
-                    onChange={e => setForm({ ...form, email: e.target.value })}
+                    onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                     required
                     className="mt-1.5 glass-card"
                   />
@@ -128,7 +128,7 @@ export default function SignupPage() {
                     type="password"
                     placeholder="At least 8 characters"
                     value={form.password}
-                    onChange={e => setForm({ ...form, password: e.target.value })}
+                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
                     required
                     minLength={8}
                     className="mt-1.5 glass-card"
@@ -157,14 +157,14 @@ export default function SignupPage() {
                     id="businessName"
                     placeholder="Bamboo Garden Restaurant"
                     value={form.businessName}
-                    onChange={e => setForm({ ...form, businessName: e.target.value })}
+                    onChange={e => setForm(f => ({ ...f, businessName: e.target.value }))}
                     required
                     className="mt-1.5 glass-card"
                   />
                 </div>
                 <div>
                   <Label htmlFor="industry">Industry</Label>
-                  <Select value={form.industry} onValueChange={v => setForm({ ...form, industry: v })}>
+                  <Select value={form.industry} onValueChange={v => setForm(f => ({ ...f, industry: v }))}>
                     <SelectTrigger className="mt-1.5 glass-card">
                       <SelectValue />
                     </SelectTrigger>
