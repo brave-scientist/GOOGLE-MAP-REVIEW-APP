@@ -43,6 +43,7 @@ const PUBLIC_API_ROUTES = [
   '/api/cron/reports',
   '/api/health',          // Public — for UptimeRobot / load balancer health checks
   '/api/review-us',       // Public — Review Us page fetches links by slug
+  '/api/sentry-test',     // Temporary — Sentry production connection test
 ]
 
 function isPublicRoute(pathname: string): boolean {
