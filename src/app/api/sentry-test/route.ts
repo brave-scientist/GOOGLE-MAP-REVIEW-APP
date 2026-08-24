@@ -4,20 +4,20 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const error = new Error('Sentry production connection test - REMOVE ME')
-  const eventId = Sentry.captureException(error)
-  const flushed = await Sentry.flush(3000)
+  try {
+    const error = new Error('Sentry production connection test - REMOVE ME')
+    const eventId = Sentry.captureException(error)
+    await Sentry.flush(2000)
 
-  const client = Sentry.getClient()
-  const dsn = client ? client.getDsn() : null
-
-  return NextResponse.json({
-    status: 'triggered',
-    eventId,
-    flushed,
-    sentryInitialized: !!client,
-    hasDsn: !!dsn,
-    projectId: dsn?.projectId || null,
-    environment: client?.getOptions()?.environment || null,
-  })
+    return NextResponse.json({
+      success: true,
+      eventId,
+      sentryDsnConfigured: !!(process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN),
+    })
+  } catch (err: any) {
+    return NextResponse.json({
+      success: false,
+      error: err?.message || String(err),
+    }, { status: 500 })
+  }
 }

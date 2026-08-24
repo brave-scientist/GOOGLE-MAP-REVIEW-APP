@@ -50,7 +50,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com data:",
               "img-src 'self' data: https: blob: https://www.googletagmanager.com https://www.google-analytics.com",
-              "connect-src 'self' https://oauth2.googleapis.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com",
+              "connect-src 'self' https://oauth2.googleapis.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io",
               "frame-ancestors 'none'",
               "base-uri 'self'",
               "form-action 'self'",
