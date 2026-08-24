@@ -1,10 +1,11 @@
-import { PrismaClient, Plan, Role } from '@prisma/client'
+import { PrismaClient, Plan, Role, DraftStatus, ReviewSource, ReportSchedule, ReportFormat, ReportStatus } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 
 import { getAuthoritativeE2EDatabaseUrl } from './db-guard'
 
 const E2E_DATABASE_URL = getAuthoritativeE2EDatabaseUrl()
+process.env.DATABASE_URL = E2E_DATABASE_URL
 
 // Explicit startup assertion proving the database target is the test database
 console.log(`[E2E-DB-SEED] Initializing Prisma with isolated test database: ${E2E_DATABASE_URL.replace(/:[^:@]+@/, ':***@')}`)
@@ -151,6 +152,197 @@ export async function seedPasswordResetToken(userId: string, options: {
   })
 
   return { rawToken, tokenHash, id: record.id }
+}
+
+/**
+ * Seed a test review for a business
+ */
+export async function seedTestReview(businessId: string, options: {
+  author?: string
+  rating?: number
+  text?: string
+  title?: string
+  source?: ReviewSource
+  draftText?: string | null
+  draftStatus?: DraftStatus
+  replyText?: string | null
+  repliedAt?: Date | null
+  externalId?: string
+} = {}) {
+  const author = options.author || 'Jane Smith'
+  const rating = options.rating ?? 5
+  const text = options.text || 'Absolutely fantastic experience! The staff was courteous and service was top-notch.'
+  const title = options.title || 'Great Service'
+  const source = options.source || ReviewSource.GOOGLE
+  const draftStatus = options.draftStatus || DraftStatus.DRAFT
+  const externalId = options.externalId || `ext_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+
+  return prisma.review.create({
+    data: {
+      businessId,
+      author,
+      rating,
+      text,
+      title,
+      source,
+      draftText: options.draftText ?? null,
+      draftStatus,
+      replyText: options.replyText ?? null,
+      repliedAt: options.repliedAt ?? null,
+      externalId,
+    },
+  })
+}
+
+/**
+ * Seed a tracked competitor with initial snapshot
+ */
+export async function seedTestCompetitor(businessId: string, options: {
+  name?: string
+  rating?: number
+  reviewCount?: number
+  responseRate?: number
+  sentimentScore?: number
+  googleMapsUrl?: string
+} = {}) {
+  const name = options.name || `Competitor ${Date.now()}`
+  const rating = options.rating ?? 4.2
+  const reviewCount = options.reviewCount ?? 120
+  const responseRate = options.responseRate ?? 65
+  const sentimentScore = options.sentimentScore ?? 0.55
+
+  const competitor = await prisma.competitor.create({
+    data: {
+      businessId,
+      name,
+      rating,
+      reviewCount,
+      responseRate,
+      sentimentScore,
+      googleMapsUrl: options.googleMapsUrl || 'https://maps.google.com/?cid=12345',
+    },
+  })
+
+  await prisma.competitorSnapshot.create({
+    data: {
+      competitorId: competitor.id,
+      rating,
+      reviewCount,
+      sentimentScore,
+    },
+  })
+
+  return competitor
+}
+
+/**
+ * Seed a scheduled report
+ */
+export async function seedTestReport(orgId: string, options: {
+  name?: string
+  schedule?: ReportSchedule
+  recipients?: string[]
+  format?: ReportFormat
+  status?: ReportStatus
+  businessId?: string
+} = {}) {
+  const name = options.name || 'Weekly Performance Digest'
+  const schedule = options.schedule || ReportSchedule.WEEKLY
+  const recipients = options.recipients || ['reports@example.com']
+  const format = options.format || ReportFormat.EMAIL_HTML
+  const status = options.status || ReportStatus.ACTIVE
+
+  return prisma.scheduledReport.create({
+    data: {
+      orgId,
+      businessId: options.businessId || null,
+      name,
+      schedule,
+      recipients: JSON.stringify(recipients),
+      format,
+      status,
+    },
+  })
+}
+
+/**
+ * Seed a cryptographic team invitation
+ */
+export async function seedTestTeamInvitation(orgId: string, invitedById: string, email: string, options: {
+  role?: Role
+  rawToken?: string
+  expiresInMs?: number
+  consumed?: boolean
+} = {}) {
+  const role = options.role || Role.STAFF
+  const rawToken = options.rawToken || crypto.randomBytes(32).toString('hex')
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
+  const expiresInMs = options.expiresInMs ?? 7 * 24 * 60 * 60 * 1000 // 7 days
+  const expiresAt = new Date(Date.now() + expiresInMs)
+  const consumedAt = options.consumed ? new Date() : null
+
+  const invitation = await prisma.teamInvitation.create({
+    data: {
+      orgId,
+      invitedById,
+      email,
+      role,
+      tokenHash,
+      expiresAt,
+      consumedAt,
+    },
+  })
+
+  return { invitation, rawToken, tokenHash }
+}
+
+/**
+ * Seed a review platform link for a business
+ */
+export async function seedTestPlatformLink(businessId: string, options: {
+  platformId?: string
+  customName?: string
+  url?: string
+  enabled?: boolean
+  sortOrder?: number
+} = {}) {
+  const platformId = options.platformId || 'google'
+  const url = options.url || 'https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4'
+  const enabled = options.enabled ?? true
+  const sortOrder = options.sortOrder ?? 0
+
+  return prisma.reviewPlatformLink.create({
+    data: {
+      businessId,
+      platformId,
+      customName: options.customName || null,
+      url,
+      enabled,
+      sortOrder,
+    },
+  })
+}
+
+/**
+ * Seed an opt-out contact entry
+ */
+export async function seedTestOptOut(contact: string, options: {
+  reason?: string
+  channel?: string
+} = {}) {
+  const normalized = contact.trim().toLowerCase()
+  return prisma.optOut.upsert({
+    where: { contact: normalized },
+    update: {
+      reason: options.reason || 'USER_REQUEST',
+      channel: options.channel || 'all',
+    },
+    create: {
+      contact: normalized,
+      reason: options.reason || 'USER_REQUEST',
+      channel: options.channel || 'all',
+    },
+  })
 }
 
 /**

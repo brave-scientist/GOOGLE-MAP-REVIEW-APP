@@ -14,6 +14,7 @@ export async function mockAIDraftGeneration(page: Page, customReply?: string): P
       contentType: 'application/json',
       body: JSON.stringify({
         draft: customReply || 'Thank you so much for your wonderful review! We are thrilled that you enjoyed your experience and look forward to welcoming you back soon.',
+        status: 'PENDING',
         source: 'AI (GLM-4.6)',
         model: 'glm-4.6',
       }),
