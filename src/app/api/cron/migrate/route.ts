@@ -37,10 +37,47 @@ export async function POST(request: NextRequest) {
       `DO $$ BEGIN ALTER TYPE "DraftStatus" ADD VALUE IF NOT EXISTS 'POSTING'; EXCEPTION WHEN duplicate_object THEN null; END $$;`,
       `DO $$ BEGIN ALTER TYPE "ReviewSource" ADD VALUE IF NOT EXISTS 'INTERNAL'; EXCEPTION WHEN duplicate_object THEN null; END $$;`,
 
-      // 2. User sessionVersion
+      // 2. User table columns
       `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "sessionVersion" INTEGER NOT NULL DEFAULT 1;`,
+      `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "avatarUrl" TEXT;`,
+      `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordHash" TEXT;`,
 
-      // 3. PasswordResetToken
+      // 3. Organization table columns
+      `ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "stripeCustomerId" TEXT;`,
+      `ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "stripeSubscriptionId" TEXT;`,
+      `ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "stripeSubscriptionStatus" TEXT;`,
+      `ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "trialEndsAt" TIMESTAMP(3);`,
+
+      // 4. Business table columns
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "orgId" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "industry" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "address" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "phone" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'America/New_York';`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "googleLocationId" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "facebookPageId" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "slug" TEXT;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "avgRating" DOUBLE PRECISION NOT NULL DEFAULT 0;`,
+      `ALTER TABLE "Business" ADD COLUMN IF NOT EXISTS "reviewCount" INTEGER NOT NULL DEFAULT 0;`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "Business_slug_key" ON "Business"("slug");`,
+
+      // 5. Review table columns
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "authorAvatar" TEXT;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "title" TEXT;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "language" TEXT NOT NULL DEFAULT 'en';`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "sentimentScore" DOUBLE PRECISION;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "topics" TEXT;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "replyText" TEXT;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "repliedAt" TIMESTAMP(3);`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "repliedBy" TEXT;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "draftText" TEXT;`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "draftStatus" "DraftStatus" NOT NULL DEFAULT 'NONE';`,
+      `ALTER TABLE "Review" ADD COLUMN IF NOT EXISTS "fetchedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`,
+
+      // 6. AuditLog table columns
+      `ALTER TABLE "AuditLog" ADD COLUMN IF NOT EXISTS "ip" TEXT;`,
+
+      // 7. PasswordResetToken
       `CREATE TABLE IF NOT EXISTS "PasswordResetToken" (
           "id" TEXT NOT NULL,
           "userId" TEXT NOT NULL,
@@ -57,7 +94,7 @@ export async function POST(request: NextRequest) {
        EXCEPTION WHEN duplicate_object THEN null;
        END $$;`,
 
-      // 4. StripeWebhookEvent
+      // 8. StripeWebhookEvent
       `CREATE TABLE IF NOT EXISTS "StripeWebhookEvent" (
           "id" TEXT NOT NULL,
           "eventId" TEXT NOT NULL,
@@ -68,7 +105,7 @@ export async function POST(request: NextRequest) {
       );`,
       `CREATE UNIQUE INDEX IF NOT EXISTS "StripeWebhookEvent_eventId_key" ON "StripeWebhookEvent"("eventId");`,
 
-      // 5. ReviewPublishAttempt
+      // 9. ReviewPublishAttempt
       `CREATE TABLE IF NOT EXISTS "ReviewPublishAttempt" (
           "id" TEXT NOT NULL,
           "reviewId" TEXT NOT NULL,
@@ -92,15 +129,15 @@ export async function POST(request: NextRequest) {
     for (const statement of ddl) {
       try {
         await db.$executeRawUnsafe(statement)
-        results.push({ statement: statement.slice(0, 40) + '...', status: 'OK' })
+        results.push({ statement: statement.slice(0, 45) + '...', status: 'OK' })
       } catch (err: any) {
-        results.push({ statement: statement.slice(0, 40) + '...', status: 'WARN', error: err?.message })
+        results.push({ statement: statement.slice(0, 45) + '...', status: 'WARN', error: err?.message })
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Stage 3 schema migration applied successfully',
+      message: 'Comprehensive schema synchronization applied successfully',
       results,
     })
   } catch (error: any) {
