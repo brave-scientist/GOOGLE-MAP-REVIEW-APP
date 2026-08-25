@@ -26,11 +26,11 @@ export async function POST(request: NextRequest) {
     const { email } = parseResult.data
     const normalizedEmail = email.trim().toLowerCase()
 
-    // Rate limiting: max 3 requests per email per 10 minutes
-    const rl = rateLimit(
+    // Rate limiting: max 3 requests per email per 15 minutes
+    const rl = await rateLimit(
       `pwd_reset:req:${normalizedEmail}`,
-      RATE_LIMITS.otpSend.limit,
-      RATE_LIMITS.otpSend.windowMs
+      RATE_LIMITS.forgotPassword?.limit || RATE_LIMITS.otpSend.limit,
+      RATE_LIMITS.forgotPassword?.windowMs || RATE_LIMITS.otpSend.windowMs
     )
     if (!rl.allowed) {
       const retryAfter = Math.ceil((rl.resetAt - Date.now()) / 1000)

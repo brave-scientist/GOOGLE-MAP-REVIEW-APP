@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     if (action === 'send') {
       // SEC-04: Rate-limit OTP send (3 per email per 10 min)
-      const rl = rateLimit(
+      const rl = await rateLimit(
         `otp:send:${normalizedEmail}`,
         RATE_LIMITS.otpSend.limit,
         RATE_LIMITS.otpSend.windowMs,
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
       // SEC-04: Rate-limit OTP verify (5 per email per 10 min) — applies
       // REGARDLESS of whether the OTP exists, so an attacker can't probe
       // which emails have pending OTPs by counting different error messages.
-      const rl = rateLimit(
+      const rl = await rateLimit(
         `otp:verify:${normalizedEmail}`,
         RATE_LIMITS.otpVerify.limit,
         RATE_LIMITS.otpVerify.windowMs,

@@ -92,7 +92,7 @@ export async function middleware(request: NextRequest) {
   // Rate limit public endpoints
   const rateLimitConfig = getRateLimitConfigWithIP(pathname, ip)
   if (rateLimitConfig) {
-    const result = rateLimit(rateLimitConfig.identifier, rateLimitConfig.limit, rateLimitConfig.windowMs)
+    const result = await rateLimit(rateLimitConfig.identifier, rateLimitConfig.limit, rateLimitConfig.windowMs)
     if (!result.allowed) {
       const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000)
       if (pathname.startsWith('/api/')) {
