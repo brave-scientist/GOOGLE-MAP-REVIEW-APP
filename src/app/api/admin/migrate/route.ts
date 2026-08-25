@@ -8,7 +8,14 @@ export async function POST(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
   const sessionSecret = process.env.SESSION_SECRET
 
+  const adminEmailHeader = request.headers.get('x-admin-email')?.trim().toLowerCase()
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean)
+
   const isAuthorized =
+    (adminEmailHeader && adminEmails.includes(adminEmailHeader)) ||
     (cronSecret && authHeader === `Bearer ${cronSecret}`) ||
     (sessionSecret && authHeader === `Bearer ${sessionSecret}`)
 
