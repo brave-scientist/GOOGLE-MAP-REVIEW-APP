@@ -41,7 +41,6 @@ const PUBLIC_API_ROUTES = [
   '/api/webhooks/stripe',
   '/api/cron/downgrade-trials',
   '/api/cron/reports',
-  '/api/cron/migrate',
   '/api/health',          // Public — for UptimeRobot / load balancer health checks
   '/api/review-us',       // Public — Review Us page fetches links by slug
 ]
