@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Channel, RequestStatus } from '@prisma/client'
-import { sendSMS, isTwilioConfigured } from '@/lib/integrations/twilio'
+import { SmsService } from '@/lib/sms'
 import { sendEmail, isResendConfigured, generateReviewRequestEmail } from '@/lib/integrations/resend'
 import { filterOptedOut } from '@/lib/opt-out'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
@@ -88,17 +88,22 @@ export async function POST(request: NextRequest) {
         for (const channel of channels) {
           const ch = channel.toLowerCase()
           if (ch === 'sms') {
-            if (!isTwilioConfigured()) {
+            if (!SmsService.isSmsEnabled()) {
               sendResults.push({ contact: recipient.contact, status: 'sent', channel: 'sms' })
               continue
             }
-            const smsBody = `${campaign.messageTemplate || `Thanks for visiting ${business.name}!`}\n\nLeave a review: ${reviewLink}\n\nReply STOP to opt out.`
-            const result = await sendSMS(recipient.contact, smsBody)
+            const smsBody = `${campaign.messageTemplate || `Thanks for visiting ${business.name}!`}\n\nLeave a review: ${reviewLink}\n\nReply STOP to opt out, HELP for help.`
+            const result = await SmsService.sendSms({
+              to: recipient.contact,
+              body: smsBody,
+              businessId,
+              campaignId: campaign.id,
+            })
             sendResults.push({
               contact: recipient.contact,
               status: result.success ? 'sent' : 'failed',
               channel: 'sms',
-              error: result.error,
+              error: result.errorMessage || result.errorCode,
             })
           } else if (ch === 'email') {
             if (!isResendConfigured()) {

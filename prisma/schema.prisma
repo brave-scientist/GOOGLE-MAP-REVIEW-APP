@@ -103,6 +103,7 @@ model Business {
   reviewUsSends       ReviewUsSend[]
   competitors         Competitor[]
   scheduledReports    ScheduledReport[]
+  smsDeliveries       SmsDeliveryEvent[]
 }
 
 model Review {
@@ -170,8 +171,9 @@ model ReviewRequest {
   convertedAt     DateTime?
   campaignId      String?
   createdAt       DateTime      @default(now())
-  business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  campaign        Campaign?     @relation(fields: [campaignId], references: [id])
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  campaign        Campaign?       @relation(fields: [campaignId], references: [id])
+  smsDeliveries   SmsDeliveryEvent[]
 
   @@index([businessId, status])
   @@index([campaignId])
@@ -468,5 +470,53 @@ model TeamInvitation {
   invitedBy   User         @relation(fields: [invitedById], references: [id], onDelete: Cascade)
 
   @@index([orgId, email])
+}
+
+// ─────────────────────────────────────────────────────
+// SMS-001: Telnyx SMS Foundation & Delivery Tracking
+// ─────────────────────────────────────────────────────
+model SmsDeliveryEvent {
+  id                String         @id @default(cuid())
+  provider          String         // 'telnyx' | 'twilio'
+  providerMessageId String         @unique
+  businessId        String
+  reviewRequestId   String?
+  recipientId       String?
+  to                String         // E.164 formatted
+  from              String         // E.164 formatted
+  status            SmsStatus      @default(QUEUED)
+  errorCode         String?
+  errorMessage      String?
+  segments          Int            @default(1)
+  cost              Float?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  business          Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  reviewRequest     ReviewRequest? @relation(fields: [reviewRequestId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, status])
+  @@index([reviewRequestId])
+}
+
+enum SmsStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  UNDELIVERED
+}
+
+model SmsWebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String    // 'telnyx' | 'twilio'
+  eventId     String    @unique
+  eventType   String
+  payload     String?
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([provider, eventId])
 }
 

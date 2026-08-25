@@ -22,7 +22,7 @@ const PUBLIC_ROUTES = [
 ]
 
 // API routes that DON'T require session authentication
-// Note: Webhooks (Stripe, Twilio) validate cryptographic signatures.
+// Note: Webhooks (Stripe, Twilio, Telnyx) validate cryptographic signatures.
 // Cron endpoints independently enforce Bearer CRON_SECRET auth.
 const PUBLIC_API_ROUTES = [
   '/api/auth/login',
@@ -38,6 +38,7 @@ const PUBLIC_API_ROUTES = [
   '/api/contact',
   '/api/unsubscribe',
   '/api/webhooks/twilio',
+  '/api/webhooks/sms/telnyx',
   '/api/webhooks/stripe',
   '/api/cron/downgrade-trials',
   '/api/cron/reports',

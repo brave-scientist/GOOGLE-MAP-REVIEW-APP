@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { filterOptedOut } from '@/lib/opt-out'
-import { sendSMS, isTwilioConfigured } from '@/lib/integrations/twilio'
+import { SmsService } from '@/lib/sms'
 import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 import { generateBusinessSlug } from '@/lib/review-platforms'
 
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     const { sendable, optedOut } = await filterOptedOut(recipients)
 
     // Check if the sending channel is configured
-    const smsConfigured = isTwilioConfigured()
+    const smsConfigured = SmsService.isSmsEnabled()
     const emailConfigured = isResendConfigured()
 
     if (channel === 'sms' && !smsConfigured) {
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
           customerContact: r.contact,
           channel,
           status: 'failed',
-          error: 'SMS sending not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in .env',
+          error: 'SMS sending not enabled in configuration. Set FEATURE_SMS_ENABLED=true in environment.',
         })),
       })
 
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
         skippedOptOut: optedOut,
         failedCount: sendable.length,
         reviewUsUrl,
-        message: `SMS sending is not configured. ${sendable.length} recipients were queued but not sent. Add Twilio credentials to .env to enable sending.`,
+        message: `SMS sending is currently disabled in system settings. ${sendable.length} recipients were queued but not sent.`,
       })
     }
 
@@ -194,7 +194,13 @@ export async function POST(request: NextRequest) {
       try {
         if (channel === 'sms') {
           const fullMessage = `${message}${stopNotice}`
-          const result = await sendSMS(recipient.contact, fullMessage)
+          const result = await SmsService.sendSms({
+            to: recipient.contact,
+            body: fullMessage,
+            businessId,
+            recipientId: recipientRecord.id,
+          })
+
           if (result.success) {
             sentCount++
             await db.reviewUsSendRecipient.update({
@@ -211,7 +217,7 @@ export async function POST(request: NextRequest) {
               where: { id: recipientRecord.id },
               data: {
                 status: 'failed',
-                error: result.error || 'Send failed',
+                error: result.errorMessage || result.errorCode || 'Send failed',
               },
             })
           }
