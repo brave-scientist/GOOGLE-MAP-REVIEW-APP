@@ -816,7 +816,7 @@ function HowItWorks() {
     {
       num: '02',
       title: 'AI learns your brand voice',
-      desc: 'AI (GLM-4.6) analyzes review context and customer sentiment, drafting on-brand replies in seconds.',
+      desc: 'AI analyzes review context and customer sentiment, drafting on-brand replies in seconds.',
       icon: Bot,
     },
     {

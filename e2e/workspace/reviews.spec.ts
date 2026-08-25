@@ -76,8 +76,8 @@ test.describe('Milestone 2D / JRN-014 & JRN-015: Unified Review Inbox & AI Publi
     await expect(textarea).toBeVisible()
     await textarea.fill('Thank you David! We truly appreciate your five-star review and hope to see you again!')
 
-    // 9. Click "Save & Post" to approve and post reply
-    const saveAndPostBtn = page.getByRole('button', { name: /Save & Post/i })
+    // 9. Click "Save & Copy" (or "Save & Post") to approve and post reply
+    const saveAndPostBtn = page.getByRole('button', { name: /Save & (Post|Copy)/i })
     await expect(saveAndPostBtn).toBeVisible()
     await saveAndPostBtn.click()
 

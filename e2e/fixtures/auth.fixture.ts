@@ -44,7 +44,7 @@ export async function loginViaUI(page: Page, email: string, password: string): P
   await page.getByRole('button', { name: /Sign In|Log In/i }).click()
 
   // Wait for redirect to /dashboard
-  await page.waitForURL('**/dashboard', { timeout: 30000 })
+  await page.waitForURL('**/dashboard', { timeout: 30000, waitUntil: 'commit' })
   await expect(page).toHaveURL(/\/dashboard/)
 }
 
