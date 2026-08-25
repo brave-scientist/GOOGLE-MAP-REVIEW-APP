@@ -8,9 +8,26 @@
 
 ## 1. Beta Customer Onboarding Workflow (Wave 1: Customers #1 & #2, Wave 2: Customer #3)
 
-### Supported Beta Architecture
-- **Authentication**: Business Email + Password OR Email OTP. *(Google Sign-In is marked Coming Soon)*
-- **Publishing**: **"Approve & Copy"** workflow. AI generates on-brand drafts, customer reviews/edits, approves & copies to clipboard, and pastes directly to their live review platform. *(Direct OAuth auto-publishing is deferred for provider verification)*
+### Supported Beta Capabilities
+- **Authentication**: Business Email + Password, Email OTP, Password Reset.
+- **Email Delivery**: Resend transactional email (OTP, Reset, Team Invites, Reports).
+- **Trial Lifecycle**: 14-day PRO trial with automatic provisioning and downgrade cron.
+- **Business Configuration**: Name, address, industry, reply-from email, timezone.
+- **Brand Voice**: Custom tone, signature, custom guidelines, prompt injection protection.
+- **AI Reply Generation**: One-click contextual AI draft generation in Inbox.
+- **Approve & Copy**: Review/edit AI draft, Approve & Copy to clipboard for manual external publishing.
+- **Manual External Publishing**: Verified manual publishing workflow to Google, Yelp, Facebook, etc.
+- **Review Links & QR**: Public `/review-us/[slug]` multi-platform landing pages and printable QR codes.
+- **Team Invitations**: Secure role-based invites (OWNER, ADMIN, MEMBER).
+- **Scheduled Reports**: Automated weekly email summaries via `/api/cron/reports`.
+- **Admin Operations**: Allowlisted platform admin trial extension and audit log inspection.
+
+### Deferred Capabilities (Post-Beta Roadmap)
+- **Google Sign-In**: Deferred (OAuth verification in progress).
+- **Google Business Profile Direct Auto-Publishing**: Deferred (Google API verification in progress).
+- **Facebook Direct Auto-Publishing**: Deferred (Meta App review in progress).
+- **Stripe Billing & Subscriptions**: Deferred (Commercial launch milestone).
+- **SMS Review Requests**: Deferred (Twilio / 10DLC registration milestone).
 
 ### Step-by-Step Customer Journey
 1. **Sign Up**: Navigate to [`https://reviewreply.pw/signup`](https://reviewreply.pw/signup). Enter Name, Email, Password, Business Name, and Industry.
