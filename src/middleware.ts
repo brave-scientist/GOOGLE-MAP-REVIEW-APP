@@ -97,7 +97,7 @@ export async function middleware(request: NextRequest) {
       const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000)
       if (pathname.startsWith('/api/')) {
         return NextResponse.json(
-          { error: 'Rate limit exceeded', code: 'RATE_LIMITED', retryAfter },
+          { error: 'Too many requests. Please wait a few minutes before trying again, or use Email OTP / Password Reset.', code: 'RATE_LIMITED', retryAfter },
           { status: 429, headers: { 'Retry-After': String(retryAfter) } }
         )
       }

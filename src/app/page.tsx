@@ -247,7 +247,7 @@ function HeroDashboardMockup() {
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/70" />
             <div className="w-2.5 h-2.5 rounded-full bg-green-400/70" />
           </div>
-          <div className="ml-3 text-xs text-muted-foreground font-mono">app.reviewreply.com/dashboard</div>
+          <div className="ml-3 text-xs text-muted-foreground font-mono">reviewreply.pw/dashboard</div>
         </div>
 
         {/* Dashboard content */}
@@ -718,7 +718,7 @@ function AIDemo() {
         </p>
         <div className="flex gap-2">
           <Button size="sm" className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-7 text-xs">
-            <Check className="w-3 h-3 mr-1" /> Approve & Post
+            <Check className="w-3 h-3 mr-1" /> Approve & Copy
           </Button>
           <Button size="sm" variant="outline" className="h-7 text-xs">Edit</Button>
           <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground">Regenerate</Button>
@@ -809,20 +809,20 @@ function HowItWorks() {
   const steps = [
     {
       num: '01',
-      title: 'Connect Google & Facebook',
-      desc: 'OAuth into your Google Business Profile and Facebook Pages. We pull your last 100 reviews automatically.',
+      title: 'Set up your business profile',
+      desc: 'Enter your business name, details, and review links. Manage all your reviews from one clean, centralized dashboard.',
       icon: Globe2,
     },
     {
       num: '02',
-      title: 'AI learns your voice',
-      desc: 'Upload your past replies (or use ours). AI-powered trains a private brand voice profile. Every draft sounds like you wrote it.',
+      title: 'AI learns your brand voice',
+      desc: 'AI (GLM-4.6) analyzes review context and customer sentiment, drafting on-brand replies in seconds.',
       icon: Bot,
     },
     {
       num: '03',
-      title: 'Auto-post & track',
-      desc: 'Approve drafts (or auto-post with rules). Send review requests by SMS, email, or QR. Track everything in real-time.',
+      title: 'Approve, copy & publish',
+      desc: 'Review and refine AI drafts, click Approve & Copy, and paste directly to Google, Facebook, Yelp, or your review platform.',
       icon: LineChart,
     },
   ]

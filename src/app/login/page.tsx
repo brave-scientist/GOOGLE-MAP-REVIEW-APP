@@ -320,7 +320,7 @@ export default function LoginPage() {
             Turn every review into a growth opportunity.
           </h2>
           <p className="text-muted-foreground text-sm mb-8 leading-relaxed">
-            Generate on-brand AI replies in seconds. Approve and publish directly to Google, Facebook, Yelp, and more.
+            Generate on-brand AI replies in seconds. Review, edit, approve, copy, and publish to your review platform.
           </p>
 
           <div className="space-y-3">
