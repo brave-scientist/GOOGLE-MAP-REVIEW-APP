@@ -1157,7 +1157,7 @@ function FAQ() {
     { q: 'Is ReviewReply TCPA-compliant for SMS?', a: 'Yes. We capture explicit opt-in with timestamp and IP, enforce 9pm–8am recipient-local quiet hours, handle STOP/UNSTOP keywords within 24 hours, and register your 10DLC campaign with Twilio. All SMS sends are logged for audit.' },
     { q: 'Can I use ReviewReply if I am an agency?', a: 'Yes — the Enterprise tier ($299/mo) includes full agency mode: white-label on your domain, client portal, per-seat pricing, role-based access control, and bulk actions across all client businesses.' },
     { q: 'How long is the free trial?', a: '14 days, no credit card required. Full Pro features. Data is retained for 30 days after trial ends, so you can upgrade without losing anything.' },
-    { q: 'Do you offer SSO for enterprise?', a: 'SSO/SAML is on our roadmap but not yet available. Enterprise customers can use email-based authentication with optional Google Sign-In today; we will announce SSO when it ships.' },
+    { q: 'Do you offer SSO for enterprise?', a: 'SSO/SAML and Google Workspace SSO are on our roadmap. Beta customers can use email-based authentication with Email & Password or fast Email OTP today.' },
     { q: 'What is your SOC2 status?', a: 'SOC2 Type I attestation is in progress. Type II monitoring starts at launch. Reports are available to enterprise customers under NDA.' },
     { q: 'Can I cancel anytime?', a: 'Yes, no contracts. Cancel from the self-serve billing portal. Annual plans get a pro-rated refund for unused months.' },
   ]

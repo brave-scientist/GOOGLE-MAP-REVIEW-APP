@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import {
   Star, MessageSquare, Search, Filter, Star as StarIcon, Clock, Check,
   Bot, Sparkles, X, Send, AlertCircle, ChevronDown, RefreshCw, Edit3,
+  Copy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -37,7 +39,9 @@ interface InboxResponse {
   pagination: { page: number; limit: number; total: number; totalPages: number }
 }
 
-export default function InboxPage() {
+function InboxPageContent() {
+  const searchParams = useSearchParams()
+  const reviewIdParam = searchParams.get('reviewId')
   const [reviews, setReviews] = useState<Review[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'replied' | 'escalated'>('all')
@@ -53,14 +57,21 @@ export default function InboxPage() {
       if (search) params.set('q', search)
       const res = await fetch(`/api/inbox?${params.toString()}`)
       const data: InboxResponse = await res.json()
-      setReviews(data.reviews || [])
+      const fetchedReviews = data.reviews || []
+      setReviews(fetchedReviews)
+
+      // Auto-select review from query param if provided
+      if (reviewIdParam && fetchedReviews.length > 0) {
+        const found = fetchedReviews.find(r => r.id === reviewIdParam)
+        if (found) setSelectedReview(found)
+      }
     } catch (e) {
       console.error(e)
       toast.error('Failed to load reviews')
     } finally {
       setLoading(false)
     }
-  }, [filter, search])
+  }, [filter, search, reviewIdParam])
 
   useEffect(() => {
     const debounce = setTimeout(fetchReviews, search ? 300 : 0)
@@ -287,11 +298,12 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
 
   const approveDraft = async (editedText?: string) => {
     setIsApproving(true)
+    const textToCopy = editedText || draft || review.draftText || ''
     try {
       const res = await fetch(`/api/reviews/${review.id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve', editedText }),
+        body: JSON.stringify({ action: 'approve', editedText, manual: true }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -302,9 +314,20 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
           repliedAt: data.repliedAt,
           draftStatus: data.status,
         })
-        toast.success('Reply posted', {
-          description: `Reply posted to ${review.source}`,
-        })
+        if (textToCopy) {
+          try {
+            await navigator.clipboard.writeText(textToCopy)
+            toast.success('Approved & Copied to Clipboard!', {
+              description: `Reply saved. Paste directly into ${review.source} to publish.`,
+            })
+          } catch {
+            toast.success('Reply Approved!', {
+              description: `Reply saved for ${review.source}.`,
+            })
+          }
+        } else {
+          toast.success('Reply Approved')
+        }
         setIsEditing(false)
       } else {
         toast.error('Failed to approve', { description: data.error })
@@ -466,7 +489,7 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
                   )}
                 </div>
                 {isPending && (
-                  <div className="px-3 py-2 border-t border-[var(--brass)]/20 flex gap-2 flex-wrap">
+                  <div className="px-3 py-2 border-t border-[var(--brass)]/20 flex gap-2 flex-wrap items-center">
                     {isEditing ? (
                       <>
                         <Button
@@ -475,8 +498,8 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
                           onClick={() => approveDraft(draft)}
                           disabled={isApproving}
                         >
-                          {isApproving ? <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> : <Check className="w-3 h-3 mr-1" />}
-                          Save & Post
+                          {isApproving ? <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> : <Copy className="w-3 h-3 mr-1" />}
+                          Save &amp; Copy
                         </Button>
                         <Button
                           size="sm"
@@ -495,8 +518,8 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
                           onClick={() => approveDraft()}
                           disabled={isApproving}
                         >
-                          {isApproving ? <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> : <Check className="w-3 h-3 mr-1" />}
-                          Approve & Post
+                          {isApproving ? <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> : <Copy className="w-3 h-3 mr-1" />}
+                          Approve &amp; Copy
                         </Button>
                         <Button
                           size="sm"
@@ -530,14 +553,45 @@ function ReviewDetailDrawer({ review, onClose, onUpdate }: {
                     )}
                   </div>
                 )}
+                {isPosted && (
+                  <div className="px-3 py-2 border-t border-[var(--brass)]/20 flex gap-2 flex-wrap items-center">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs bg-[var(--brass)]/10 text-[var(--brass)] hover:bg-[var(--brass)]/20 border-[var(--brass)]/30"
+                      onClick={async () => {
+                        const text = review.replyText || draft || ''
+                        if (text) {
+                          await navigator.clipboard.writeText(text)
+                          toast.success('Copied to clipboard!', { description: `Paste directly into ${review.source}.` })
+                        }
+                      }}
+                    >
+                      <Copy className="w-3 h-3 mr-1" />
+                      Copy reply text
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
               <Card className="p-6 border-dashed border-border/40 text-center">
                 <Bot className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
                 <p className="text-sm text-muted-foreground mb-1">No draft yet</p>
-                <p className="text-xs text-muted-foreground/70">Click "Generate draft" to create an AI reply</p>
+                <p className="text-xs text-muted-foreground/70">Click &quot;Generate draft&quot; to create an AI reply</p>
               </Card>
             )}
+
+            {/* Beta guidance banner */}
+            <div className="p-3 rounded-lg bg-accent/20 border border-border/30 text-xs text-muted-foreground space-y-1">
+              <div className="font-medium text-foreground flex items-center gap-1.5">
+                <span>💡</span> Beta Publishing Workflow
+              </div>
+              <p className="leading-relaxed text-[11px]">
+                1. Click <strong>Generate draft</strong> to create an on-brand AI reply.<br />
+                2. Review or edit the draft to your liking.<br />
+                3. Click <strong>Approve &amp; Copy</strong> to save and copy to clipboard, then paste into your {review.source} business dashboard.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -583,4 +637,23 @@ function getTimeAgo(iso: string): string {
   if (hrs < 24) return `${hrs}h ago`
   if (days < 7) return `${days}d ago`
   return new Date(iso).toLocaleDateString()
+}
+
+export default function InboxPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen">
+        <AppSidebar />
+        <main className="flex-1 min-w-0 pb-20 lg:pb-0">
+          <AppTopbar title="Unified Inbox" description="Loading reviews..." />
+          <div className="p-4 sm:p-6 space-y-4">
+            <ReviewSkeleton />
+            <ReviewSkeleton />
+          </div>
+        </main>
+      </div>
+    }>
+      <InboxPageContent />
+    </Suspense>
+  )
 }

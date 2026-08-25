@@ -13,7 +13,7 @@ export async function sendEmail(params: {
   error?: string
 }> {
   const apiKey = process.env.RESEND_API_KEY
-  const defaultFrom = process.env.RESEND_FROM_EMAIL || 'ReviewReply <noreply@reviewreply.com>'
+  const defaultFrom = process.env.RESEND_FROM_EMAIL || 'ReviewReply <noreply@reviewreply.pw>'
 
   if (!apiKey) {
     return {

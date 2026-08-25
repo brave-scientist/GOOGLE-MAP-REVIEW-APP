@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import {
   Star, ArrowRight, Check, Sparkles, TrendingUp, MessageSquare, Mail,
   Loader2,
@@ -31,9 +30,6 @@ export default function LoginPage() {
   const [otpSent, setOtpSent] = useState(false)
   const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
-  const [googleLoading, setGoogleLoading] = useState(false)
-  const [googleModalOpen, setGoogleModalOpen] = useState(false)
-  const [googleEmail, setGoogleEmail] = useState('')
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -112,39 +108,6 @@ export default function LoginPage() {
     }
   }
 
-  const handleGoogleLogin = () => {
-    setGoogleModalOpen(true)
-  }
-
-  const handleGoogleSubmit = async () => {
-    if (!googleEmail) {
-      toast.error('Email required', { description: 'Please enter your Google email' })
-      return
-    }
-    setGoogleLoading(true)
-    try {
-      const name = googleEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: googleEmail, name }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        toast.success('Logged in with Google!', { description: data.user?.name })
-        setGoogleModalOpen(false)
-        router.push(data.redirectTo || redirectTo)
-      } else {
-        toast.error('Google login failed', { description: data.error })
-      }
-    } catch {
-      toast.error('Network error')
-    } finally {
-      setGoogleLoading(false)
-    }
-  }
-
   const fillDemo = () => {
     setEmail('owner@bamboogarden.com')
     setPassword('demo1234')
@@ -152,7 +115,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left side — form */}
       <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 lg:px-20 aurora-bg">
         <div className="absolute inset-0 grid-overlay opacity-30" />
         <div className="relative w-full max-w-md mx-auto">
@@ -171,25 +133,27 @@ export default function LoginPage() {
             <p className="text-sm text-muted-foreground">Log in to your ReviewReply dashboard</p>
           </div>
 
-          {/* Google OAuth button */}
-          <Button
-            variant="outline"
-            className="w-full h-11 glass-card mb-4"
-            onClick={handleGoogleLogin}
-            disabled={googleLoading}
-          >
-            {googleLoading ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
+          {/* Google OAuth button — Disabled for Beta */}
+          <div className="mb-4">
+            <Button
+              variant="outline"
+              className="w-full h-11 glass-card opacity-70 cursor-not-allowed justify-center"
+              disabled={true}
+              aria-label="Google Sign-In coming soon"
+            >
               <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
-            )}
-            Continue with Google
-          </Button>
+              Continue with Google
+              <span className="ml-2 text-[10px] bg-muted px-2 py-0.5 rounded-full font-mono font-medium text-muted-foreground border border-border/40">Coming Soon</span>
+            </Button>
+            <p className="text-[11px] text-center text-muted-foreground mt-1.5">
+              Closed Beta access is supported via Email &amp; Password or Email OTP below.
+            </p>
+          </div>
 
           {/* Divider */}
           <div className="flex items-center gap-3 mb-4">
@@ -198,7 +162,6 @@ export default function LoginPage() {
             <Separator className="flex-1" />
           </div>
 
-          {/* Mode tabs */}
           <div className="flex gap-1 p-1 glass-card rounded-lg mb-4">
             <button
               onClick={() => setMode('password')}
@@ -251,7 +214,7 @@ export default function LoginPage() {
                 disabled={loading}
               >
                 {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                Log in
+                {loading ? 'Logging in...' : 'Sign in'}
                 {!loading && <ArrowRight className="ml-2 w-4 h-4" />}
               </Button>
             </form>
@@ -259,164 +222,124 @@ export default function LoginPage() {
 
           {mode === 'otp' && (
             <div className="space-y-4">
-              <div>
-                <Label htmlFor="otp-email">Email</Label>
-                <Input
-                  id="otp-email"
-                  type="email"
-                  placeholder="you@business.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  disabled={otpSent}
-                  required
-                  className="mt-1.5 glass-card"
-                />
-              </div>
-
               {!otpSent ? (
-                <Button
-                  onClick={handleSendOtp}
-                  className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-11"
-                  disabled={loading || !email}
-                >
-                  {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Mail className="w-4 h-4 mr-2" />}
-                  Send login code
-                </Button>
-              ) : (
                 <>
                   <div>
-                    <Label htmlFor="otp-code">6-digit code</Label>
+                    <Label htmlFor="email-otp">Email</Label>
+                    <Input
+                      id="email-otp"
+                      type="email"
+                      placeholder="you@business.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      required
+                      className="mt-1.5 glass-card"
+                    />
+                  </div>
+                  <Button
+                    onClick={handleSendOtp}
+                    className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer h-11"
+                    disabled={loading || !email}
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    {loading ? 'Sending code...' : 'Send 6-digit code'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="p-3 rounded-lg bg-accent/20 border border-border/30 text-xs text-muted-foreground">
+                    Code sent to <span className="font-medium text-foreground">{email}</span>.{' '}
+                    <button onClick={() => setOtpSent(false)} className="text-[var(--brass)] hover:underline">
+                      Change email
+                    </button>
+                  </div>
+                  <div>
+                    <Label htmlFor="otp-code">6-digit verification code</Label>
                     <Input
                       id="otp-code"
+                      type="text"
                       placeholder="123456"
-                      value={otpCode}
-                      onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       maxLength={6}
-                      className="mt-1.5 glass-card font-mono text-center text-lg tracking-widest"
+                      value={otpCode}
+                      onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                      className="mt-1.5 glass-card text-center text-lg tracking-widest font-mono"
+                      autoFocus
                     />
-                    <p className="text-[10px] text-muted-foreground mt-1">
-                      Code sent to {email} · expires in 10 minutes
-                    </p>
                   </div>
                   <Button
                     onClick={handleVerifyOtp}
-                    className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-11"
+                    className="w-full bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] btn-shimmer h-11"
                     disabled={loading || otpCode.length !== 6}
                   >
                     {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                    Verify & log in
+                    {loading ? 'Verifying...' : 'Verify & Log in'}
                   </Button>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-xs text-muted-foreground"
                     onClick={handleSendOtp}
-                    className="w-full text-xs text-[var(--brass)] hover:underline"
                     disabled={loading}
                   >
                     Resend code
-                  </button>
+                  </Button>
                 </>
               )}
             </div>
           )}
 
-          <div className="mt-4 p-3 rounded-lg bg-[var(--brass)]/5 border border-[var(--brass)]/20">
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles className="w-3.5 h-3.5 text-[var(--brass)]" />
-              <span className="text-xs font-medium">Demo account</span>
-            </div>
-            <p className="text-[11px] text-muted-foreground mb-2">
-              Use the seeded demo account to explore the full product:
-            </p>
+          {/* Quick demo fill (dev helper) */}
+          <div className="mt-6 pt-6 border-t border-border/30">
             <button
               onClick={fillDemo}
-              className="text-xs font-mono text-[var(--brass)] hover:underline"
+              className="w-full text-xs text-muted-foreground hover:text-foreground text-center py-1 transition-colors"
             >
-              owner@bamboogarden.com · any password →
+              Demo: click to fill demo owner credentials
             </button>
           </div>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{' '}
             <Link href="/signup" className="text-[var(--brass)] hover:underline font-medium">
-              Sign up free
+              Start 14-day free trial
             </Link>
           </p>
         </div>
       </div>
 
-      {/* Right side — showcase */}
+      {/* Right side — hero preview */}
       <div className="hidden lg:flex flex-1 bg-card/30 border-l border-border/30 flex-col justify-center p-12 relative overflow-hidden">
         <div className="absolute inset-0 aurora-bg opacity-50" />
         <div className="relative max-w-md">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-card mb-8">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">growing businesses trust us</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass-card text-xs font-mono text-[var(--brass)] mb-6">
+            <Sparkles className="w-3.5 h-3.5" />
+            AI-Powered Review Management
           </div>
 
           <h2 className="font-display text-4xl font-bold tracking-tight mb-4 leading-tight">
-            Turn every customer into a{' '}
-            <span className="text-gradient-brass">five-star review.</span>
+            Turn every review into a growth opportunity.
           </h2>
-
-          <p className="text-muted-foreground mb-8 leading-relaxed">
-            AI-trained brand voice. Unified inbox. Competitor intelligence. All in one premium platform.
+          <p className="text-muted-foreground text-sm mb-8 leading-relaxed">
+            Generate on-brand AI replies in seconds. Approve and publish directly to Google, Facebook, Yelp, and more.
           </p>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             {[
-              { icon: MessageSquare, title: 'Unified Review Inbox', desc: 'Google, Facebook, Yelp, Trustpilot — all in one place' },
-              { icon: Sparkles, title: 'AI Brand Voice', desc: 'AI-powered drafts that sound like you' },
-              { icon: TrendingUp, title: 'Competitor Intelligence', desc: 'Weekly benchmarks against your top 3 competitors' },
-            ].map(f => (
-              <div key={f.title} className="flex items-start gap-3 p-3 rounded-lg glass-card">
-                <div className="p-2 rounded-lg bg-[var(--brass)]/10">
-                  <f.icon className="w-4 h-4 text-[var(--brass)]" />
+              { text: 'AI trained on your private brand voice', icon: Sparkles },
+              { text: 'Unified inbox across all review platforms', icon: MessageSquare },
+              { text: 'Automated review requests via SMS & email', icon: Mail },
+              { text: 'Real-time sentiment and competitor tracking', icon: TrendingUp },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 rounded-lg glass-card">
+                <div className="w-7 h-7 rounded-md bg-[var(--brass)]/10 flex items-center justify-center text-[var(--brass)] flex-shrink-0">
+                  <item.icon className="w-3.5 h-3.5" />
                 </div>
-                <div>
-                  <div className="font-medium text-sm">{f.title}</div>
-                  <div className="text-xs text-muted-foreground">{f.desc}</div>
-                </div>
-                <Check className="w-4 h-4 text-green-500 ml-auto flex-shrink-0" />
+                <span className="text-xs">{item.text}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
-
-      {/* Google login modal */}
-      <Dialog open={googleModalOpen} onOpenChange={setGoogleModalOpen}>
-        <DialogContent className="glass-card">
-          <DialogHeader>
-            <DialogTitle className="font-display">Continue with Google</DialogTitle>
-            <DialogDescription>
-              Enter your Google email to continue. In production, this will open Google&apos;s official OAuth consent screen.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <Label htmlFor="google-email">Google email</Label>
-              <Input
-                id="google-email"
-                type="email"
-                placeholder="you@gmail.com"
-                value={googleEmail}
-                onChange={e => setGoogleEmail(e.target.value)}
-                className="mt-1.5 glass-card"
-                onKeyDown={e => e.key === 'Enter' && handleGoogleSubmit()}
-              />
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              Dev mode: Creates an account if one doesn&apos;t exist. In production, real Google OAuth token verification is used.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setGoogleModalOpen(false)}>Cancel</Button>
-            <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleGoogleSubmit} disabled={googleLoading || !googleEmail}>
-              {googleLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              Continue
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

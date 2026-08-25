@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -178,42 +179,44 @@ export default function ReviewsPage() {
               </Card>
             ) : (
               reviews.map(review => (
-                <Card key={review.id} className="p-4 glass-card hover:border-[var(--brass)]/30 transition-all">
-                  <div className="flex items-start gap-3">
-                    <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
-                      {review.author[0]}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="text-sm font-medium">{review.author}</span>
-                        <div className="flex">
-                          {Array.from({ length: 5 }).map((_, j) => (
-                            <Star key={j} className={cn('w-2.5 h-2.5', j < review.rating ? 'text-[var(--brass)] fill-[var(--brass)]' : 'text-muted-foreground/30')} />
-                          ))}
+                <Link key={review.id} href={`/inbox?reviewId=${review.id}`}>
+                  <Card className="p-4 glass-card hover:border-[var(--brass)]/50 hover:bg-accent/10 transition-all cursor-pointer h-full">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
+                        {review.author[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-sm font-medium">{review.author}</span>
+                          <div className="flex">
+                            {Array.from({ length: 5 }).map((_, j) => (
+                              <Star key={j} className={cn('w-2.5 h-2.5', j < review.rating ? 'text-[var(--brass)] fill-[var(--brass)]' : 'text-muted-foreground/30')} />
+                            ))}
+                          </div>
+                          <Badge variant="outline" className="text-[9px] font-mono uppercase py-0 px-1.5">{review.source}</Badge>
                         </div>
-                        <Badge variant="outline" className="text-[9px] font-mono uppercase py-0 px-1.5">{review.source}</Badge>
-                      </div>
-                      {review.title && <div className="text-xs font-medium mb-1">{review.title}</div>}
-                      <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{review.text}</p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] text-muted-foreground">{review.business.name}</span>
-                        {review.draftStatus === 'POSTED' ? (
-                          <Badge variant="outline" className="text-[9px] bg-green-500/10 text-green-600 border-green-500/30 py-0">
-                            <Check className="w-2.5 h-2.5 mr-1" />
-                            Replied
-                          </Badge>
-                        ) : review.draftStatus === 'PENDING' ? (
-                          <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/30 py-0">
-                            <Clock className="w-2.5 h-2.5 mr-1" />
-                            Draft ready
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[9px] py-0">No reply</Badge>
-                        )}
+                        {review.title && <div className="text-xs font-medium mb-1">{review.title}</div>}
+                        <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{review.text}</p>
+                        <div className="flex items-center justify-between gap-2 flex-wrap mt-auto pt-1">
+                          <span className="text-[10px] text-muted-foreground">{review.business.name}</span>
+                          {review.draftStatus === 'POSTED' ? (
+                            <Badge variant="outline" className="text-[9px] bg-green-500/10 text-green-600 border-green-500/30 py-0">
+                              <Check className="w-2.5 h-2.5 mr-1" />
+                              Replied
+                            </Badge>
+                          ) : review.draftStatus === 'PENDING' ? (
+                            <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/30 py-0">
+                              <Clock className="w-2.5 h-2.5 mr-1" />
+                              Draft ready
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[9px] py-0 text-muted-foreground">Open in Inbox →</Badge>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </Card>
+                  </Card>
+                </Link>
               ))
             )}
           </div>

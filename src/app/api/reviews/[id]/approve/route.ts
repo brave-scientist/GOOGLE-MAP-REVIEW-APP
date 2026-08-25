@@ -87,6 +87,41 @@ export async function POST(
       },
     })
 
+    // If manual publishing workflow is selected (Beta workflow: Approve & Copy)
+    if (body.manual === true || body.publishMode === 'manual') {
+      await db.$transaction([
+        db.reviewPublishAttempt.update({
+          where: { id: attempt.id },
+          data: { status: PublishAttemptStatus.SUCCESS, remoteId: `manual_copy_${id}` },
+        }),
+        db.review.update({
+          where: { id },
+          data: {
+            replyText: finalText,
+            repliedAt: new Date(),
+            repliedBy: ctx.user.id,
+            draftStatus: DraftStatus.POSTED,
+          },
+        }),
+        db.auditLog.create({
+          data: {
+            actorId: ctx.user.id,
+            action: 'reply.manual_approved',
+            targetType: 'review',
+            targetId: id,
+            metadata: JSON.stringify({ reviewId: id, source: review.source, mode: 'manual_copy' }),
+          },
+        }),
+      ])
+
+      return NextResponse.json({
+        status: DraftStatus.POSTED,
+        replyText: finalText,
+        repliedAt: new Date().toISOString(),
+        manual: true,
+      })
+    }
+
     // Dispatch to external platform adapter
     if (review.source === ReviewSource.GOOGLE) {
       const token = await db.oAuthToken.findUnique({
