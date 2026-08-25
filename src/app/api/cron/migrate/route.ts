@@ -4,15 +4,15 @@ import { db } from '@/lib/db'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
-  const sessionSecret = process.env.SESSION_SECRET
-
   const adminEmailHeader = request.headers.get('x-admin-email')?.trim().toLowerCase()
   const adminEmails = (process.env.ADMIN_EMAILS || '')
     .split(',')
     .map(e => e.trim().toLowerCase())
     .filter(Boolean)
+
+  const authHeader = request.headers.get('authorization')
+  const cronSecret = process.env.CRON_SECRET
+  const sessionSecret = process.env.SESSION_SECRET
 
   const isAuthorized =
     (adminEmailHeader && adminEmails.includes(adminEmailHeader)) ||
