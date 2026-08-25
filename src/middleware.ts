@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionFromRequest } from '@/lib/auth'
+import { getSessionFromRequest } from '@/lib/session'
 import { rateLimit, getClientIP, RATE_LIMITS } from '@/lib/rate-limit'
 
 // Routes that DON'T require authentication
