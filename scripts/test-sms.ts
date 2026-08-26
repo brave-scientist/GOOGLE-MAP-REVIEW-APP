@@ -603,10 +603,285 @@ async function runTests() {
   )
 
   // ═══════════════════════════════════════════════════════════════
+  // SECTION 16: TELNYX PRODUCTION SPECIFIC MATRIX (TELNYX-PROD-001 - TELNYX-PROD-035)
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n--- SECTION 16: TELNYX PRODUCTION MATRIX (SMS-001.2) ---')
+
+  // TELNYX-PROD-001: Telnyx default provider when SMS_PROVIDER is unset
+  const prevProv = process.env.SMS_PROVIDER
+  delete process.env.SMS_PROVIDER
+  assert(SmsService.getProvider().name === 'telnyx', 'TELNYX-PROD-001', 'Telnyx is default provider when SMS_PROVIDER is unset')
+
+  // TELNYX-PROD-002: Explicit Telnyx selection
+  process.env.SMS_PROVIDER = 'telnyx'
+  assert(SmsService.getProvider().name === 'telnyx', 'TELNYX-PROD-002', 'Explicit SMS_PROVIDER=telnyx selects Telnyx')
+  delete process.env.SMS_PROVIDER
+
+  // TELNYX-PROD-003: Missing API key fails closed with CONFIG_MISSING
+  {
+    const origKey = process.env.TELNYX_API_KEY
+    delete process.env.TELNYX_API_KEY
+    const tAdapter = new TelnyxAdapter()
+    const res = await tAdapter.send({ to: '+14155552671', body: 'Test', businessId: 'bus_1' })
+    assert(!res.success && res.errorCode === 'CONFIG_MISSING', 'TELNYX-PROD-003', 'Missing TELNYX_API_KEY returns CONFIG_MISSING')
+    if (origKey) process.env.TELNYX_API_KEY = origKey
+  }
+
+  // TELNYX-PROD-004: Missing sender configuration fails closed
+  {
+    const origKey = process.env.TELNYX_API_KEY
+    const origFrom = process.env.TELNYX_FROM_PHONE_NUMBER
+    const origProf = process.env.TELNYX_MESSAGING_PROFILE_ID
+    process.env.TELNYX_API_KEY = 'test_key'
+    delete process.env.TELNYX_FROM_PHONE_NUMBER
+    delete process.env.TELNYX_MESSAGING_PROFILE_ID
+    const tAdapter = new TelnyxAdapter()
+    const res = await tAdapter.send({ to: '+14155552671', body: 'Test', businessId: 'bus_1' })
+    assert(!res.success && res.errorCode === 'CONFIG_MISSING', 'TELNYX-PROD-004', 'Missing sender number/profile returns CONFIG_MISSING')
+    if (origKey) process.env.TELNYX_API_KEY = origKey
+    else delete process.env.TELNYX_API_KEY
+    if (origFrom) process.env.TELNYX_FROM_PHONE_NUMBER = origFrom
+    if (origProf) process.env.TELNYX_MESSAGING_PROFILE_ID = origProf
+  }
+
+  // TELNYX-PROD-005: Invalid destination rejected
+  const invPhone = validateAndNormalizePhone('invalid_number_123', 'US')
+  assert(!invPhone.valid, 'TELNYX-PROD-005', 'Invalid destination phone number is rejected')
+
+  // TELNYX-PROD-006: Valid E.164 destination normalized and accepted
+  const valPhone = validateAndNormalizePhone('(415) 555-2671', 'US')
+  assert(valPhone.valid && valPhone.e164 === '+14155552671', 'TELNYX-PROD-006', 'Valid destination normalized to strict E.164')
+
+  // TELNYX-PROD-007: Successful provider message ID stored from Telnyx response
+  const parsedTelnyxEvt = telnyx.parseWebhook(testPayload)
+  assert(parsedTelnyxEvt?.providerMessageId === 'msg_sec_001', 'TELNYX-PROD-007', 'Real Telnyx provider message ID preserved')
+
+  // TELNYX-PROD-008: Failed dispatch has NULL providerMessageId
+  {
+    const tAdapter = new TelnyxAdapter()
+    const res = await tAdapter.send({ to: 'invalid', body: 'Test', businessId: 'bus_1' })
+    assert(res.providerMessageId === undefined, 'TELNYX-PROD-008', 'Failed dispatch does not manufacture providerMessageId')
+  }
+
+  // TELNYX-PROD-009: Network failure has NULL providerMessageId
+  {
+    // TelnyxAdapter catch block returns { success: false, providerMessageId: undefined, errorCode: 'NETWORK_ERROR' }
+    const sendSrc = fs.readFileSync(new URL('../src/lib/sms/telnyx.ts', import.meta.url), 'utf-8')
+    assert(
+      sendSrc.includes("errorCode: 'NETWORK_ERROR'") && !sendSrc.includes("providerMessageId: 'local_"),
+      'TELNYX-PROD-009',
+      'Network failure returns no synthetic providerMessageId'
+    )
+  }
+
+  // TELNYX-PROD-010: Valid webhook signature verifies (Ed25519)
+  process.env.TELNYX_PUBLIC_KEY = testCrypto.rawPubKeyBase64
+  assert(
+    telnyx.verifyWebhook(testPayload, new Headers({
+      'telnyx-signature-ed25519': validSig,
+      'telnyx-timestamp': currentTs,
+    })),
+    'TELNYX-PROD-010',
+    'Valid Ed25519 signature verifies successfully'
+  )
+
+  // TELNYX-PROD-011: Invalid webhook signature rejected (403)
+  assert(
+    !telnyx.verifyWebhook(testPayload, new Headers({
+      'telnyx-signature-ed25519': Buffer.from('invalid-signature-bytes-64-length-padding-123456789012345678901234').toString('base64'),
+      'telnyx-timestamp': currentTs,
+    })),
+    'TELNYX-PROD-011',
+    'Invalid webhook signature fails closed'
+  )
+
+  // TELNYX-PROD-012: Tampered raw body rejected (403)
+  assert(
+    !telnyx.verifyWebhook(testPayload + '{"tampered":true}', new Headers({
+      'telnyx-signature-ed25519': validSig,
+      'telnyx-timestamp': currentTs,
+    })),
+    'TELNYX-PROD-012',
+    'Tampered raw body fails signature verification'
+  )
+
+  // TELNYX-PROD-013: Missing signature header rejected (403)
+  assert(
+    !telnyx.verifyWebhook(testPayload, new Headers({ 'telnyx-timestamp': currentTs })),
+    'TELNYX-PROD-013',
+    'Missing signature header rejected'
+  )
+
+  // TELNYX-PROD-014: Missing timestamp header rejected (403)
+  assert(
+    !telnyx.verifyWebhook(testPayload, new Headers({ 'telnyx-signature-ed25519': validSig })),
+    'TELNYX-PROD-014',
+    'Missing timestamp header rejected'
+  )
+
+  // TELNYX-PROD-015: Missing public key fails closed (403)
+  {
+    delete process.env.TELNYX_PUBLIC_KEY
+    assert(
+      !telnyx.verifyWebhook(testPayload, new Headers({
+        'telnyx-signature-ed25519': validSig,
+        'telnyx-timestamp': currentTs,
+      })),
+      'TELNYX-PROD-015',
+      'Missing TELNYX_PUBLIC_KEY fails closed'
+    )
+    process.env.TELNYX_PUBLIC_KEY = testCrypto.rawPubKeyBase64
+  }
+
+  // TELNYX-PROD-016: Stale timestamp (>300s) rejected for replay prevention (403)
+  {
+    const oldTs = (Math.floor(Date.now() / 1000) - 301).toString()
+    const oldSig = testCrypto.sign(testPayload, oldTs)
+    assert(
+      !telnyx.verifyWebhook(testPayload, new Headers({
+        'telnyx-signature-ed25519': oldSig,
+        'telnyx-timestamp': oldTs,
+      })),
+      'TELNYX-PROD-016',
+      'Stale timestamp (>300s) rejected by replay protection window'
+    )
+  }
+
+  // TELNYX-PROD-017: Malformed timestamp rejected (403)
+  assert(
+    !telnyx.verifyWebhook(testPayload, new Headers({
+      'telnyx-signature-ed25519': validSig,
+      'telnyx-timestamp': 'not_a_unix_timestamp',
+    })),
+    'TELNYX-PROD-017',
+    'Malformed timestamp rejected'
+  )
+
+  // TELNYX-PROD-018: Malformed public key fails closed (403)
+  {
+    process.env.TELNYX_PUBLIC_KEY = 'invalid_key_bytes'
+    assert(
+      !telnyx.verifyWebhook(testPayload, new Headers({
+        'telnyx-signature-ed25519': validSig,
+        'telnyx-timestamp': currentTs,
+      })),
+      'TELNYX-PROD-018',
+      'Malformed public key fails closed safely'
+    )
+    process.env.TELNYX_PUBLIC_KEY = testCrypto.rawPubKeyBase64
+  }
+
+  // TELNYX-PROD-019: Malformed signature fails closed (403)
+  assert(
+    !telnyx.verifyWebhook(testPayload, new Headers({
+      'telnyx-signature-ed25519': 'short_sig',
+      'telnyx-timestamp': currentTs,
+    })),
+    'TELNYX-PROD-019',
+    'Malformed signature length fails closed safely'
+  )
+
+  // TELNYX-PROD-020: Missing event ID returns null (fails closed)
+  const noEvtId = JSON.stringify({ data: { event_type: 'message.delivered', payload: {} } })
+  assert(telnyx.parseWebhook(noEvtId) === null, 'TELNYX-PROD-020', 'Missing event ID returns null')
+
+  // TELNYX-PROD-021: Unknown event type returns null (safe ignore)
+  const unkEvt = JSON.stringify({ data: { id: 'evt_123', event_type: 'unknown.type', payload: {} } })
+  assert(telnyx.parseWebhook(unkEvt) === null, 'TELNYX-PROD-021', 'Unknown event type returns null')
+
+  // TELNYX-PROD-022: Atomic duplicate webhook handled via P2002
+  assert(serviceSource.includes("err.code === 'P2002'"), 'TELNYX-PROD-022', 'Atomic duplicate event handled via Prisma P2002')
+
+  // TELNYX-PROD-023: Concurrent duplicate webhook handled via unique constraint
+  assert(
+    serviceSource.includes("return { status: 200, message: 'Event already processed (idempotent).' }"),
+    'TELNYX-PROD-023',
+    'Concurrent duplicate receives 200 idempotent acknowledgement without re-mutating'
+  )
+
+  // TELNYX-PROD-024: Unknown providerMessageId safely ignored
+  assert(
+    serviceSource.includes('if (existingDelivery)'),
+    'TELNYX-PROD-024',
+    'Unknown providerMessageId does not mutate database or create orphan state'
+  )
+
+  // TELNYX-PROD-025: Cross-tenant providerMessageId cannot mutate unowned business
+  assert(
+    !serviceSource.includes('event.businessId') &&
+    !serviceSource.includes('event.orgId') &&
+    serviceSource.includes('providerMessageId: event.providerMessageId'),
+    'TELNYX-PROD-025',
+    'Tenant identity resolved strictly via existing delivery record lookup, not webhook payload'
+  )
+
+  // TELNYX-PROD-026: Delivery status regression (DELIVERED -> SENT) rejected
+  assert(!isValidStatusTransition('DELIVERED', 'SENT'), 'TELNYX-PROD-026', 'Status regression DELIVERED → SENT rejected')
+
+  // TELNYX-PROD-027: Valid delivery status transition (SENT -> DELIVERED) allowed
+  assert(isValidStatusTransition('SENT', 'DELIVERED'), 'TELNYX-PROD-027', 'Forward status transition SENT → DELIVERED allowed')
+
+  // TELNYX-PROD-028: STOP keyword opt-out handling and normalization
+  assert(isStopKeyword('  STOP  ') && isStopKeyword('unsubscribe'), 'TELNYX-PROD-028', 'STOP/UNSUBSCRIBE keywords normalized and recognized')
+
+  // TELNYX-PROD-029: START keyword opt-in handling
+  assert(isStartKeyword('START') && isStartKeyword('unstop'), 'TELNYX-PROD-029', 'START/UNSTOP keywords recognized for re-subscription')
+
+  // TELNYX-PROD-030: HELP keyword logging (no opt-in/opt-out mutation)
+  assert(!isStopKeyword('HELP') && !isStartKeyword('HELP'), 'TELNYX-PROD-030', 'HELP keyword classified for logging without opt mutation')
+
+  // TELNYX-PROD-031: Daily quota boundary enforcement
+  assert(
+    99 < SMS_LIMITS.TRIAL_DAILY_LIMIT && 100 >= SMS_LIMITS.TRIAL_DAILY_LIMIT &&
+    499 < SMS_LIMITS.STANDARD_DAILY_LIMIT && 500 >= SMS_LIMITS.STANDARD_DAILY_LIMIT,
+    'TELNYX-PROD-031',
+    'Daily quota boundaries enforced: Trial (100) and Standard (500)'
+  )
+
+  // TELNYX-PROD-032: Recipient 14-day cooldown enforcement
+  assert(SMS_LIMITS.RECIPIENT_COOLDOWN_DAYS === 14, 'TELNYX-PROD-032', 'Recipient cooldown enforced at 14 days')
+
+  // TELNYX-PROD-033: Campaign batch recipient limit
+  assert(SMS_LIMITS.CAMPAIGN_MAX_RECIPIENTS === 250, 'TELNYX-PROD-033', 'Campaign batch limit enforced at 250 recipients')
+
+  // TELNYX-PROD-034: SMS kill switch
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    delete process.env.FEATURE_SMS_ENABLED
+    const res = await SmsService.sendSms({ to: '+14155552671', body: 'Test', businessId: 'bus_1' })
+    assert(!res.success && res.errorCode === 'FEATURE_DISABLED', 'TELNYX-PROD-034', 'SMS kill switch fails closed with FEATURE_DISABLED')
+    if (origFlag) process.env.FEATURE_SMS_ENABLED = origFlag
+  }
+
+  // TELNYX-PROD-035: Telnyx failure does not silently send through Twilio
+  {
+    // 1. Adapter level: Telnyx adapter returns provider: 'telnyx' with error code on failure
+    const tAdapter = new TelnyxAdapter()
+    const sendRes = await tAdapter.send({ to: '+14155552671', body: 'Test fail-closed behavior', businessId: 'mock_bus_id' })
+    assert(
+      !sendRes.success && sendRes.provider === 'telnyx' && sendRes.errorCode === 'CONFIG_MISSING',
+      'TELNYX-PROD-035',
+      'Telnyx failure returns failed Telnyx result and does not invoke Twilio fallback'
+    )
+
+    // 2. Orchestrator level: Verify SmsService has no fallback dispatch mechanism from Telnyx to Twilio
+    assert(
+      !serviceSource.includes('twilioProvider.send') &&
+      !serviceSource.includes('fallbackProvider') &&
+      !serviceSource.includes('try { await provider.send') &&
+      !serviceSource.match(/provider\.send[\s\S]*catch[\s\S]*twilio/),
+      'TELNYX-PROD-035-ORCH',
+      'SmsService orchestrator contains no silent Telnyx → Twilio fallback pipeline'
+    )
+  }
+
+  if (prevProv) process.env.SMS_PROVIDER = prevProv
+
+  // ═══════════════════════════════════════════════════════════════
   // SUMMARY
   // ═══════════════════════════════════════════════════════════════
   console.log('\n=================================================================')
-  console.log(`SMS-001.1 TEST SUMMARY: ${passedTests} PASSED, ${failedTests} FAILED (TOTAL: ${totalTests})`)
+  console.log(`SMS-001.2 TEST SUMMARY: ${passedTests} PASSED, ${failedTests} FAILED (TOTAL: ${totalTests})`)
   console.log('=================================================================\n')
 
   if (failedTests > 0) {

@@ -156,8 +156,8 @@ export class SmsService {
     // 7. Dispatch Message via Active Provider
     const provider = this.getProvider()
 
-    // Resolve sender: explicit option > env var. No fake fallback.
-    const senderNumber = options.from || process.env.TELNYX_FROM_PHONE_NUMBER || process.env.TWILIO_PHONE_NUMBER
+    // Resolve sender: explicit option > provider-specific env var. No fake fallback.
+    const senderNumber = options.from || (provider.name === 'telnyx' ? process.env.TELNYX_FROM_PHONE_NUMBER : process.env.TWILIO_PHONE_NUMBER)
     const fromField = senderNumber || 'UNCONFIGURED'
 
     const result = await provider.send({
