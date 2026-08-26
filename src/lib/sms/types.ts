@@ -16,7 +16,8 @@ export interface SmsSendOptions {
 export interface SmsSendResult {
   success: boolean
   provider: 'telnyx' | 'twilio'
-  providerMessageId?: string
+  providerMessageId?: string  // Real provider ID, or undefined on rejection/failure
+  dispatchId?: string         // Internal correlation ID (always present in DB)
   status: 'queued' | 'sent' | 'failed'
   segments?: number
   errorCode?: string
@@ -62,6 +63,38 @@ export const SMS_LIMITS = {
   RECIPIENT_COOLDOWN_DAYS: 14, // Minimum days between review requests to same number
   WEBHOOK_REPLAY_WINDOW_SEC: 300, // 5-minute replay protection threshold
 } as const
+
+/**
+ * Monotonic status ordinals for delivery state machine.
+ *
+ * Rules:
+ * - A webhook can only move status forward (higher ordinal) or to the same ordinal (idempotent).
+ * - Exception: DELIVERED (3) → FAILED (4) is allowed because it represents a provider correction
+ *   (e.g., carrier returned a delayed failure after initial delivery confirmation).
+ * - DELIVERED → SENT is never allowed (prevents regression from delayed webhooks).
+ *
+ * Quota policy:
+ * - Daily quota counts ALL dispatch attempts (including FAILED) to prevent abuse loops.
+ * - This means a bad actor cannot circumvent limits by causing intentional failures.
+ */
+export const SMS_STATUS_ORDINAL: Record<string, number> = {
+  QUEUED: 0,
+  SENDING: 1,
+  SENT: 2,
+  DELIVERED: 3,
+  FAILED: 4,
+  UNDELIVERED: 5,
+} as const
+
+/**
+ * Determines whether a status transition is valid (monotonic forward or same).
+ */
+export function isValidStatusTransition(currentStatus: string, newStatus: string): boolean {
+  const currentOrd = SMS_STATUS_ORDINAL[currentStatus] ?? 0
+  const newOrd = SMS_STATUS_ORDINAL[newStatus] ?? 0
+  // Allow forward transitions, same-status (idempotent), and DELIVERED→FAILED/UNDELIVERED (provider correction)
+  return newOrd >= currentOrd
+}
 
 // Standard Review Request Template Builder
 export function buildReviewRequestSms(params: {

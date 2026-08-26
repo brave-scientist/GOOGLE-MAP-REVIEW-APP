@@ -172,6 +172,11 @@ export class TelnyxAdapter implements ISmsProvider {
       const payload = data.payload || {}
       const providerMessageId = payload.id as string | undefined
 
+      // Reject events without a real event ID — synthetic IDs break idempotency
+      if (!eventId) {
+        return null
+      }
+
       let type: ParsedSmsWebhookEvent['type']
       switch (eventType) {
         case 'message.sent':
@@ -197,7 +202,7 @@ export class TelnyxAdapter implements ISmsProvider {
 
       return {
         provider: 'telnyx',
-        eventId: eventId || `telnyx_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        eventId: eventId,
         providerMessageId,
         type,
         from: payload.from?.phone_number,

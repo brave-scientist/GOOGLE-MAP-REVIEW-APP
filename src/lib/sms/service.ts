@@ -1,5 +1,7 @@
-// src/lib/sms/service.ts — Central SMS Orchestrator (Quota, Opt-Out, Cooldown, Dispatch, and Webhook Ingestion)
+// src/lib/sms/service.ts — Central SMS Orchestrator
+// SMS-001.1 Hardened: Atomic idempotency, monotonic status, E.164 opt-out, no fake fallbacks
 import { db } from '@/lib/db'
+import { Prisma } from '@prisma/client'
 import { isOptedOut, optOutContact, optInContact } from '@/lib/opt-out'
 import { isStopKeyword, isStartKeyword } from '@/lib/integrations/twilio'
 import { validateAndNormalizePhone } from './phone'
@@ -11,6 +13,8 @@ import {
   SmsSendResult,
   SmsStatus,
   SMS_LIMITS,
+  SMS_STATUS_ORDINAL,
+  isValidStatusTransition,
 } from './types'
 
 export class SmsService {
@@ -38,6 +42,9 @@ export class SmsService {
 
   /**
    * Dispatches a single SMS through the compliance, rate limiting, and provider pipeline.
+   *
+   * Quota policy: Daily quota counts ALL dispatch attempts (including FAILED) to prevent
+   * abuse loops where a bad actor circumvents limits by causing intentional failures.
    */
   static async sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
     const { businessId, body, reviewRequestId, recipientId } = options
@@ -99,6 +106,7 @@ export class SmsService {
     }
 
     // 5. Check Daily Sending Quota (UTC Day Window)
+    // Counts ALL dispatch attempts including FAILED to prevent abuse loops
     const todayStart = new Date()
     todayStart.setUTCHours(0, 0, 0, 0)
 
@@ -122,7 +130,8 @@ export class SmsService {
       }
     }
 
-    // 6. Recipient Cooldown Enforcement (14 Days between review requests)
+    // 6. Recipient Cooldown Enforcement (14 Days between review requests per business)
+    // Scoped to business + E.164 normalized number
     const cooldownCutoff = new Date(Date.now() - SMS_LIMITS.RECIPIENT_COOLDOWN_DAYS * 24 * 60 * 60 * 1000)
     const recentSend = await db.smsDeliveryEvent.findFirst({
       where: {
@@ -146,33 +155,41 @@ export class SmsService {
 
     // 7. Dispatch Message via Active Provider
     const provider = this.getProvider()
+
+    // Resolve sender: explicit option > env var. No fake fallback.
+    const senderNumber = options.from || process.env.TELNYX_FROM_PHONE_NUMBER || process.env.TWILIO_PHONE_NUMBER
+    const fromField = senderNumber || 'UNCONFIGURED'
+
     const result = await provider.send({
       ...options,
       to: toE164,
+      from: senderNumber,
     })
 
     // 8. Persist Delivery Event Record in Database
-    const providerMessageId = result.providerMessageId || `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    // providerMessageId is nullable — only store real provider IDs, never synthetic
     const mappedStatus = result.success
       ? (result.status === 'sent' ? SmsStatus.SENT : SmsStatus.QUEUED)
       : SmsStatus.FAILED
 
-    await db.smsDeliveryEvent.create({
+    const deliveryRecord = await db.smsDeliveryEvent.create({
       data: {
         provider: provider.name,
-        providerMessageId,
+        providerMessageId: result.providerMessageId || null, // NULL if provider didn't return ID
         businessId,
         reviewRequestId,
         recipientId,
         to: toE164,
-        from: options.from || process.env.TELNYX_FROM_PHONE_NUMBER || process.env.TWILIO_PHONE_NUMBER || '+18005550199',
+        from: fromField,
         status: mappedStatus,
+        statusOrdinal: SMS_STATUS_ORDINAL[mappedStatus] ?? 0,
         segments: result.segments || 1,
         errorCode: result.errorCode,
         errorMessage: result.errorMessage,
       },
     }).catch(err => {
       console.error('[SMS-DB] Failed to record SmsDeliveryEvent:', err)
+      return null
     })
 
     // 9. Audit Logging (PII-masked)
@@ -184,7 +201,8 @@ export class SmsService {
         targetId: businessId,
         metadata: JSON.stringify({
           provider: provider.name,
-          providerMessageId: result.providerMessageId,
+          providerMessageId: result.providerMessageId || null,
+          dispatchId: deliveryRecord?.dispatchId || null,
           to: maskedPhone,
           success: result.success,
           errorCode: result.errorCode,
@@ -192,12 +210,21 @@ export class SmsService {
       },
     }).catch(() => {})
 
-    return result
+    return {
+      ...result,
+      dispatchId: deliveryRecord?.dispatchId,
+    }
   }
 
   /**
    * Ingests and processes incoming provider webhooks (delivery receipts and inbound replies).
-   * Enforces cryptographic verification, replay protection, and idempotency.
+   *
+   * Security controls:
+   * 1. Cryptographic signature verification (Ed25519 for Telnyx, HMAC-SHA1 for Twilio)
+   * 2. Timestamp replay protection (300s window)
+   * 3. Atomic database-enforced idempotency via unique constraint on SmsWebhookEvent.eventId
+   * 4. Monotonic delivery status transitions (prevents DELIVERED→SENT regressions)
+   * 5. Tenant isolation via providerMessageId→SmsDeliveryEvent→businessId lookup
    */
   static async handleWebhook(
     provider: ISmsProvider,
@@ -216,27 +243,31 @@ export class SmsService {
       return { status: 400, message: 'Malformed webhook payload or unsupported event.' }
     }
 
-    // 3. Idempotency Gate (Prevent Duplicate Event Ingestion)
-    const existingEvent = await db.smsWebhookEvent.findUnique({
-      where: { eventId: event.eventId },
-    })
-
-    if (existingEvent) {
-      return { status: 200, message: 'Event already processed (idempotent).' }
+    // 3. Atomic Idempotency Gate — use INSERT with unique constraint catch
+    // Two concurrent requests with the same eventId: exactly one succeeds, the other gets P2002
+    try {
+      await db.smsWebhookEvent.create({
+        data: {
+          provider: event.provider,
+          eventId: event.eventId,
+          eventType: event.type,
+          payload: rawBody.slice(0, 2000),
+          processedAt: new Date(),
+        },
+      })
+    } catch (err) {
+      // P2002 = Unique constraint violation → event already processed
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        return { status: 200, message: 'Event already processed (idempotent).' }
+      }
+      // Genuine database error — do not silently swallow
+      console.error('[SMS-WEBHOOK] Failed to record webhook event:', err)
+      return { status: 500, message: 'Database error during webhook processing.' }
     }
 
-    // Record Webhook Event for Idempotency
-    await db.smsWebhookEvent.create({
-      data: {
-        provider: event.provider,
-        eventId: event.eventId,
-        eventType: event.type,
-        payload: rawBody.slice(0, 2000), // Persist head of payload safely
-        processedAt: new Date(),
-      },
-    }).catch(() => {})
-
     // 4. Handle Outbound Delivery Receipts
+    // Tenant isolation: webhook cannot supply tenant IDs. We resolve tenant from
+    // providerMessageId → SmsDeliveryEvent → businessId → Business.orgId
     if (event.providerMessageId && event.type.startsWith('outbound.')) {
       let targetStatus: SmsStatus
       switch (event.type) {
@@ -256,45 +287,65 @@ export class SmsService {
           targetStatus = SmsStatus.SENT
       }
 
-      // Update Delivery Event
-      const updatedDelivery = await db.smsDeliveryEvent.updateMany({
+      const newOrdinal = SMS_STATUS_ORDINAL[targetStatus] ?? 0
+
+      // Look up the delivery event by real provider message ID
+      const existingDelivery = await db.smsDeliveryEvent.findUnique({
         where: { providerMessageId: event.providerMessageId },
-        data: {
-          status: targetStatus,
-          errorCode: event.errorCode,
-          errorMessage: event.errorMessage,
+        select: {
+          id: true,
+          status: true,
+          statusOrdinal: true,
+          reviewRequestId: true,
+          recipientId: true,
+          businessId: true,
         },
       })
 
-      // Update associated ReviewRequest / ReviewUsSendRecipient if matched
-      if (event.type === 'outbound.delivered') {
-        const delivery = await db.smsDeliveryEvent.findUnique({
-          where: { providerMessageId: event.providerMessageId },
-          select: { reviewRequestId: true, recipientId: true },
-        })
-
-        if (delivery?.reviewRequestId) {
-          await db.reviewRequest.update({
-            where: { id: delivery.reviewRequestId },
-            data: { deliveredAt: new Date() },
-          }).catch(() => {})
-        }
-
-        if (delivery?.recipientId) {
-          await db.reviewUsSendRecipient.update({
-            where: { id: delivery.recipientId },
+      if (existingDelivery) {
+        // Monotonic status enforcement: only allow forward transitions
+        if (isValidStatusTransition(existingDelivery.status, targetStatus)) {
+          await db.smsDeliveryEvent.update({
+            where: { id: existingDelivery.id },
             data: {
-              status: 'delivered',
-              deliveredAt: new Date(),
+              status: targetStatus,
+              statusOrdinal: newOrdinal,
+              errorCode: event.errorCode,
+              errorMessage: event.errorMessage,
             },
-          }).catch(() => {})
+          })
+        }
+        // If transition is invalid, silently ignore (delayed webhook regression)
+
+        // Update associated ReviewRequest / ReviewUsSendRecipient if delivered
+        if (event.type === 'outbound.delivered') {
+          if (existingDelivery.reviewRequestId) {
+            await db.reviewRequest.update({
+              where: { id: existingDelivery.reviewRequestId },
+              data: { deliveredAt: new Date() },
+            }).catch(() => {})
+          }
+
+          if (existingDelivery.recipientId) {
+            await db.reviewUsSendRecipient.update({
+              where: { id: existingDelivery.recipientId },
+              data: {
+                status: 'delivered',
+                deliveredAt: new Date(),
+              },
+            }).catch(() => {})
+          }
         }
       }
+      // If no existingDelivery found for this providerMessageId, silently ignore.
+      // This prevents unknown/cross-tenant providerMessageIds from creating arbitrary state.
     }
 
     // 5. Handle Inbound Customer Replies (STOP, START, HELP)
     if (event.type === 'inbound.received' && event.from && event.body) {
-      const normalizedFrom = event.from.trim().toLowerCase()
+      // Normalize inbound phone to E.164 before opt-out storage
+      const phoneResult = validateAndNormalizePhone(event.from)
+      const normalizedFrom = phoneResult.valid && phoneResult.e164 ? phoneResult.e164 : event.from.trim()
       const bodyText = event.body.trim().toUpperCase()
 
       // STOP / UNSUBSCRIBE / CANCEL / QUIT / END
@@ -331,7 +382,7 @@ export class SmsService {
         }).catch(() => {})
       }
 
-      // HELP Keyword
+      // HELP Keyword — log only, no opt-in/opt-out mutation
       if (bodyText === 'HELP') {
         await db.auditLog.create({
           data: {

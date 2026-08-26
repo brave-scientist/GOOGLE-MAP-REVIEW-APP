@@ -474,17 +474,22 @@ model TeamInvitation {
 
 // ─────────────────────────────────────────────────────
 // SMS-001: Telnyx SMS Foundation & Delivery Tracking
+// SMS-001.1: Hardened — nullable providerMessageId,
+//   dispatchId for internal correlation, statusOrdinal
+//   for monotonic delivery state transitions
 // ─────────────────────────────────────────────────────
 model SmsDeliveryEvent {
   id                String         @id @default(cuid())
+  dispatchId        String         @unique @default(cuid()) // Internal correlation ID (always present)
   provider          String         // 'telnyx' | 'twilio'
-  providerMessageId String         @unique
+  providerMessageId String?        @unique // Provider-generated ID; NULL on rejection/network failure
   businessId        String
   reviewRequestId   String?
   recipientId       String?
   to                String         // E.164 formatted
-  from              String         // E.164 formatted
+  from              String         // E.164 formatted or 'UNCONFIGURED'
   status            SmsStatus      @default(QUEUED)
+  statusOrdinal     Int            @default(0) // Monotonic: prevents webhook status regressions
   errorCode         String?
   errorMessage      String?
   segments          Int            @default(1)
@@ -497,6 +502,7 @@ model SmsDeliveryEvent {
 
   @@index([businessId, status])
   @@index([reviewRequestId])
+  @@index([to, businessId, createdAt]) // Cooldown query optimization
 }
 
 enum SmsStatus {

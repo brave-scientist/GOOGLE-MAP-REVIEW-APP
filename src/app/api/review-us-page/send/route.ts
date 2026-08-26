@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { filterOptedOut } from '@/lib/opt-out'
-import { SmsService } from '@/lib/sms'
+import { SmsService, SMS_LIMITS } from '@/lib/sms'
 import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 import { generateBusinessSlug } from '@/lib/review-platforms'
 
@@ -77,6 +77,14 @@ export async function POST(request: NextRequest) {
 
     // Filter recipients against the opt-out list (same as campaigns)
     const { sendable, optedOut } = await filterOptedOut(recipients)
+
+    // Enforce batch size limit for SMS channel
+    if (channel === 'sms' && recipients.length > SMS_LIMITS.CAMPAIGN_MAX_RECIPIENTS) {
+      return NextResponse.json(
+        { error: `SMS batch size exceeds maximum of ${SMS_LIMITS.CAMPAIGN_MAX_RECIPIENTS} recipients.` },
+        { status: 400 }
+      )
+    }
 
     // Check if the sending channel is configured
     const smsConfigured = SmsService.isSmsEnabled()

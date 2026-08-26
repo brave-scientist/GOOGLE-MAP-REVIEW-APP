@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Channel, RequestStatus } from '@prisma/client'
-import { SmsService } from '@/lib/sms'
+import { SmsService, SMS_LIMITS } from '@/lib/sms'
 import { sendEmail, isResendConfigured, generateReviewRequestEmail } from '@/lib/integrations/resend'
 import { filterOptedOut } from '@/lib/opt-out'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
@@ -58,6 +58,14 @@ export async function POST(request: NextRequest) {
     const business = await db.business.findUnique({ where: { id: businessId } })
     if (!business) {
       return NextResponse.json({ error: 'Business not found' }, { status: 404 })
+    }
+
+    // Enforce campaign batch size limit
+    if (recipients.length > SMS_LIMITS.CAMPAIGN_MAX_RECIPIENTS) {
+      return NextResponse.json(
+        { error: `Campaign batch size exceeds maximum of ${SMS_LIMITS.CAMPAIGN_MAX_RECIPIENTS} recipients.` },
+        { status: 400 }
+      )
     }
 
     // Check opt-out list before sending
