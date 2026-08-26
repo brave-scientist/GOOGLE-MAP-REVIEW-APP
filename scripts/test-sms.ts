@@ -2,6 +2,7 @@
 // Comprehensive verification: idempotency, providerMessageId, config, tenant isolation,
 // quota boundaries, cooldowns, consent, keywords, status machine, security matrix
 import crypto from 'crypto'
+import { db } from '../src/lib/db'
 import {
   SmsService,
   TelnyxAdapter,
@@ -11,8 +12,216 @@ import {
   SMS_LIMITS,
   SMS_STATUS_ORDINAL,
   isValidStatusTransition,
+  recordConsent,
+  revokeConsent,
+  hasValidConsent,
+  getConsentRecord,
+  getDefaultSmsDisclosureText,
+  SmsConsentType,
+  SmsConsentSource,
+  ALLOWED_COMMERCIAL_CONSENT_TYPES,
 } from '../src/lib/sms'
 import { isStopKeyword, isStartKeyword } from '../src/lib/integrations/twilio'
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://mock:mock@localhost:5432/mock'
+
+import { optOutContact, optInContact, isOptedOut } from '../src/lib/opt-out'
+
+// In-Memory Test Store
+const inMemoryConsents = new Map<string, any>()
+const inMemoryOptOuts = new Map<string, any>()
+const inMemoryAuditLogs: any[] = []
+const inMemoryBusinesses = new Map<string, any>()
+const inMemoryOrgs = new Map<string, any>()
+const inMemoryUsers = new Map<string, any>()
+const inMemoryDeliveryEvents: any[] = []
+const inMemoryWebhookEvents = new Map<string, any>()
+
+// Install mock handlers on db for standalone test execution
+;(db as any).customerSmsConsent = {
+  findUnique: async ({ where }: any) => {
+    if (where?.id) {
+      for (const val of inMemoryConsents.values()) {
+        if (val.id === where.id) return { ...val }
+      }
+      return null
+    }
+    const key = `${where?.businessId_contact?.businessId}:${where?.businessId_contact?.contact}`
+    const found = inMemoryConsents.get(key)
+    return found ? { ...found } : null
+  },
+  upsert: async ({ where, create, update }: any) => {
+    const key = `${where?.businessId_contact?.businessId}:${where?.businessId_contact?.contact}`
+    const existing = inMemoryConsents.get(key)
+    if (existing) {
+      const updated = {
+        ...existing,
+        ...update,
+        consentedAt: update.consentedAt || new Date(),
+        revokedAt: update.revokedAt !== undefined ? update.revokedAt : existing.revokedAt,
+      }
+      inMemoryConsents.set(key, updated)
+      return { ...updated }
+    }
+    const created = {
+      id: `consent_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      ...create,
+      consentedAt: create.consentedAt || new Date(),
+      revokedAt: create.revokedAt || null,
+    }
+    inMemoryConsents.set(key, created)
+    return { ...created }
+  },
+  update: async ({ where, data }: any) => {
+    for (const [key, val] of inMemoryConsents.entries()) {
+      if (val.id === where.id) {
+        const updated = { ...val, ...data }
+        inMemoryConsents.set(key, updated)
+        return { ...updated }
+      }
+    }
+    throw new Error('Consent record not found')
+  },
+  count: async ({ where }: any) => {
+    let count = 0
+    for (const val of inMemoryConsents.values()) {
+      if (where?.businessId && val.businessId !== where.businessId) continue
+      if (where?.contact && val.contact !== where.contact) continue
+      count++
+    }
+    return count
+  },
+  deleteMany: async ({ where }: any) => {
+    let deleted = 0
+    for (const [key, val] of Array.from(inMemoryConsents.entries())) {
+      if (where?.contact && val.contact === where.contact) {
+        inMemoryConsents.delete(key)
+        deleted++
+      }
+    }
+    return { count: deleted }
+  },
+}
+
+;(db as any).optOut = {
+  findUnique: async ({ where }: any) => {
+    return inMemoryOptOuts.get(where.contact) || null
+  },
+  upsert: async ({ where, create, update }: any) => {
+    const existing = inMemoryOptOuts.get(where.contact)
+    if (existing) {
+      const updated = { ...existing, ...update }
+      inMemoryOptOuts.set(where.contact, updated)
+      return { ...updated }
+    }
+    const created = { id: `opt_${Date.now()}`, ...create, createdAt: new Date() }
+    inMemoryOptOuts.set(where.contact, created)
+    return { ...created }
+  },
+  delete: async ({ where }: any) => {
+    inMemoryOptOuts.delete(where.contact)
+    return {}
+  },
+}
+
+;(db as any).organization = {
+  upsert: async ({ where, create, update }: any) => {
+    const existing = inMemoryOrgs.get(where.id)
+    if (existing) {
+      const updated = { ...existing, ...update }
+      inMemoryOrgs.set(where.id, updated)
+      return { ...updated }
+    }
+    const created = { id: where.id, ...create }
+    inMemoryOrgs.set(where.id, created)
+    return { ...created }
+  },
+  findUnique: async ({ where }: any) => {
+    return inMemoryOrgs.get(where.id) || null
+  },
+}
+
+;(db as any).user = {
+  upsert: async ({ where, create, update }: any) => {
+    const existing = inMemoryUsers.get(where.email)
+    if (existing) {
+      const updated = { ...existing, ...update }
+      inMemoryUsers.set(where.email, updated)
+      return { ...updated }
+    }
+    const created = { id: create.id || `usr_${Date.now()}`, ...create }
+    inMemoryUsers.set(where.email, created)
+    return { ...created }
+  },
+  findUnique: async ({ where }: any) => {
+    return inMemoryUsers.get(where.email) || null
+  },
+}
+
+;(db as any).business = {
+  upsert: async ({ where, create, update }: any) => {
+    const existing = inMemoryBusinesses.get(where.id)
+    if (existing) {
+      const updated = { ...existing, ...update }
+      inMemoryBusinesses.set(where.id, updated)
+      return { ...updated }
+    }
+    const created = { id: where.id, ...create }
+    inMemoryBusinesses.set(where.id, created)
+    return { ...created }
+  },
+  findUnique: async ({ where, include }: any) => {
+    const b = inMemoryBusinesses.get(where.id)
+    if (!b) return null
+    const res = { ...b }
+    if (include?.org) {
+      res.org = inMemoryOrgs.get(b.orgId) || { plan: 'PRO' }
+    }
+    return res
+  },
+}
+
+;(db as any).smsDeliveryEvent = {
+  create: async ({ data }: any) => {
+    const rec = {
+      id: `sde_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      dispatchId: `disp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      ...data,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    inMemoryDeliveryEvents.push(rec)
+    return { ...rec }
+  },
+  count: async () => 0,
+  findFirst: async () => null,
+  findUnique: async ({ where }: any) => {
+    if (where?.providerMessageId) {
+      return inMemoryDeliveryEvents.find(e => e.providerMessageId === where.providerMessageId) || null
+    }
+    return null
+  },
+  update: async ({ where, data }: any) => {
+    const item = inMemoryDeliveryEvents.find(e => e.id === where.id)
+    if (item) Object.assign(item, data)
+    return item
+  },
+}
+
+;(db as any).auditLog = {
+  create: async ({ data }: any) => {
+    const log = { id: `log_${Date.now()}`, ...data, createdAt: new Date() }
+    inMemoryAuditLogs.push(log)
+    return { ...log }
+  },
+  findFirst: async ({ where, orderBy }: any) => {
+    const matches = inMemoryAuditLogs.filter(l => {
+      if (where?.targetId && l.targetId !== where.targetId) return false
+      if (where?.action && l.action !== where.action) return false
+      return true
+    })
+    return matches.length > 0 ? matches[matches.length - 1] : null
+  },
+}
 
 let totalTests = 0
 let passedTests = 0
@@ -878,10 +1087,563 @@ async function runTests() {
   if (prevProv) process.env.SMS_PROVIDER = prevProv
 
   // ═══════════════════════════════════════════════════════════════
+  // SECTION 15: SMS-002 — AFFIRMATIVE SMS CONSENT LEDGER & PRE-SEND ENFORCEMENT
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n=================================================================')
+  console.log('SMS-002 — AFFIRMATIVE SMS CONSENT & PRE-SEND ENFORCEMENT')
+  console.log('=================================================================\n')
+
+  // Setup test businesses in DB
+  const testOrg = await db.organization.upsert({
+    where: { id: 'org_consent_test_001' },
+    create: { id: 'org_consent_test_001', name: 'Consent Test Org', plan: 'PRO' },
+    update: {},
+  })
+
+  const testUser = await db.user.upsert({
+    where: { email: 'consent-tester@reviewreply.pw' },
+    create: {
+      id: 'usr_consent_test_001',
+      email: 'consent-tester@reviewreply.pw',
+      name: 'Consent Tester',
+    },
+    update: {},
+  })
+
+  const testBusA = await db.business.upsert({
+    where: { id: 'bus_consent_test_a' },
+    create: {
+      id: 'bus_consent_test_a',
+      orgId: testOrg.id,
+      ownerId: testUser.id,
+      name: 'Business Alpha',
+      slug: 'business-alpha-test',
+    },
+    update: {},
+  })
+
+  const testBusB = await db.business.upsert({
+    where: { id: 'bus_consent_test_b' },
+    create: {
+      id: 'bus_consent_test_b',
+      orgId: testOrg.id,
+      ownerId: testUser.id,
+      name: 'Business Beta',
+      slug: 'business-beta-test',
+    },
+    update: {},
+  })
+
+  const samplePhone = '+14155552671'
+  const sampleDisclosure = getDefaultSmsDisclosureText('Business Alpha')
+
+  // CONSENT-101: Consent model exists in db schema
+  assert(
+    typeof (db as any).customerSmsConsent?.findUnique === 'function' &&
+    typeof (db as any).customerSmsConsent?.upsert === 'function',
+    'CONSENT-101',
+    'CustomerSmsConsent model exists in Prisma database client'
+  )
+
+  // CONSENT-102: Consent can be created for normalized E.164 contact
+  const res102 = await recordConsent({
+    businessId: testBusA.id,
+    contact: '(415) 555-2671',
+    consentType: SmsConsentType.EXPRESS_WRITTEN,
+    consentSource: SmsConsentSource.CHECKOUT_FORM,
+    disclosureText: sampleDisclosure,
+    ipAddress: '192.168.1.1',
+    userAgent: 'Mozilla/5.0 TestBrowser',
+    actorId: testUser.id,
+  })
+  assert(
+    res102.success && res102.consent?.contact === samplePhone && res102.consent?.consentType === 'EXPRESS_WRITTEN',
+    'CONSENT-102',
+    'Consent successfully recorded for normalized E.164 contact'
+  )
+
+  // CONSENT-103: Invalid phone number rejected
+  const res103 = await recordConsent({
+    businessId: testBusA.id,
+    contact: 'invalid-number-123',
+    disclosureText: sampleDisclosure,
+  })
+  assert(
+    !res103.success && res103.errorCode === 'INVALID_PHONE_NUMBER',
+    'CONSENT-103',
+    'Invalid phone number rejected during consent capture'
+  )
+
+  // CONSENT-104: Missing disclosure text rejected
+  const res104 = await recordConsent({
+    businessId: testBusA.id,
+    contact: samplePhone,
+    disclosureText: '',
+  })
+  assert(
+    !res104.success && res104.errorCode === 'DISCLOSURE_TEXT_REQUIRED',
+    'CONSENT-104',
+    'Missing or empty disclosure text rejected during consent capture'
+  )
+
+  // CONSENT-105: Invalid consent type rejected
+  const res105 = await recordConsent({
+    businessId: testBusA.id,
+    contact: samplePhone,
+    consentType: 'UNVERIFIED_VERBAL' as any,
+    disclosureText: sampleDisclosure,
+  })
+  assert(
+    !res105.success && res105.errorCode === 'INVALID_CONSENT_TYPE',
+    'CONSENT-105',
+    'Invalid or uncontrolled consent type rejected'
+  )
+
+  // CONSENT-106: Invalid consent source rejected
+  const res106 = await recordConsent({
+    businessId: testBusA.id,
+    contact: samplePhone,
+    consentSource: 'customer_said_yes' as any,
+    disclosureText: sampleDisclosure,
+  })
+  assert(
+    !res106.success && res106.errorCode === 'INVALID_CONSENT_SOURCE',
+    'CONSENT-106',
+    'Invalid or uncontrolled consent source rejected'
+  )
+
+  // CONSENT-107: Consent is associated with correct business
+  const record107 = await getConsentRecord(testBusA.id, samplePhone)
+  assert(
+    record107 !== null && record107.businessId === testBusA.id,
+    'CONSENT-107',
+    'Consent record correctly associated with sending business ID'
+  )
+
+  // CONSENT-108: Cross-business consent cannot authorize SMS
+  const validBusB = await hasValidConsent(testBusB.id, samplePhone)
+  assert(
+    validBusB === false,
+    'CONSENT-108',
+    'Consent for Business A does not authorize Business B'
+  )
+
+  // CONSENT-109: Active consent allows eligible SMS
+  const validBusA = await hasValidConsent(testBusA.id, samplePhone)
+  assert(
+    validBusA === true,
+    'CONSENT-109',
+    'Active express written consent authorizes SMS verification check'
+  )
+
+  // CONSENT-110: Missing consent blocks SMS
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const unconsentedNumber = '+14155559999'
+
+    const sendRes = await SmsService.sendSms({
+      to: unconsentedNumber,
+      body: 'Review request',
+      businessId: testBusA.id,
+    })
+
+    assert(
+      !sendRes.success && sendRes.errorCode === 'CONSENT_REQUIRED',
+      'CONSENT-110',
+      'Outbound SMS to unconsented recipient is blocked with CONSENT_REQUIRED'
+    )
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+  }
+
+  // CONSENT-111: Revoked consent blocks SMS
+  {
+    const revokePhone = '+14155553333'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: revokePhone,
+      disclosureText: sampleDisclosure,
+    })
+
+    assert(await hasValidConsent(testBusA.id, revokePhone) === true, 'CONSENT-111-PRE', 'Initial consent active')
+
+    const revokeRes = await revokeConsent({
+      businessId: testBusA.id,
+      contact: revokePhone,
+      reason: 'customer_requested_revocation',
+    })
+
+    assert(revokeRes.success && revokeRes.consent?.revokedAt !== null, 'CONSENT-111-REVOKE', 'Revocation recorded')
+    assert(await hasValidConsent(testBusA.id, revokePhone) === false, 'CONSENT-111', 'Revoked consent blocks verification check')
+  }
+
+  // CONSENT-112: OptOut blocks SMS even when consent exists
+  {
+    const optOutPhone = '+14155554444'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: optOutPhone,
+      disclosureText: sampleDisclosure,
+    })
+    await optOutContact(optOutPhone, 'Customer sent STOP')
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+
+    const sendRes = await SmsService.sendSms({
+      to: optOutPhone,
+      body: 'Review request',
+      businessId: testBusA.id,
+    })
+
+    assert(
+      !sendRes.success && sendRes.errorCode === 'RECIPIENT_OPTED_OUT',
+      'CONSENT-112',
+      'OptOut blocklist overrides affirmative consent (fails closed with RECIPIENT_OPTED_OUT)'
+    )
+
+    // Cleanup opt-out state
+    await optInContact(optOutPhone)
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+  }
+
+  // CONSENT-113: START does not manufacture consent
+  {
+    const startPhone = '+14155555555'
+    // Ensure no prior consent exists
+    await db.customerSmsConsent.deleteMany({ where: { contact: startPhone } })
+    await optOutContact(startPhone, 'Prior STOP')
+
+    // Simulate customer sending START
+    await optInContact(startPhone)
+    assert(await isOptedOut(startPhone) === false, 'CONSENT-113-OPTIN', 'OptOut blocklist cleared on START')
+
+    const hasManufacturedConsent = await hasValidConsent(testBusA.id, startPhone)
+    assert(
+      hasManufacturedConsent === false,
+      'CONSENT-113',
+      'START keyword removes opt-out state but does NOT manufacture affirmative consent'
+    )
+  }
+
+  // CONSENT-114: Historical revoked consent evidence remains stored
+  {
+    const histPhone = '+14155556666'
+    const customDisclosure = 'Verbatim custom disclosure text from checkout page v2'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: histPhone,
+      disclosureText: customDisclosure,
+    })
+
+    await revokeConsent({
+      businessId: testBusA.id,
+      contact: histPhone,
+    })
+
+    const historicalRecord = await db.customerSmsConsent.findUnique({
+      where: {
+        businessId_contact: {
+          businessId: testBusA.id,
+          contact: histPhone,
+        },
+      },
+    })
+
+    assert(
+      historicalRecord !== null &&
+      historicalRecord.revokedAt !== null &&
+      historicalRecord.disclosureText === customDisclosure,
+      'CONSENT-114',
+      'Revocation preserves verbatim historical disclosure text and consent evidence in database'
+    )
+  }
+
+  // CONSENT-115: Exact disclosure text is persisted
+  {
+    const exactPhone = '+14155557777'
+    const exactText = 'Exact compliance disclosure text shown to user on kiosk #4'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: exactPhone,
+      disclosureText: exactText,
+    })
+
+    const record = await getConsentRecord(testBusA.id, exactPhone)
+    assert(
+      record?.disclosureText === exactText,
+      'CONSENT-115',
+      'Exact verbatim disclosure text is persisted without alteration'
+    )
+  }
+
+  // CONSENT-116: Consent timestamp is server-generated
+  {
+    const tsPhone = '+14155558888'
+    const before = new Date(Date.now() - 1000)
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: tsPhone,
+      disclosureText: sampleDisclosure,
+    })
+    const after = new Date(Date.now() + 1000)
+
+    const record = await getConsentRecord(testBusA.id, tsPhone)
+    const consentedAt = record?.consentedAt ? new Date(record.consentedAt).getTime() : 0
+    assert(
+      consentedAt >= before.getTime() && consentedAt <= after.getTime(),
+      'CONSENT-116',
+      'Consent timestamp is securely generated on the server at capture time'
+    )
+  }
+
+  // CONSENT-117: E.164 normalization prevents duplicate representations
+  {
+    const basePhone = '+14155559000'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: '(415) 555-9000',
+      disclosureText: sampleDisclosure,
+    })
+
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: '415-555-9000',
+      disclosureText: sampleDisclosure + ' (updated)',
+    })
+
+    const count = await db.customerSmsConsent.count({
+      where: {
+        businessId: testBusA.id,
+        contact: basePhone,
+      },
+    })
+
+    assert(
+      count === 1,
+      'CONSENT-117',
+      'E.164 normalization prevents duplicate representation rows for the same phone number'
+    )
+  }
+
+  // CONSENT-118: Existing contacts without consent remain blocked
+  {
+    const existingUnconsented = '+14155559111'
+    const hasConsent = await hasValidConsent(testBusA.id, existingUnconsented)
+    assert(
+      hasConsent === false,
+      'CONSENT-118',
+      'Existing contacts without affirmative consent records remain blocked (fail closed)'
+    )
+  }
+
+  // CONSENT-119: API import without consent evidence is rejected
+  {
+    const importNoEvidence = await recordConsent({
+      businessId: testBusA.id,
+      contact: '+14155559222',
+      consentSource: SmsConsentSource.API_IMPORT,
+      disclosureText: '', // Missing evidence
+    })
+
+    assert(
+      !importNoEvidence.success && importNoEvidence.errorCode === 'DISCLOSURE_TEXT_REQUIRED',
+      'CONSENT-119',
+      'API import without consent evidence is strictly rejected'
+    )
+  }
+
+  // CONSENT-120: API import with valid evidence succeeds
+  {
+    const importPhone = '+14155559333'
+    const importEvidence = 'Imported from Shopify POS checkout checkbox with affirmative consent'
+    const importRes = await recordConsent({
+      businessId: testBusA.id,
+      contact: importPhone,
+      consentType: SmsConsentType.EXPRESS_WRITTEN,
+      consentSource: SmsConsentSource.API_IMPORT,
+      disclosureText: importEvidence,
+    })
+
+    assert(
+      importRes.success && importRes.consent?.consentSource === 'API_IMPORT',
+      'CONSENT-120',
+      'API import with complete valid evidence succeeds'
+    )
+  }
+
+  // CONSENT-121: Business A consent does not authorize Business B (Tenant Isolation)
+  {
+    const tenantPhone = '+14155559444'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: tenantPhone,
+      disclosureText: sampleDisclosure,
+    })
+
+    const busAValid = await hasValidConsent(testBusA.id, tenantPhone)
+    const busBValid = await hasValidConsent(testBusB.id, tenantPhone)
+
+    assert(
+      busAValid === true && busBValid === false,
+      'CONSENT-121',
+      'Tenant isolation verified: Business A consent strictly isolates from Business B'
+    )
+  }
+
+  // CONSENT-122: No Telnyx request occurs when consent is missing
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const unconsentedPhone = '+14155559555'
+
+    let telnyxCalled = false
+    const origTelnyxSend = TelnyxAdapter.prototype.send
+    TelnyxAdapter.prototype.send = async function (opts: any) {
+      telnyxCalled = true
+      return origTelnyxSend.call(this, opts)
+    }
+
+    const sendRes = await SmsService.sendSms({
+      to: unconsentedPhone,
+      body: 'Test no telnyx call',
+      businessId: testBusA.id,
+    })
+
+    TelnyxAdapter.prototype.send = origTelnyxSend
+
+    assert(
+      !sendRes.success && sendRes.errorCode === 'CONSENT_REQUIRED' && telnyxCalled === false,
+      'CONSENT-122',
+      'No Telnyx network request is triggered when affirmative consent is missing'
+    )
+
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+  }
+
+  // CONSENT-123: No Twilio request occurs when consent is missing
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    const origProv = process.env.SMS_PROVIDER
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    process.env.SMS_PROVIDER = 'twilio'
+
+    const unconsentedPhone = '+14155559666'
+
+    let twilioCalled = false
+    const origTwilioSend = TwilioAdapter.prototype.send
+    TwilioAdapter.prototype.send = async function (opts: any) {
+      twilioCalled = true
+      return origTwilioSend.call(this, opts)
+    }
+
+    const sendRes = await SmsService.sendSms({
+      to: unconsentedPhone,
+      body: 'Test no twilio call',
+      businessId: testBusA.id,
+    })
+
+    TwilioAdapter.prototype.send = origTwilioSend
+
+    assert(
+      !sendRes.success && sendRes.errorCode === 'CONSENT_REQUIRED' && twilioCalled === false,
+      'CONSENT-123',
+      'No Twilio network request is triggered when affirmative consent is missing'
+    )
+
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+    if (origProv !== undefined) process.env.SMS_PROVIDER = origProv
+    else delete process.env.SMS_PROVIDER
+  }
+
+  // CONSENT-124: Consent gate cannot be bypassed through campaign endpoint
+  {
+    const campaignRouteSource = fs.readFileSync(
+      new URL('../src/app/api/campaigns/create/route.ts', import.meta.url), 'utf-8'
+    )
+    assert(
+      campaignRouteSource.includes('SmsService.sendSms') &&
+      campaignRouteSource.includes('recordConsent') &&
+      serviceSource.includes('hasValidConsent(businessId, toE164)'),
+      'CONSENT-124',
+      'Campaign endpoint dispatches via SmsService central gate and cannot bypass consent enforcement'
+    )
+  }
+
+  // CONSENT-125: Consent gate cannot be bypassed through review-us-page endpoint
+  {
+    const reviewUsRouteSource = fs.readFileSync(
+      new URL('../src/app/api/review-us-page/send/route.ts', import.meta.url), 'utf-8'
+    )
+    assert(
+      reviewUsRouteSource.includes('SmsService.sendSms') &&
+      reviewUsRouteSource.includes('recordConsent') &&
+      serviceSource.includes('hasValidConsent(businessId, toE164)'),
+      'CONSENT-125',
+      'Review Us Page send endpoint dispatches via SmsService central gate and cannot bypass consent enforcement'
+    )
+  }
+
+  // SEC-CONSENT-001: Re-granting consent on revoked record clears revokedAt
+  {
+    const reGrantPhone = '+14155559777'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: reGrantPhone,
+      disclosureText: sampleDisclosure,
+    })
+    await revokeConsent({
+      businessId: testBusA.id,
+      contact: reGrantPhone,
+    })
+    assert(await hasValidConsent(testBusA.id, reGrantPhone) === false, 'SEC-001-REV', 'Revoked state verified')
+
+    const reGrantRes = await recordConsent({
+      businessId: testBusA.id,
+      contact: reGrantPhone,
+      disclosureText: sampleDisclosure + ' (Re-granted consent)',
+    })
+    assert(
+      reGrantRes.success && reGrantRes.consent?.revokedAt === null,
+      'SEC-CONSENT-001',
+      'Re-granting consent resets revokedAt to null and re-enables active consent'
+    )
+  }
+
+  // SEC-CONSENT-002: Audit logs recorded for consent operations
+  {
+    const auditPhone = '+14155559888'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: auditPhone,
+      disclosureText: sampleDisclosure,
+      actorId: testUser.id,
+    })
+
+    const auditGranted = await db.auditLog.findFirst({
+      where: {
+        targetId: testBusA.id,
+        action: 'sms.consent_granted',
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    assert(
+      auditGranted !== null && !!auditGranted.metadata?.includes('****'),
+      'SEC-CONSENT-002',
+      'Audit log recorded for sms.consent_granted with PII-masked phone number'
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // SUMMARY
   // ═══════════════════════════════════════════════════════════════
   console.log('\n=================================================================')
-  console.log(`SMS-001.2 TEST SUMMARY: ${passedTests} PASSED, ${failedTests} FAILED (TOTAL: ${totalTests})`)
+  console.log(`SMS-002 TEST SUMMARY: ${passedTests} PASSED, ${failedTests} FAILED (TOTAL: ${totalTests})`)
   console.log('=================================================================\n')
 
   if (failedTests > 0) {

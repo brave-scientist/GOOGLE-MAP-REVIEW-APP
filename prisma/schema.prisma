@@ -104,6 +104,7 @@ model Business {
   competitors         Competitor[]
   scheduledReports    ScheduledReport[]
   smsDeliveries       SmsDeliveryEvent[]
+  smsConsents         CustomerSmsConsent[]
 }
 
 model Review {
@@ -524,5 +525,42 @@ model SmsWebhookEvent {
   createdAt   DateTime  @default(now())
 
   @@index([provider, eventId])
+}
+
+// ─────────────────────────────────────────────────────
+// SMS-002: Affirmative SMS Consent Ledger
+// Durable evidence of express written consent prior to dispatch
+// ─────────────────────────────────────────────────────
+model CustomerSmsConsent {
+  id             String           @id @default(cuid())
+  businessId     String
+  contact        String           // Normalized E.164 (+1XXXXXXXXXX)
+  consentType    SmsConsentType   @default(EXPRESS_WRITTEN)
+  consentSource  SmsConsentSource @default(CHECKOUT_FORM)
+  disclosureText String           // Verbatim disclosure text presented at opt-in
+  ipAddress      String?
+  userAgent      String?
+  consentedAt    DateTime         @default(now())
+  revokedAt      DateTime?
+
+  business       Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, contact])
+  @@index([businessId, contact])
+  @@index([businessId, consentedAt])
+}
+
+enum SmsConsentType {
+  EXPRESS_WRITTEN
+  TRANSACTIONAL
+  IMPLIED
+}
+
+enum SmsConsentSource {
+  CHECKOUT_FORM
+  IN_PERSON_KIOSK
+  API_IMPORT
+  WEBSITE_FORM
+  MANUAL_ENTRY
 }
 

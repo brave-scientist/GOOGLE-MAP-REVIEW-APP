@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client'
 import { isOptedOut, optOutContact, optInContact } from '@/lib/opt-out'
 import { isStopKeyword, isStartKeyword } from '@/lib/integrations/twilio'
 import { validateAndNormalizePhone } from './phone'
+import { hasValidConsent } from './consent'
 import { TelnyxAdapter } from './telnyx'
 import { TwilioAdapter } from './twilio'
 import {
@@ -105,7 +106,54 @@ export class SmsService {
       }
     }
 
-    // 5. Check Daily Sending Quota (UTC Day Window)
+    // 5. Affirmative SMS Consent Enforcement (SMS-002)
+    // Commercial review-request SMS requires durable affirmative express written consent
+    const hasConsent = await hasValidConsent(businessId, toE164)
+    if (!hasConsent) {
+      const deliveryRecord = await db.smsDeliveryEvent.create({
+        data: {
+          provider: this.getProvider().name,
+          providerMessageId: null,
+          businessId,
+          reviewRequestId,
+          recipientId,
+          to: toE164,
+          from: options.from || 'UNCONFIGURED',
+          status: SmsStatus.FAILED,
+          statusOrdinal: SMS_STATUS_ORDINAL[SmsStatus.FAILED] ?? 4,
+          segments: 1,
+          errorCode: 'CONSENT_REQUIRED',
+          errorMessage: 'Affirmative express written consent (EXPRESS_WRITTEN) is required before sending SMS to this recipient.',
+        },
+      }).catch(() => null)
+
+      const maskedPhone = toE164.slice(0, 4) + '****' + toE164.slice(-4)
+      await db.auditLog.create({
+        data: {
+          action: 'sms.dispatch_failed',
+          targetType: 'business',
+          targetId: businessId,
+          metadata: JSON.stringify({
+            provider: this.getProvider().name,
+            dispatchId: deliveryRecord?.dispatchId || null,
+            to: maskedPhone,
+            success: false,
+            errorCode: 'CONSENT_REQUIRED',
+          }),
+        },
+      }).catch(() => {})
+
+      return {
+        success: false,
+        provider: this.getProvider().name,
+        status: 'failed',
+        errorCode: 'CONSENT_REQUIRED',
+        errorMessage: 'Affirmative express written consent (EXPRESS_WRITTEN) is required before sending SMS to this recipient.',
+        dispatchId: deliveryRecord?.dispatchId,
+      }
+    }
+
+    // 6. Check Daily Sending Quota (UTC Day Window)
     // Counts ALL dispatch attempts including FAILED to prevent abuse loops
     const todayStart = new Date()
     todayStart.setUTCHours(0, 0, 0, 0)
@@ -130,7 +178,7 @@ export class SmsService {
       }
     }
 
-    // 6. Recipient Cooldown Enforcement (14 Days between review requests per business)
+    // 7. Recipient Cooldown Enforcement (14 Days between review requests per business)
     // Scoped to business + E.164 normalized number
     const cooldownCutoff = new Date(Date.now() - SMS_LIMITS.RECIPIENT_COOLDOWN_DAYS * 24 * 60 * 60 * 1000)
     const recentSend = await db.smsDeliveryEvent.findFirst({
@@ -153,7 +201,7 @@ export class SmsService {
       }
     }
 
-    // 7. Dispatch Message via Active Provider
+    // 8. Dispatch Message via Active Provider
     const provider = this.getProvider()
 
     // Resolve sender: explicit option > provider-specific env var. No fake fallback.
@@ -166,7 +214,7 @@ export class SmsService {
       from: senderNumber,
     })
 
-    // 8. Persist Delivery Event Record in Database
+    // 9. Persist Delivery Event Record in Database
     // providerMessageId is nullable — only store real provider IDs, never synthetic
     const mappedStatus = result.success
       ? (result.status === 'sent' ? SmsStatus.SENT : SmsStatus.QUEUED)
@@ -192,7 +240,7 @@ export class SmsService {
       return null
     })
 
-    // 9. Audit Logging (PII-masked)
+    // 10. Audit Logging (PII-masked)
     const maskedPhone = toE164.slice(0, 4) + '****' + toE164.slice(-4)
     await db.auditLog.create({
       data: {

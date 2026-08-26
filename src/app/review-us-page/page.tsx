@@ -41,9 +41,12 @@ export default function ReviewUsPagePage() {
   const [channel, setChannel] = useState<'sms' | 'email'>('sms')
   const [messageTemplate, setMessageTemplate] = useState('')
   const [recipients, setRecipients] = useState<Recipient[]>([])
+  const [consentConfirmed, setConsentConfirmed] = useState(false)
   const [sending, setSending] = useState(false)
   const [pastSends, setPastSends] = useState<PastSend[]>([])
   const [loadingSends, setLoadingSends] = useState(false)
+
+  const disclosureText = `By providing your phone number, you agree to receive text messages from ${businessName || 'this business'} regarding review requests and customer feedback. Message and data rates may apply. Message frequency varies. Reply STOP to opt out, HELP for help.`
 
   // Fetch business ID + name on mount
   useEffect(() => {
@@ -150,6 +153,10 @@ export default function ReviewUsPagePage() {
       toast.error('No valid recipients', { description: 'Add at least one recipient with name and contact' })
       return
     }
+    if (channel === 'sms' && !consentConfirmed) {
+      toast.error('Affirmative consent required', { description: 'You must confirm affirmative express written consent before sending commercial SMS.' })
+      return
+    }
 
     setSending(true)
     try {
@@ -161,6 +168,8 @@ export default function ReviewUsPagePage() {
           channel,
           messageTemplate,
           recipients: validRecipients,
+          consentConfirmed,
+          disclosureText,
         }),
       })
       const data = await res.json()
@@ -347,6 +356,25 @@ export default function ReviewUsPagePage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Affirmative SMS Consent Checkbox (SMS-002) */}
+              {channel === 'sms' && validRecipients.length > 0 && (
+                <div className="mt-3 p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
+                  <div className="flex items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      id="review-us-sms-consent"
+                      checked={consentConfirmed}
+                      onChange={e => setConsentConfirmed(e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-amber-500/40 text-[var(--brass)] focus:ring-[var(--brass)] cursor-pointer"
+                    />
+                    <label htmlFor="review-us-sms-consent" className="text-xs text-foreground cursor-pointer leading-relaxed">
+                      <span className="font-medium text-amber-600 dark:text-amber-400 block mb-0.5">Affirmative Express Written Consent Confirmation</span>
+                      I confirm that all SMS recipients have affirmatively agreed to receive review request text messages from {businessName || 'this business'}. Message and data rates may apply. Message frequency varies. Recipients can reply STOP to opt out at any time.
+                    </label>
+                  </div>
                 </div>
               )}
 

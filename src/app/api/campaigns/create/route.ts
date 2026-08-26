@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Channel, RequestStatus } from '@prisma/client'
-import { SmsService, SMS_LIMITS } from '@/lib/sms'
+import { SmsService, SMS_LIMITS, recordConsent, SmsConsentSource, SmsConsentType } from '@/lib/sms'
 import { sendEmail, isResendConfigured, generateReviewRequestEmail } from '@/lib/integrations/resend'
 import { filterOptedOut } from '@/lib/opt-out'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
@@ -23,6 +23,8 @@ const CreateCampaignSchema = z.object({
     })
   ).min(1, 'At least one recipient is required'),
   sendNow: z.boolean().optional(),
+  consentConfirmed: z.boolean().optional(),
+  disclosureText: z.string().optional(),
 })
 
 // POST /api/campaigns/create — Create a new campaign and optionally send it
@@ -49,6 +51,8 @@ export async function POST(request: NextRequest) {
       messageTemplate,
       recipients,
       sendNow = false,
+      consentConfirmed = false,
+      disclosureText,
     } = parseResult.data
 
     // SEC-01: verify the caller's org owns this business
@@ -90,6 +94,20 @@ export async function POST(request: NextRequest) {
 
     const channels = Array.isArray(channelMix) ? channelMix : channelMix.split(',').map((c: string) => c.trim())
     const sendResults: Array<{ contact: string; status: 'sent' | 'failed' | 'opted_out'; channel: string; error?: string }> = []
+
+    // If affirmative consent was confirmed with disclosure text, record consent evidence
+    if (consentConfirmed && disclosureText && channels.some(c => c.toLowerCase() === 'sms')) {
+      for (const recipient of sendable) {
+        await recordConsent({
+          businessId,
+          contact: recipient.contact,
+          consentType: SmsConsentType.EXPRESS_WRITTEN,
+          consentSource: SmsConsentSource.CHECKOUT_FORM,
+          disclosureText,
+          actorId: ctx.user.id,
+        }).catch(() => {})
+      }
+    }
 
     if (sendNow) {
       for (const recipient of sendable) {

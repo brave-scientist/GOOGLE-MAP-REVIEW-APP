@@ -40,6 +40,7 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
   const [businessId, setBusinessId] = useState<string>('')
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
   const [qrLoading, setQrLoading] = useState(false)
+  const [consentConfirmed, setConsentConfirmed] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch first business on mount
@@ -66,6 +67,7 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
     setSelectedChannels(['sms'])
     setMessageTemplate('')
     setRecipients([{ name: '', contact: '' }])
+    setConsentConfirmed(false)
   }
 
   const handleClose = (open: boolean) => {
@@ -93,6 +95,8 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
 
   const validRecipients = recipients.filter(r => r.name.trim() && r.contact.trim())
 
+  const disclosureText = `By providing your phone number, you agree to receive text messages regarding review requests and customer feedback. Message and data rates may apply. Message frequency varies. Reply STOP to opt out, HELP for help.`
+
   const handleCreate = async (sendNow: boolean) => {
     if (!businessId) {
       toast.error('No business found', { description: 'Please add a business first' })
@@ -100,6 +104,10 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
     }
     if (validRecipients.length === 0) {
       toast.error('No valid recipients', { description: 'Add at least one recipient with name and contact' })
+      return
+    }
+    if (sendNow && selectedChannels.includes('sms') && !consentConfirmed) {
+      toast.error('Affirmative consent required', { description: 'You must confirm affirmative express written consent before sending commercial SMS.' })
       return
     }
 
@@ -116,6 +124,8 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
           messageTemplate,
           recipients: validRecipients,
           sendNow,
+          consentConfirmed,
+          disclosureText,
         }),
       })
       const data = await res.json()
@@ -488,6 +498,25 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
               <code className="text-[10px]">Sarah Chen,+14155552001</code><br />
               <code className="text-[10px]">Marcus Webb,marcus@example.com</code>
             </div>
+
+            {/* Affirmative SMS Consent Checkbox (SMS-002) */}
+            {selectedChannels.includes('sms') && (
+              <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    id="campaign-sms-consent"
+                    checked={consentConfirmed}
+                    onChange={e => setConsentConfirmed(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-amber-500/40 text-[var(--brass)] focus:ring-[var(--brass)] cursor-pointer"
+                  />
+                  <label htmlFor="campaign-sms-consent" className="text-xs text-foreground cursor-pointer leading-relaxed">
+                    <span className="font-medium text-amber-600 dark:text-amber-400 block mb-0.5">Affirmative Express Written Consent Confirmation</span>
+                    I confirm that all SMS recipients have affirmatively agreed to receive review request text messages from this business. Message and data rates may apply. Message frequency varies. Recipients can reply STOP to opt out at any time.
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { filterOptedOut } from '@/lib/opt-out'
-import { SmsService, SMS_LIMITS } from '@/lib/sms'
+import { SmsService, SMS_LIMITS, recordConsent, SmsConsentSource, SmsConsentType } from '@/lib/sms'
 import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 import { generateBusinessSlug } from '@/lib/review-platforms'
 
@@ -21,6 +21,8 @@ const SendReviewUsSchema = z.object({
       contact: z.union([z.string(), z.number()]).transform(c => String(c)),
     })
   ).min(1, 'At least one recipient is required'),
+  consentConfirmed: z.boolean().optional(),
+  disclosureText: z.string().optional(),
 })
 
 // POST /api/review-us-page/send — bulk-send the Review Us Page link to customers
@@ -38,7 +40,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { businessId, channel, messageTemplate, recipients } = parseResult.data
+    const {
+      businessId,
+      channel,
+      messageTemplate,
+      recipients,
+      consentConfirmed = false,
+      disclosureText,
+    } = parseResult.data
 
     // Verify the business has a slug set (needed for the Review Us URL)
     const business = await db.business.findUnique({
@@ -183,6 +192,20 @@ export async function POST(request: NextRequest) {
         failedCount: 0,
       },
     })
+
+    // If affirmative consent was confirmed with disclosure text, record consent evidence
+    if (channel === 'sms' && consentConfirmed && disclosureText) {
+      for (const recipient of sendable) {
+        await recordConsent({
+          businessId,
+          contact: recipient.contact,
+          consentType: SmsConsentType.EXPRESS_WRITTEN,
+          consentSource: SmsConsentSource.WEBSITE_FORM,
+          disclosureText,
+          actorId: ctx.user.id,
+        }).catch(() => {})
+      }
+    }
 
     // Send to each recipient
     let sentCount = 0
