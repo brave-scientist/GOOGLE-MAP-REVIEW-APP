@@ -1,15 +1,43 @@
 import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { Role, Plan } from '@prisma/client'
-import { SignJWT, jwtVerify } from 'jose'
+import { EncryptJWT, jwtDecrypt } from 'jose'
 import { NextRequest, NextResponse } from 'next/server'
 import { SessionUser } from '@/lib/session'
+import { getRedisClient } from '@/lib/rate-limit'
 
 export const OAUTH_STATE_COOKIE = 'rr_oauth_google_state'
 export const OAUTH_STATE_TTL_SECONDS = 600 // 10 minutes
 
 const SECRET_KEY = process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'
-const stateSecret = new TextEncoder().encode(SECRET_KEY)
+
+// In-memory single-use transaction store for fast atomic check & local/fallback execution
+const consumedOAuthTransactions = new Map<string, number>()
+
+// Periodic cleanup of expired in-memory consumed transaction entries
+if (typeof setInterval !== 'undefined') {
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now()
+    for (const [key, expiresAt] of consumedOAuthTransactions.entries()) {
+      if (expiresAt < now) {
+        consumedOAuthTransactions.delete(key)
+      }
+    }
+  }, 5 * 60 * 1000)
+  if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer && typeof (cleanupTimer as any).unref === 'function') {
+    ;(cleanupTimer as any).unref()
+  }
+}
+
+/**
+ * Derives a dedicated 256-bit symmetric encryption key from SESSION_SECRET for OAuth state JWE.
+ */
+function getOAuthEncryptionKey(): Uint8Array {
+  return crypto
+    .createHash('sha256')
+    .update('rr-oauth-state-encryption-key-v1:' + SECRET_KEY)
+    .digest()
+}
 
 export interface GoogleOAuthConfig {
   clientId: string
@@ -114,22 +142,25 @@ export function verifyPKCEChallenge(verifier: string, challenge: string): boolea
 }
 
 /**
- * Signs and encodes the temporary OAuth transaction state.
+ * Encrypts and encodes the temporary OAuth transaction state using JWE (AES-256-GCM).
+ * Provides confidentiality, integrity, authenticity, and expiration.
  */
 export async function encodeOAuthState(payload: OAuthStatePayload): Promise<string> {
-  return await new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: 'HS256' })
+  const encryptionKey = getOAuthEncryptionKey()
+  return await new EncryptJWT({ ...payload })
+    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + OAUTH_STATE_TTL_SECONDS)
-    .sign(stateSecret)
+    .encrypt(encryptionKey)
 }
 
 /**
- * Verifies and decodes the temporary OAuth transaction state.
+ * Decrypts and verifies the temporary OAuth transaction state from JWE.
  */
 export async function decodeOAuthState(token: string): Promise<OAuthStatePayload | null> {
   try {
-    const { payload } = await jwtVerify(token, stateSecret)
+    const encryptionKey = getOAuthEncryptionKey()
+    const { payload } = await jwtDecrypt(token, encryptionKey)
     if (!payload.state || !payload.nonce || !payload.codeVerifier) {
       return null
     }
@@ -146,12 +177,60 @@ export async function decodeOAuthState(token: string): Promise<OAuthStatePayload
   }
 }
 
+/**
+ * Atomically consumes an OAuth transaction state to guarantee true single-use semantics
+ * and prevent concurrent replay race conditions.
+ * Returns true if successfully claimed, or false if already consumed / race condition detected.
+ */
+export async function consumeOAuthTransaction(
+  state: string,
+  ttlMs: number = OAUTH_STATE_TTL_SECONDS * 1000
+): Promise<boolean> {
+  if (!state || typeof state !== 'string' || state.trim().length === 0) {
+    return false
+  }
+
+  // 1. Try Redis atomic SET NX PX if Redis is configured
+  const redis = getRedisClient()
+  if (redis) {
+    try {
+      const res = await redis.set(`oauth:consumed:${state}`, '1', {
+        nx: true,
+        px: ttlMs,
+      })
+      if (!res || (res !== 'OK' && res !== 'true')) {
+        return false
+      }
+      return true
+    } catch (err) {
+      console.warn('[OAuth] Upstash Redis consume error, falling back to in-memory store:', err)
+    }
+  }
+
+  // 2. In-memory atomic single-use check
+  const now = Date.now()
+  const existingExpiresAt = consumedOAuthTransactions.get(state)
+  if (existingExpiresAt && existingExpiresAt > now) {
+    return false
+  }
+
+  consumedOAuthTransactions.set(state, now + ttlMs)
+  return true
+}
+
+/**
+ * Clears in-memory consumed transactions (for testing purposes).
+ */
+export function _clearConsumedOAuthTransactions(): void {
+  consumedOAuthTransactions.clear()
+}
+
 function shouldUseSecureCookie(): boolean {
   return process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_APP_URL?.startsWith('https') === true
 }
 
 /**
- * Sets the secure OAuth transaction state cookie on a response.
+ * Sets the secure, encrypted OAuth transaction state cookie on a response.
  */
 export async function setOAuthStateCookie(response: NextResponse, payload: OAuthStatePayload) {
   const token = await encodeOAuthState(payload)

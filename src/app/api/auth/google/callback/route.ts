@@ -3,6 +3,7 @@ import {
   getGoogleOAuthConfig,
   getOAuthStateFromRequest,
   clearOAuthStateCookie,
+  consumeOAuthTransaction,
   exchangeGoogleAuthCode,
   verifyGoogleIdTokenClaims,
   resolveGoogleIdentity,
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
     return fallbackRedirect('missing_oauth_parameters')
   }
 
-  // Read and validate temporary OAuth state cookie
+  // Read and decrypt temporary OAuth state cookie (validates expiration & integrity)
   const storedTx = await getOAuthStateFromRequest(request)
   if (!storedTx) {
     return fallbackRedirect('oauth_state_missing_or_expired')
@@ -48,6 +49,13 @@ export async function GET(request: NextRequest) {
   if (storedTx.state !== state) {
     console.error('[OAuth] State mismatch detected during callback')
     return fallbackRedirect('oauth_state_mismatch')
+  }
+
+  // Atomically consume transaction — enforces true single-use and blocks concurrent replay races
+  const claimed = await consumeOAuthTransaction(storedTx.state)
+  if (!claimed) {
+    console.error('[OAuth] Transaction already consumed or concurrent callback attempt detected')
+    return fallbackRedirect('oauth_transaction_already_consumed')
   }
 
   // Check config

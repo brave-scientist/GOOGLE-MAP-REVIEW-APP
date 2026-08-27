@@ -27,6 +27,8 @@ import {
   verifyPKCEChallenge,
   encodeOAuthState,
   decodeOAuthState,
+  consumeOAuthTransaction,
+  _clearConsumedOAuthTransactions,
   buildGoogleAuthUrl,
   verifyGoogleIdTokenClaims,
   resolveGoogleIdentity,
@@ -36,7 +38,7 @@ import {
 import { createSession, decodeSession, encodeSession, SessionUser } from '../src/lib/session'
 import { getCurrentUser } from '../src/lib/auth'
 import { Plan, Role } from '@prisma/client'
-import { SignJWT } from 'jose'
+import { SignJWT, EncryptJWT } from 'jose'
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -108,7 +110,9 @@ async function runGoogleOAuthTests() {
   // ──────────────────────────────────────────────────────────────────
   // GOOGLE-003, GOOGLE-004, GOOGLE-005, GOOGLE-025: State & Cookie Lifecycle
   // ──────────────────────────────────────────────────────────────────
-  console.log('\n--- GOOGLE-003, 004, 005, 025: OAuth State Lifecycle & Invalidation ---')
+  console.log('\n--- GOOGLE-003, 004, 005, 025: OAuth State Lifecycle, JWE Encryption & Atomic Invalidation ---')
+  _clearConsumedOAuthTransactions()
+
   const stateToken = await encodeOAuthState({
     state: state1,
     nonce: nonce1,
@@ -118,8 +122,14 @@ async function runGoogleOAuthTests() {
     createdAt: Date.now(),
   })
 
+  // GOOGLE-025-F: Encrypted JWE confidentiality test
+  const decodedHeader = JSON.parse(Buffer.from(stateToken.split('.')[0], 'base64url').toString('utf8'))
+  assert('GOOGLE-025-F: OAuth state cookie is encrypted via JWE (A256GCM authenticated encryption)', decodedHeader.enc === 'A256GCM' && decodedHeader.alg === 'dir')
+  assert('GOOGLE-025-F: OAuth state cookie does not leak code_verifier as plaintext', !stateToken.includes(pkce.codeVerifier))
+  assert('GOOGLE-025-F: OAuth state cookie does not leak state as plaintext', !stateToken.includes(state1))
+
   const decodedState = await decodeOAuthState(stateToken)
-  assert('State token decodes correctly', decodedState !== null && decodedState.state === state1 && decodedState.nonce === nonce1)
+  assert('State token decodes and decrypts correctly', decodedState !== null && decodedState.state === state1 && decodedState.nonce === nonce1 && decodedState.codeVerifier === pkce.codeVerifier)
 
   // GOOGLE-003: State mismatch check
   assert('GOOGLE-003: State mismatch rejected', decodedState?.state !== 'attacker_state')
@@ -128,17 +138,48 @@ async function runGoogleOAuthTests() {
   const emptyDecode = await decodeOAuthState('')
   assert('GOOGLE-004: Empty state token rejected', emptyDecode === null)
 
-  // GOOGLE-005: Expired state rejected
-  const expiredToken = await new SignJWT({ state: state1, nonce: nonce1, codeVerifier: pkce.codeVerifier })
-    .setProtectedHeader({ alg: 'HS256' })
+  // GOOGLE-005 & GOOGLE-025-D: Expired state rejected
+  const derivedKey = crypto
+    .createHash('sha256')
+    .update('rr-oauth-state-encryption-key-v1:' + (process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'))
+    .digest()
+
+  const expiredToken = await new EncryptJWT({ state: state1, nonce: nonce1, codeVerifier: pkce.codeVerifier })
+    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
     .setIssuedAt(Math.floor(Date.now() / 1000) - 1200)
     .setExpirationTime(Math.floor(Date.now() / 1000) - 600)
-    .sign(new TextEncoder().encode(process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'))
+    .encrypt(derivedKey)
 
   const expiredDecode = await decodeOAuthState(expiredToken)
-  assert('GOOGLE-005: Expired OAuth state transaction rejected', expiredDecode === null)
+  assert('GOOGLE-005 & GOOGLE-025-D: Expired OAuth state transaction rejected', expiredDecode === null)
 
-  // GOOGLE-025: Single-use state clearing simulation
+  // GOOGLE-025-A: First callback transaction consumption succeeds
+  const firstConsume = await consumeOAuthTransaction(state1)
+  assert('GOOGLE-025-A: First callback transaction consumption succeeds', firstConsume === true)
+
+  // GOOGLE-025-B: Second callback using same transaction fails (replay rejection)
+  const secondConsume = await consumeOAuthTransaction(state1)
+  assert('GOOGLE-025-B: Second callback using same transaction fails', secondConsume === false)
+
+  // GOOGLE-025-C: Concurrent callback race condition test
+  const concurrentState = generateCryptographicEntropy(32)
+  const [resA, resB] = await Promise.all([
+    consumeOAuthTransaction(concurrentState),
+    consumeOAuthTransaction(concurrentState),
+  ])
+  const concurrentSuccessCount = (resA ? 1 : 0) + (resB ? 1 : 0)
+  const concurrentFailCount = (!resA ? 1 : 0) + (!resB ? 1 : 0)
+  assert(
+    'GOOGLE-025-C: Two concurrent callback attempts result in exactly ONE success and ONE failure',
+    concurrentSuccessCount === 1 && concurrentFailCount === 1,
+    `Successes: ${concurrentSuccessCount}, Failures: ${concurrentFailCount}`
+  )
+
+  // GOOGLE-025-E: Consumed transaction cannot be resurrected
+  const thirdConsume = await consumeOAuthTransaction(state1)
+  assert('GOOGLE-025-E: Consumed transaction cannot be resurrected on subsequent attempts', thirdConsume === false)
+
+  // GOOGLE-025: Single-use state cookie clearing
   const dummyRes = NextResponse.json({ ok: true })
   dummyRes.cookies.set(OAUTH_STATE_COOKIE, '', { maxAge: 0, path: '/' })
   assert('GOOGLE-025: OAuth state cookie is cleared on consumption', dummyRes.cookies.get(OAUTH_STATE_COOKIE)?.value === '')
