@@ -12,6 +12,9 @@
 | **Kill-Switch State** | `FEATURE_SMS_ENABLED=false` (Enforced OFF) |
 | **Google OAuth Status** | `GOOGLE-OAUTH-001: CLEARED` |
 
+> [!IMPORTANT]
+> **SUPERSEDED BY SMS-002.1**: The initial SMS-002 implementation was enhanced by [SMS-002.1](file:///c:/WEB%20APP/REVIEW%20REPLY/docs/SMS-002.1-CUSTOMER-CONSENT.md) to eliminate employee checkbox consent manufacturing, implement cryptographic customer consent invitation links (`/consent/[token]`), introduce an append-only immutable consent event ledger (`CustomerSmsConsentEvent`), establish server-controlled disclosure templates (`SmsDisclosureTemplate`), and require structured provenance validation for external imports.
+
 ---
 
 ## 1. Why Opt-Out Is Not Consent

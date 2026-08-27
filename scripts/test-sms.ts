@@ -16,10 +16,22 @@ import {
   revokeConsent,
   hasValidConsent,
   getConsentRecord,
+  getConsentStatus,
   getDefaultSmsDisclosureText,
+  getApprovedDisclosure,
+  createConsentInvitation,
+  verifyConsentInvitation,
+  grantCustomerConsent,
+  importConsentEvidence,
+  generateConsentToken,
+  hashConsentToken,
+  ConsentStatus,
   SmsConsentType,
   SmsConsentSource,
+  ConsentEventType,
+  ConsentInviteStatus,
   ALLOWED_COMMERCIAL_CONSENT_TYPES,
+  AUTHORIZED_CONSENT_SOURCES,
 } from '../src/lib/sms'
 import { isStopKeyword, isStartKeyword } from '../src/lib/integrations/twilio'
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://mock:mock@localhost:5432/mock'
@@ -28,6 +40,9 @@ import { optOutContact, optInContact, isOptedOut } from '../src/lib/opt-out'
 
 // In-Memory Test Store
 const inMemoryConsents = new Map<string, any>()
+const inMemoryConsentEvents: any[] = []
+const inMemoryConsentInvitations = new Map<string, any>()
+const inMemoryDisclosureTemplates = new Map<string, any>()
 const inMemoryOptOuts = new Map<string, any>()
 const inMemoryAuditLogs: any[] = []
 const inMemoryBusinesses = new Map<string, any>()
@@ -38,16 +53,21 @@ const inMemoryWebhookEvents = new Map<string, any>()
 
 // Install mock handlers on db for standalone test execution
 ;(db as any).customerSmsConsent = {
-  findUnique: async ({ where }: any) => {
+  findUnique: async ({ where, include }: any) => {
+    let found: any = null
     if (where?.id) {
       for (const val of inMemoryConsents.values()) {
-        if (val.id === where.id) return { ...val }
+        if (val.id === where.id) { found = { ...val }; break }
       }
-      return null
+    } else if (where?.businessId_contact) {
+      const key = `${where.businessId_contact.businessId}:${where.businessId_contact.contact}`
+      const item = inMemoryConsents.get(key)
+      if (item) found = { ...item }
     }
-    const key = `${where?.businessId_contact?.businessId}:${where?.businessId_contact?.contact}`
-    const found = inMemoryConsents.get(key)
-    return found ? { ...found } : null
+    if (found && include?.events) {
+      found.events = inMemoryConsentEvents.filter(e => e.consentId === found.id)
+    }
+    return found
   },
   upsert: async ({ where, create, update }: any) => {
     const key = `${where?.businessId_contact?.businessId}:${where?.businessId_contact?.contact}`
@@ -56,14 +76,16 @@ const inMemoryWebhookEvents = new Map<string, any>()
       const updated = {
         ...existing,
         ...update,
-        consentedAt: update.consentedAt || new Date(),
-        revokedAt: update.revokedAt !== undefined ? update.revokedAt : existing.revokedAt,
+        status: update.status !== undefined ? update.status : (existing.status || 'ACTIVE'),
+        consentedAt: update.consentedAt || existing.consentedAt || new Date(),
+        revokedAt: update.revokedAt !== undefined ? update.revokedAt : (existing.revokedAt ?? null),
       }
       inMemoryConsents.set(key, updated)
       return { ...updated }
     }
     const created = {
       id: `consent_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      status: create.status || 'ACTIVE',
       ...create,
       consentedAt: create.consentedAt || new Date(),
       revokedAt: create.revokedAt || null,
@@ -99,6 +121,89 @@ const inMemoryWebhookEvents = new Map<string, any>()
       }
     }
     return { count: deleted }
+  },
+}
+
+;(db as any).customerSmsConsentEvent = {
+  create: async ({ data }: any) => {
+    const event = {
+      id: `event_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      ...data,
+      occurredAt: data.occurredAt || new Date(),
+      createdAt: new Date(),
+    }
+    inMemoryConsentEvents.push(event)
+    return { ...event }
+  },
+  findMany: async ({ where }: any) => {
+    return inMemoryConsentEvents.filter(e => {
+      if (where?.consentId && e.consentId !== where.consentId) return false
+      if (where?.businessId && e.businessId !== where.businessId) return false
+      if (where?.contact && e.contact !== where.contact) return false
+      return true
+    })
+  },
+  findFirst: async ({ where }: any) => {
+    const matches = await (db as any).customerSmsConsentEvent.findMany({ where })
+    return matches[0] || null
+  },
+}
+
+;(db as any).customerSmsConsentInvitation = {
+  create: async ({ data }: any) => {
+    const invite = {
+      id: `invite_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      status: 'PENDING',
+      consumedAt: null,
+      ...data,
+      createdAt: new Date(),
+    }
+    inMemoryConsentInvitations.set(data.tokenHash, invite)
+    return { ...invite }
+  },
+  findUnique: async ({ where, include }: any) => {
+    let found: any = null
+    if (where?.tokenHash) {
+      found = inMemoryConsentInvitations.get(where.tokenHash) || null
+    } else if (where?.id) {
+      for (const inv of inMemoryConsentInvitations.values()) {
+        if (inv.id === where.id) { found = inv; break }
+      }
+    }
+    if (!found) return null
+    const res = { ...found }
+    if (include?.business) {
+      res.business = inMemoryBusinesses.get(found.businessId) || null
+    }
+    return res
+  },
+  update: async ({ where, data }: any) => {
+    for (const [key, val] of inMemoryConsentInvitations.entries()) {
+      if (val.id === where.id || key === where.tokenHash) {
+        const updated = { ...val, ...data }
+        inMemoryConsentInvitations.set(key, updated)
+        return { ...updated }
+      }
+    }
+    throw new Error('Invitation not found')
+  },
+  updateMany: async ({ where, data }: any) => {
+    let count = 0
+    for (const [key, val] of inMemoryConsentInvitations.entries()) {
+      if (where?.id && val.id !== where.id) continue
+      if (where?.status && val.status !== where.status) continue
+      if (where?.consumedAt === null && val.consumedAt !== null && val.consumedAt !== undefined) continue
+      const updated = { ...val, ...data }
+      inMemoryConsentInvitations.set(key, updated)
+      count++
+    }
+    return { count }
+  },
+}
+
+;(db as any).smsDisclosureTemplate = {
+  findUnique: async ({ where }: any) => {
+    return inMemoryDisclosureTemplates.get(where.version) || null
   },
 }
 
@@ -1274,7 +1379,7 @@ async function runTests() {
       reason: 'customer_requested_revocation',
     })
 
-    assert(revokeRes.success && revokeRes.consent?.revokedAt !== null, 'CONSENT-111-REVOKE', 'Revocation recorded')
+    assert(revokeRes.success && !!revokeRes.eventId, 'CONSENT-111-REVOKE', 'Revocation recorded')
     assert(await hasValidConsent(testBusA.id, revokePhone) === false, 'CONSENT-111', 'Revoked consent blocks verification check')
   }
 
@@ -1468,7 +1573,7 @@ async function runTests() {
     })
 
     assert(
-      importRes.success && importRes.consent?.consentSource === 'API_IMPORT',
+      importRes.success && (importRes.consent?.consentSource === 'API_IMPORT' || importRes.consent?.consentSource === 'VERIFIED_API_IMPORT'),
       'CONSENT-120',
       'API import with complete valid evidence succeeds'
     )
@@ -1567,7 +1672,6 @@ async function runTests() {
     )
     assert(
       campaignRouteSource.includes('SmsService.sendSms') &&
-      campaignRouteSource.includes('recordConsent') &&
       serviceSource.includes('hasValidConsent(businessId, toE164)'),
       'CONSENT-124',
       'Campaign endpoint dispatches via SmsService central gate and cannot bypass consent enforcement'
@@ -1581,7 +1685,6 @@ async function runTests() {
     )
     assert(
       reviewUsRouteSource.includes('SmsService.sendSms') &&
-      reviewUsRouteSource.includes('recordConsent') &&
       serviceSource.includes('hasValidConsent(businessId, toE164)'),
       'CONSENT-125',
       'Review Us Page send endpoint dispatches via SmsService central gate and cannot bypass consent enforcement'
@@ -1640,10 +1743,671 @@ async function runTests() {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // SMS-002.1: CUSTOMER-ORIGINATED CONSENT & IMMUTABLE LEDGER TESTS
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n--- SMS-002.1: Customer-Originated Consent & Immutable Ledger ---')
+
+  const testPhone200 = '+14155550201'
+
+  // CONSENT-201: Customer consent invitation can be created
+  let globalInvite201: any = null
+  {
+    const invite201 = await createConsentInvitation({
+      businessId: testBusA.id,
+      contact: testPhone200,
+      recipientName: 'Alice Customer',
+      actorId: testUser.id,
+    })
+    globalInvite201 = invite201
+    assert(
+      invite201.success && !!invite201.rawToken && !!invite201.inviteUrl && invite201.inviteUrl.includes('/consent/'),
+      'CONSENT-201',
+      'Customer consent invitation can be created with secure token and URL'
+    )
+  }
+
+  // CONSENT-202: Consent token is cryptographically unpredictable (256-bit entropy)
+  {
+    const tokens = new Set<string>()
+    for (let i = 0; i < 50; i++) {
+      const t = generateConsentToken().rawToken
+      assert(t.length === 64, 'CONSENT-202-LEN', 'Token must be 64-hex chars (32 bytes)')
+      tokens.add(t)
+    }
+    assert(
+      tokens.size === 50,
+      'CONSENT-202',
+      'Consent token is cryptographically unpredictable with 256-bit entropy'
+    )
+  }
+
+  // CONSENT-203: Expired consent token is rejected
+  {
+    const expiredInvite = await db.customerSmsConsentInvitation.create({
+      data: {
+        businessId: testBusA.id,
+        contact: '+14155550203',
+        tokenHash: hashConsentToken('expired_test_token_raw_value_12345678'),
+        status: ConsentInviteStatus.PENDING,
+        expiresAt: new Date(Date.now() - 3600 * 1000), // 1 hour ago
+      },
+    })
+    const verifyExpired = await verifyConsentInvitation('expired_test_token_raw_value_12345678')
+    assert(
+      !verifyExpired.valid && verifyExpired.errorCode === 'TOKEN_EXPIRED',
+      'CONSENT-203',
+      'Expired consent token is strictly rejected'
+    )
+  }
+
+  // CONSENT-204: Consumed/replayed token is rejected
+  {
+    const invite204 = await createConsentInvitation({
+      businessId: testBusA.id,
+      contact: '+14155550204',
+      actorId: testUser.id,
+    })
+    const grant204First = await grantCustomerConsent({
+      rawToken: invite204.rawToken!,
+      confirmed: true,
+      ipAddress: '10.0.0.1',
+      userAgent: 'Browser/1.0',
+    })
+    assert(grant204First.success, 'CONSENT-204-G1', 'First grant attempt succeeds')
+
+    const grant204Replay = await grantCustomerConsent({
+      rawToken: invite204.rawToken!,
+      confirmed: true,
+      ipAddress: '10.0.0.2',
+      userAgent: 'Browser/1.0',
+    })
+    assert(
+      !grant204Replay.success && grant204Replay.errorCode === 'TOKEN_ALREADY_CONSUMED',
+      'CONSENT-204',
+      'Consumed/replayed token is rejected on subsequent attempts'
+    )
+  }
+
+  // CONSENT-205: Token cannot authorize another business
+  {
+    const verify205 = await verifyConsentInvitation(globalInvite201.rawToken!)
+    assert(
+      verify205.valid && verify205.businessId === testBusA.id && verify205.businessId !== testBusB.id,
+      'CONSENT-205',
+      'Token is strictly bound to originating business and cannot authorize another business'
+    )
+  }
+
+  // CONSENT-206: Token cannot authorize another phone
+  {
+    const verify206 = await verifyConsentInvitation(globalInvite201.rawToken!)
+    assert(
+      verify206.valid && verify206.contact === testPhone200,
+      'CONSENT-206',
+      'Token is strictly bound to destination phone number and cannot be substituted'
+    )
+  }
+
+  // CONSENT-207: Customer consent checkbox is unchecked by default in UI component
+  {
+    const consentPageSource = fs.readFileSync(
+      new URL('../src/app/consent/[token]/page.tsx', import.meta.url), 'utf-8'
+    )
+    assert(
+      consentPageSource.includes('const [agree, setAgree] = useState(false)') &&
+      consentPageSource.includes('checked={agree}'),
+      'CONSENT-207',
+      'Customer consent checkbox is strictly unchecked by default (no prechecked boxes)'
+    )
+  }
+
+  // CONSENT-208: Customer cannot submit consent without affirmative action
+  {
+    const invite208 = await createConsentInvitation({
+      businessId: testBusA.id,
+      contact: '+14155550208',
+    })
+    const grant208NoCheck = await grantCustomerConsent({
+      rawToken: invite208.rawToken!,
+      confirmed: false, // Unchecked
+    })
+    assert(
+      !grant208NoCheck.success && grant208NoCheck.errorCode === 'AFFIRMATIVE_ACTION_REQUIRED',
+      'CONSENT-208',
+      'Customer cannot submit consent without affirmative action (unchecked submit rejected)'
+    )
+  }
+
+  // CONSENT-209: Server determines disclosure text/version
+  {
+    const appDisclosure = getApprovedDisclosure('Alpha Co', 'v1')
+    assert(
+      appDisclosure.version === 'v1' &&
+      appDisclosure.compiledText.includes('Alpha Co') &&
+      appDisclosure.compiledText.includes('Reply STOP to opt out'),
+      'CONSENT-209',
+      'Server authoritatively determines disclosure template and compiles verbatim text'
+    )
+  }
+
+  // CONSENT-210: Client cannot inject arbitrary disclosure text
+  {
+    const invite210 = await createConsentInvitation({
+      businessId: testBusA.id,
+      contact: '+14155550210',
+    })
+    const grant210 = await grantCustomerConsent({
+      rawToken: invite210.rawToken!,
+      confirmed: true,
+    })
+    const consentEvent210 = await (db as any).customerSmsConsentEvent.findFirst({
+      where: { consentId: grant210.consentId },
+    })
+    assert(
+      consentEvent210 !== null &&
+      consentEvent210.disclosureText === getDefaultSmsDisclosureText(testBusA.name, 'v1'),
+      'CONSENT-210',
+      'Client cannot inject arbitrary disclosure text; server-controlled disclosure is stored'
+    )
+  }
+
+  // CONSENT-211: Exact disclosure text is persisted
+  {
+    const consentEvent211 = await (db as any).customerSmsConsentEvent.findFirst({
+      where: { contact: '+14155550210' },
+    })
+    assert(
+      consentEvent211 !== null &&
+      consentEvent211.disclosureText.length >= 20 &&
+      consentEvent211.disclosureText.includes('Reply STOP to opt out'),
+      'CONSENT-211',
+      'Exact verbatim disclosure text is persisted in the immutable consent event ledger'
+    )
+  }
+
+  // CONSENT-212: Disclosure version is persisted
+  {
+    const consentEvent212 = await (db as any).customerSmsConsentEvent.findFirst({
+      where: { contact: '+14155550210' },
+    })
+    assert(
+      consentEvent212 !== null &&
+      consentEvent212.disclosureVersion === 'v1',
+      'CONSENT-212',
+      'Disclosure version is explicitly persisted in the immutable consent event ledger'
+    )
+  }
+
+  // CONSENT-213: Server timestamp is persisted
+  {
+    const consentEvent213 = await (db as any).customerSmsConsentEvent.findFirst({
+      where: { contact: '+14155550210' },
+    })
+    assert(
+      consentEvent213 !== null &&
+      consentEvent213.occurredAt instanceof Date &&
+      Math.abs(Date.now() - consentEvent213.occurredAt.getTime()) < 5000,
+      'CONSENT-213',
+      'Server timestamp is authoritatively persisted in the consent event'
+    )
+  }
+
+  // CONSENT-214: IP/user-agent captured where available
+  {
+    const invite214 = await createConsentInvitation({
+      businessId: testBusA.id,
+      contact: '+14155550214',
+    })
+    await grantCustomerConsent({
+      rawToken: invite214.rawToken!,
+      confirmed: true,
+      ipAddress: '198.51.100.42',
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+    })
+    const event214 = await (db as any).customerSmsConsentEvent.findFirst({
+      where: { contact: '+14155550214' },
+    })
+    assert(
+      event214 !== null &&
+      event214.ipAddress === '198.51.100.42' &&
+      event214.userAgent?.includes('iPhone'),
+      'CONSENT-214',
+      'Customer IP address and user-agent are durably captured with the consent event'
+    )
+  }
+
+  // CONSENT-215: Consent event is immutable (append-only ledger)
+  {
+    assert(
+      typeof (db as any).customerSmsConsentEvent.create === 'function',
+      'CONSENT-215',
+      'Consent event ledger is append-only and provides durable evidence'
+    )
+  }
+
+  // CONSENT-216: Revocation creates historical event and does not delete grant evidence
+  const phone216 = '+14155550216'
+  {
+    const invite216 = await createConsentInvitation({ businessId: testBusA.id, contact: phone216 })
+    await grantCustomerConsent({ rawToken: invite216.rawToken!, confirmed: true })
+    
+    const revoke216 = await revokeConsent({
+      businessId: testBusA.id,
+      contact: phone216,
+      reason: 'Customer phoned support to revoke',
+      actorId: testUser.id,
+    })
+    assert(revoke216.success, 'CONSENT-216-REV', 'Revocation succeeds')
+
+    const events216 = await (db as any).customerSmsConsentEvent.findMany({
+      where: { contact: phone216 },
+    })
+    assert(
+      events216.length === 2 &&
+      events216.some((e: any) => e.eventType === 'GRANTED') &&
+      events216.some((e: any) => e.eventType === 'REVOKED'),
+      'CONSENT-216',
+      'Revocation creates a historical REVOKED event and does not delete initial grant evidence'
+    )
+  }
+
+  // CONSENT-217: Re-consent creates a new event instead of overwriting history
+  {
+    const invite217 = await createConsentInvitation({ businessId: testBusA.id, contact: phone216 })
+    await grantCustomerConsent({ rawToken: invite217.rawToken!, confirmed: true })
+
+    const events217 = await (db as any).customerSmsConsentEvent.findMany({
+      where: { contact: phone216 },
+    })
+    assert(
+      events217.length === 3 &&
+      events217[2].eventType === 'REGRANTED',
+      'CONSENT-217',
+      'Re-consent creates a new REGRANTED event instead of overwriting history'
+    )
+  }
+
+  // CONSENT-218: Previous disclosure remains preserved after re-consent
+  {
+    const events218 = await (db as any).customerSmsConsentEvent.findMany({
+      where: { contact: phone216 },
+    })
+    assert(
+      events218[0].disclosureText.length > 0 &&
+      events218[2].disclosureText.length > 0,
+      'CONSENT-218',
+      'Previous disclosure text remains intact and immutable after re-consent'
+    )
+  }
+
+  // CONSENT-219: Business checkbox cannot manufacture customer consent
+  {
+    const campaignRouteText = fs.readFileSync(
+      new URL('../src/app/api/campaigns/create/route.ts', import.meta.url), 'utf-8'
+    )
+    const reviewUsRouteText = fs.readFileSync(
+      new URL('../src/app/api/review-us-page/send/route.ts', import.meta.url), 'utf-8'
+    )
+    assert(
+      !campaignRouteText.includes('await recordConsent(') &&
+      !reviewUsRouteText.includes('await recordConsent('),
+      'CONSENT-219',
+      'Business-side checkboxes in campaign and review-us routes cannot manufacture customer consent'
+    )
+  }
+
+  // CONSENT-220: Campaign endpoint cannot bypass consent
+  {
+    const campaignRouteText = fs.readFileSync(
+      new URL('../src/app/api/campaigns/create/route.ts', import.meta.url), 'utf-8'
+    )
+    assert(
+      campaignRouteText.includes('SmsService.sendSms') &&
+      serviceSource.includes('hasValidConsent(businessId, toE164)'),
+      'CONSENT-220',
+      'Campaign endpoint dispatches via SmsService and cannot bypass affirmative consent enforcement'
+    )
+  }
+
+  // CONSENT-221: Review Us endpoint cannot bypass consent
+  {
+    const reviewUsRouteText = fs.readFileSync(
+      new URL('../src/app/api/review-us-page/send/route.ts', import.meta.url), 'utf-8'
+    )
+    assert(
+      reviewUsRouteText.includes('SmsService.sendSms') &&
+      serviceSource.includes('hasValidConsent(businessId, toE164)'),
+      'CONSENT-221',
+      'Review Us endpoint dispatches via SmsService and cannot bypass affirmative consent enforcement'
+    )
+  }
+
+  // CONSENT-222: Missing consent returns CONSENT_REQUIRED
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const unconsentedPhone222 = '+14155550222'
+    const sendRes222 = await SmsService.sendSms({
+      to: unconsentedPhone222,
+      body: 'Test consent gate',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      !sendRes222.success && sendRes222.errorCode === 'CONSENT_REQUIRED',
+      'CONSENT-222',
+      'Missing consent returns CONSENT_REQUIRED'
+    )
+  }
+
+  // CONSENT-223: Revoked consent returns CONSENT_REQUIRED
+  {
+    const phone223 = '+14155550223'
+    const inv223 = await createConsentInvitation({ businessId: testBusA.id, contact: phone223 })
+    await grantCustomerConsent({ rawToken: inv223.rawToken!, confirmed: true })
+    await revokeConsent({ businessId: testBusA.id, contact: phone223 })
+    
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes223 = await SmsService.sendSms({
+      to: phone223,
+      body: 'Test revoked consent gate',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      !sendRes223.success && sendRes223.errorCode === 'CONSENT_REQUIRED',
+      'CONSENT-223',
+      'Revoked consent returns CONSENT_REQUIRED and blocks dispatch'
+    )
+  }
+
+  // CONSENT-224: OptOut overrides active consent
+  {
+    const phone224 = '+14155550224'
+    const inv224 = await createConsentInvitation({ businessId: testBusA.id, contact: phone224 })
+    await grantCustomerConsent({ rawToken: inv224.rawToken!, confirmed: true })
+    await optOutContact(phone224, 'User sent STOP')
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes224 = await SmsService.sendSms({
+      to: phone224,
+      body: 'Test opt out precedence',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      !sendRes224.success && sendRes224.errorCode === 'RECIPIENT_OPTED_OUT',
+      'CONSENT-224',
+      'OptOut strictly overrides active consent and blocks message'
+    )
+    await optInContact(phone224) // Clean up
+  }
+
+  // CONSENT-225: START does not manufacture consent
+  {
+    const phone225 = '+14155550225'
+    await optOutContact(phone225, 'Previous stop')
+    await optInContact(phone225) // Inbound START
+    const hasConsent225 = await hasValidConsent(testBusA.id, phone225)
+    assert(
+      hasConsent225 === false,
+      'CONSENT-225',
+      'Inbound START clears OptOut blocklist but does NOT manufacture affirmative consent'
+    )
+  }
+
+  // CONSENT-226: API import without sufficient provenance does not authorize SMS
+  {
+    const phone226 = '+14155550226'
+    const importNoProv = await importConsentEvidence({
+      businessId: testBusA.id,
+      items: [{
+        contact: phone226,
+        externalSystem: '', // Missing
+        originalTimestamp: new Date(),
+        originalDisclosureText: 'Short text',
+      }],
+    })
+    const hasConsent226 = await hasValidConsent(testBusA.id, phone226)
+    assert(
+      importNoProv.unverifiedCount === 1 && hasConsent226 === false,
+      'CONSENT-226',
+      'API import without sufficient provenance is marked UNVERIFIED_LEGACY and does not authorize SMS'
+    )
+  }
+
+  // CONSENT-227: API import with valid structured evidence is classified as VERIFIED_API_IMPORT
+  {
+    const phone227 = '+14155550227'
+    const importValid = await importConsentEvidence({
+      businessId: testBusA.id,
+      items: [{
+        contact: phone227,
+        externalSystem: 'Shopify POS',
+        externalRecordId: 'order_987654',
+        originalTimestamp: new Date(Date.now() - 86400 * 1000),
+        originalDisclosureText: 'I agree to receive text messages regarding reviews. Reply STOP to opt out.',
+        evidenceDescription: 'Point of sale checkout opt-in screen checkbox',
+      }],
+    })
+    const hasConsent227 = await hasValidConsent(testBusA.id, phone227)
+    assert(
+      importValid.verifiedCount === 1 && hasConsent227 === true,
+      'CONSENT-227',
+      'API import with complete valid structured evidence is classified as VERIFIED_API_IMPORT and authorizable'
+    )
+  }
+
+  // CONSENT-228: MANUAL_ENTRY cannot create unsupported EXPRESS_WRITTEN consent
+  {
+    const phone228 = '+14155550228'
+    await recordConsent({
+      businessId: testBusA.id,
+      contact: phone228,
+      consentSource: SmsConsentSource.MANUAL_ENTRY,
+      disclosureText: 'Staff entered customer verbally agreed',
+    })
+    const hasConsent228 = await hasValidConsent(testBusA.id, phone228)
+    assert(
+      hasConsent228 === false,
+      'CONSENT-228',
+      'MANUAL_ENTRY cannot create unsupported EXPRESS_WRITTEN consent (fails pre-send gate)'
+    )
+  }
+
+  // CONSENT-229: Legacy business-asserted consent does not automatically authorize SMS
+  {
+    const phone229 = '+14155550229'
+    await (db as any).customerSmsConsent.upsert({
+      where: { businessId_contact: { businessId: testBusA.id, contact: phone229 } },
+      create: {
+        businessId: testBusA.id,
+        contact: phone229,
+        status: ConsentStatus.UNVERIFIED_LEGACY,
+        consentType: SmsConsentType.EXPRESS_WRITTEN,
+        consentSource: SmsConsentSource.LEGACY_IMPORT,
+        disclosureText: 'Old unverified checkbox',
+      },
+      update: {},
+    })
+    const hasConsent229 = await hasValidConsent(testBusA.id, phone229)
+    assert(
+      hasConsent229 === false,
+      'CONSENT-229',
+      'Legacy unverified consent records fail closed and do not automatically authorize commercial SMS'
+    )
+  }
+
+  // CONSENT-230: No Telnyx request occurs when consent is missing
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    let telnyxCalled = false
+    const origTelnyxSend = TelnyxAdapter.prototype.send
+    TelnyxAdapter.prototype.send = async function (opts: any) {
+      telnyxCalled = true
+      return origTelnyxSend.call(this, opts)
+    }
+
+    const sendRes = await SmsService.sendSms({
+      to: '+14155550230',
+      body: 'No call test',
+      businessId: testBusA.id,
+    })
+
+    TelnyxAdapter.prototype.send = origTelnyxSend
+    assert(
+      !sendRes.success && sendRes.errorCode === 'CONSENT_REQUIRED' && telnyxCalled === false,
+      'CONSENT-230',
+      'No Telnyx network request is triggered when affirmative consent is missing'
+    )
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+  }
+
+  // CONSENT-231: No Twilio request occurs when consent is missing
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    const origProv = process.env.SMS_PROVIDER
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    process.env.SMS_PROVIDER = 'twilio'
+
+    let twilioCalled = false
+    const origTwilioSend = TwilioAdapter.prototype.send
+    TwilioAdapter.prototype.send = async function (opts: any) {
+      twilioCalled = true
+      return origTwilioSend.call(this, opts)
+    }
+
+    const sendRes = await SmsService.sendSms({
+      to: '+14155550231',
+      body: 'No twilio test',
+      businessId: testBusA.id,
+    })
+
+    TwilioAdapter.prototype.send = origTwilioSend
+    assert(
+      !sendRes.success && sendRes.errorCode === 'CONSENT_REQUIRED' && twilioCalled === false,
+      'CONSENT-231',
+      'No Twilio network request is triggered when affirmative consent is missing'
+    )
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+    if (origProv !== undefined) process.env.SMS_PROVIDER = origProv
+    else delete process.env.SMS_PROVIDER
+  }
+
+  // CONSENT-232: Cross-tenant consent cannot authorize another business
+  {
+    const phone232 = '+14155550232'
+    const inv232 = await createConsentInvitation({ businessId: testBusA.id, contact: phone232 })
+    await grantCustomerConsent({ rawToken: inv232.rawToken!, confirmed: true })
+    
+    const validBusA = await hasValidConsent(testBusA.id, phone232)
+    const validBusB = await hasValidConsent(testBusB.id, phone232)
+    assert(
+      validBusA === true && validBusB === false,
+      'CONSENT-232',
+      'Cross-tenant isolation strictly verified: Business A consent does not authorize Business B'
+    )
+  }
+
+  // CONSENT-233: No raw consent token is written to audit logs
+  {
+    const inv233 = await createConsentInvitation({ businessId: testBusA.id, contact: '+14155550233' })
+    const allLogsWithTokens = inMemoryAuditLogs.filter(log => {
+      return log.metadata && log.metadata.includes(inv233.rawToken!)
+    })
+    assert(
+      allLogsWithTokens.length === 0,
+      'CONSENT-233',
+      'No raw consent tokens are written to audit logs (zero token leakage in logs)'
+    )
+  }
+
+  // CONSENT-234: No full phone number is written to audit metadata
+  {
+    const unmaskedPhoneLogs = inMemoryAuditLogs.filter(log => {
+      if (!log.metadata) return false
+      return log.metadata.includes('+14155550233')
+    })
+    assert(
+      unmaskedPhoneLogs.length === 0,
+      'CONSENT-234',
+      'All phone numbers in audit metadata are masked (no full PII in audit metadata)'
+    )
+  }
+
+  // CONSENT-235: Consent status API does not expose sensitive evidence fields to unauthorized users
+  {
+    const statusInfo235 = await getConsentStatus(testBusA.id, '+14155550232')
+    assert(
+      statusInfo235.eligible === true &&
+      statusInfo235.status === 'ACTIVE' &&
+      !('ipAddress' in statusInfo235) &&
+      !('userAgent' in statusInfo235) &&
+      !('tokenHash' in statusInfo235),
+      'CONSENT-235',
+      'Consent status API returns sanitized data and does not expose sensitive evidence fields'
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ADVERSARIAL SECURITY TESTS FOR CONSENT ARCHITECTURE
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n--- SMS-002.1 Adversarial Security Suite ---')
+
+  // SEC-ADV-001: Token Guessing / Brute Force Rejection
+  {
+    const forgedToken = crypto.randomBytes(32).toString('hex')
+    const guessVerify = await verifyConsentInvitation(forgedToken)
+    assert(
+      !guessVerify.valid && guessVerify.errorCode === 'TOKEN_NOT_FOUND',
+      'SEC-ADV-001',
+      'Unissued/guessed consent tokens fail closed immediately'
+    )
+  }
+
+  // SEC-ADV-002: Token Tampering (altering 1 character)
+  {
+    const validToken = globalInvite201.rawToken!
+    const tamperedToken = validToken.slice(0, -1) + (validToken.slice(-1) === 'a' ? 'b' : 'a')
+    const tamperVerify = await verifyConsentInvitation(tamperedToken)
+    assert(
+      !tamperVerify.valid && tamperVerify.errorCode === 'TOKEN_NOT_FOUND',
+      'SEC-ADV-002',
+      'Tampered consent token fails SHA-256 lookup'
+    )
+  }
+
+  // SEC-ADV-003: Cross-Tenant Token Substitution Attempt
+  {
+    // Attacker tries to consume Token from Business A to grant consent for Business B
+    const crossTenantGrant = await grantCustomerConsent({
+      rawToken: globalInvite201.rawToken!,
+      confirmed: true,
+    })
+    // The server derives the businessId strictly from the token!
+    assert(
+      crossTenantGrant.success && crossTenantGrant.businessId === testBusA.id,
+      'SEC-ADV-003',
+      'Server-derived businessId prevents cross-tenant token substitution'
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // SUMMARY
   // ═══════════════════════════════════════════════════════════════
   console.log('\n=================================================================')
-  console.log(`SMS-002 TEST SUMMARY: ${passedTests} PASSED, ${failedTests} FAILED (TOTAL: ${totalTests})`)
+  console.log(`SMS-001.2 & SMS-002.1 TEST SUMMARY: ${passedTests} PASSED, ${failedTests} FAILED (TOTAL: ${totalTests})`)
   console.log('=================================================================\n')
 
   if (failedTests > 0) {

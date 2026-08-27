@@ -499,9 +499,9 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
               <code className="text-[10px]">Marcus Webb,marcus@example.com</code>
             </div>
 
-            {/* Affirmative SMS Consent Checkbox (SMS-002) */}
+            {/* Customer-Originated SMS Consent Notice (SMS-002.1) */}
             {selectedChannels.includes('sms') && (
-              <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2">
+              <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2.5">
                 <div className="flex items-start gap-2.5">
                   <input
                     type="checkbox"
@@ -511,10 +511,13 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
                     className="mt-1 h-4 w-4 rounded border-amber-500/40 text-[var(--brass)] focus:ring-[var(--brass)] cursor-pointer"
                   />
                   <label htmlFor="campaign-sms-consent" className="text-xs text-foreground cursor-pointer leading-relaxed">
-                    <span className="font-medium text-amber-600 dark:text-amber-400 block mb-0.5">Affirmative Express Written Consent Confirmation</span>
-                    I confirm that all SMS recipients have affirmatively agreed to receive review request text messages from this business. Message and data rates may apply. Message frequency varies. Recipients can reply STOP to opt out at any time.
+                    <span className="font-medium text-amber-600 dark:text-amber-400 block mb-0.5">Staff Compliance Acknowledgment</span>
+                    I acknowledge that outbound commercial SMS requires customer-originated affirmative express written consent. Recipients lacking verified customer consent will be blocked by the SMS compliance gate.
                   </label>
                 </div>
+                <p className="text-[11px] text-muted-foreground/80 pl-6.5">
+                  Need to collect consent? Generate a secure consent link via the SMS Consent Manager or share your Review Us Page.
+                </p>
               </div>
             )}
           </div>

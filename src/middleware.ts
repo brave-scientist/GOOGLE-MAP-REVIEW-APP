@@ -44,6 +44,8 @@ const PUBLIC_API_ROUTES = [
   '/api/cron/reports',
   '/api/health',          // Public — for UptimeRobot / load balancer health checks
   '/api/review-us',       // Public — Review Us page fetches links by slug
+  '/api/sms/consent/public', // Public — Customer token verification
+  '/api/sms/consent/grant',  // Public — Customer affirmative consent submission
 ]
 
 function isPublicRoute(pathname: string): boolean {
@@ -52,6 +54,7 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/help/')) return true
   if (pathname.startsWith('/r/')) return true
   if (pathname.startsWith('/review-us/')) return true  // public Review Us page
+  if (pathname.startsWith('/consent/')) return true    // public Customer Consent page
   if (pathname.startsWith('/unsubscribe')) return true
   if (pathname === '/widget.js') return true
   if (pathname.startsWith('/google') && pathname.endsWith('.html')) return true

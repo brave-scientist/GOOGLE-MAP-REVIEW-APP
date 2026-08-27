@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { filterOptedOut } from '@/lib/opt-out'
-import { SmsService, SMS_LIMITS, recordConsent, SmsConsentSource, SmsConsentType } from '@/lib/sms'
+import { SmsService, SMS_LIMITS } from '@/lib/sms'
 import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 import { generateBusinessSlug } from '@/lib/review-platforms'
 
@@ -193,19 +193,8 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // If affirmative consent was confirmed with disclosure text, record consent evidence
-    if (channel === 'sms' && consentConfirmed && disclosureText) {
-      for (const recipient of sendable) {
-        await recordConsent({
-          businessId,
-          contact: recipient.contact,
-          consentType: SmsConsentType.EXPRESS_WRITTEN,
-          consentSource: SmsConsentSource.WEBSITE_FORM,
-          disclosureText,
-          actorId: ctx.user.id,
-        }).catch(() => {})
-      }
-    }
+    // Note: Employee confirmation checkbox does NOT manufacture affirmative customer consent.
+    // Outbound SMS dispatches strictly require pre-existing affirmative customer consent enforced in SmsService.sendSms().
 
     // Send to each recipient
     let sentCount = 0

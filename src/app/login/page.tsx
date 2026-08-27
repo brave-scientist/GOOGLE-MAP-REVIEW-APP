@@ -133,13 +133,15 @@ export default function LoginPage() {
             <p className="text-sm text-muted-foreground">Log in to your ReviewReply dashboard</p>
           </div>
 
-          {/* Google OAuth button — Disabled for Beta */}
+          {/* Google OAuth button */}
           <div className="mb-4">
             <Button
               variant="outline"
-              className="w-full h-11 glass-card opacity-70 cursor-not-allowed justify-center"
-              disabled={true}
-              aria-label="Google Sign-In coming soon"
+              className="w-full h-11 glass-card hover:bg-accent/40 justify-center transition-colors"
+              onClick={() => {
+                window.location.href = `/api/auth/google?redirect=${encodeURIComponent(redirectTo)}`
+              }}
+              aria-label="Continue with Google"
             >
               <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -148,11 +150,7 @@ export default function LoginPage() {
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
               Continue with Google
-              <span className="ml-2 text-[10px] bg-muted px-2 py-0.5 rounded-full font-mono font-medium text-muted-foreground border border-border/40">Coming Soon</span>
             </Button>
-            <p className="text-[11px] text-center text-muted-foreground mt-1.5">
-              Closed Beta access is supported via Email &amp; Password or Email OTP below.
-            </p>
           </div>
 
           {/* Divider */}

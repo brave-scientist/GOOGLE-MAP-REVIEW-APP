@@ -1,45 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
-import { revokeConsent } from '@/lib/sms/consent'
+import { createConsentInvitation } from '@/lib/sms/consent'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
 
-const RevokeConsentSchema = z.object({
+const CreateInviteSchema = z.object({
   businessId: z.string().min(1, 'businessId is required'),
   contact: z.union([z.string(), z.number()]).transform(c => String(c)),
-  reason: z.string().optional(),
+  recipientName: z.string().optional(),
 })
 
-// POST /api/sms/consent/revoke — Revoke affirmative SMS consent (appends immutable event)
+// POST /api/sms/consent/invite — Create a secure customer SMS consent invitation link
 export async function POST(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
   try {
     const body = await request.json().catch(() => ({}))
-    const parseResult = RevokeConsentSchema.safeParse(body)
+    const parseResult = CreateInviteSchema.safeParse(body)
     if (!parseResult.success) {
       return NextResponse.json(
-        { error: parseResult.error.issues[0]?.message || 'Invalid payload' },
+        { error: parseResult.error.issues[0]?.message || 'Invalid request payload' },
         { status: 400 }
       )
     }
 
-    const { businessId, contact, reason } = parseResult.data
+    const { businessId, contact, recipientName } = parseResult.data
     const denied = assertBusinessOwnership(ctx, businessId)
     if (denied) return denied
 
-    const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || request.headers.get('x-real-ip') || null
-    const userAgent = request.headers.get('user-agent') || null
-
-    const result = await revokeConsent({
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://${request.headers.get('host') || 'localhost:3000'}`
+    const result = await createConsentInvitation({
       businessId,
       contact,
-      reason,
+      recipientName,
       actorId: ctx.user.id,
-      ipAddress,
-      userAgent,
+      appUrl,
     })
 
     if (!result.success) {
@@ -51,12 +48,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      consentId: result.consentId,
-      eventId: result.eventId,
-      message: 'SMS consent successfully revoked and recorded in historical evidence ledger.',
+      inviteUrl: result.inviteUrl,
+      expiresAt: result.expiresAt,
+      token: result.rawToken,
+      invitation: result.invitation,
     })
   } catch (err: any) {
-    console.error('Consent revocation error:', err)
-    return NextResponse.json({ error: 'Failed to revoke consent' }, { status: 500 })
+    console.error('Consent invitation error:', err)
+    return NextResponse.json({ error: 'Failed to create consent invitation' }, { status: 500 })
   }
 }

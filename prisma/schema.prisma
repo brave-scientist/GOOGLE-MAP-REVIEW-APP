@@ -52,6 +52,22 @@ model User {
   businesses         Business[]           // businesses they own
   passwordResetTokens PasswordResetToken[]
   sentInvitations    TeamInvitation[]
+  accounts           Account[]
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  email             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model PasswordResetToken {
@@ -105,6 +121,8 @@ model Business {
   scheduledReports    ScheduledReport[]
   smsDeliveries       SmsDeliveryEvent[]
   smsConsents         CustomerSmsConsent[]
+  smsConsentEvents    CustomerSmsConsentEvent[]
+  smsConsentInvitations CustomerSmsConsentInvitation[]
 }
 
 model Review {
@@ -528,26 +546,56 @@ model SmsWebhookEvent {
 }
 
 // ─────────────────────────────────────────────────────
-// SMS-002: Affirmative SMS Consent Ledger
-// Durable evidence of express written consent prior to dispatch
+// SMS-002.1: Controlled SMS Disclosure Templates
+// ─────────────────────────────────────────────────────
+model SmsDisclosureTemplate {
+  id           String   @id @default(cuid())
+  version      String   @unique // e.g. "v1", "v2"
+  purpose      String   @default("REVIEW_REQUEST")
+  title        String
+  bodyTemplate String   // Standard text with {businessName} placeholder
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  events       CustomerSmsConsentEvent[]
+  invitations  CustomerSmsConsentInvitation[]
+}
+
+// ─────────────────────────────────────────────────────
+// SMS-002.1: Active Affirmative SMS Consent State
+// Fast status resolution pointer for dispatch gates
 // ─────────────────────────────────────────────────────
 model CustomerSmsConsent {
   id             String           @id @default(cuid())
   businessId     String
   contact        String           // Normalized E.164 (+1XXXXXXXXXX)
+  status         ConsentStatus    @default(ACTIVE)
   consentType    SmsConsentType   @default(EXPRESS_WRITTEN)
-  consentSource  SmsConsentSource @default(CHECKOUT_FORM)
-  disclosureText String           // Verbatim disclosure text presented at opt-in
+  consentSource  SmsConsentSource @default(CUSTOMER_WEB_FORM)
+  currentVersion String?          // Latest disclosure version consented to
+  lastEventId    String?          // Pointer to latest immutable event
+  disclosureText String?          // Verbatim snapshot of latest disclosure text
   ipAddress      String?
   userAgent      String?
   consentedAt    DateTime         @default(now())
   revokedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   business       Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  events         CustomerSmsConsentEvent[]
 
   @@unique([businessId, contact])
+  @@index([businessId, status])
   @@index([businessId, contact])
   @@index([businessId, consentedAt])
+}
+
+enum ConsentStatus {
+  ACTIVE
+  REVOKED
+  UNVERIFIED_LEGACY
 }
 
 enum SmsConsentType {
@@ -557,10 +605,86 @@ enum SmsConsentType {
 }
 
 enum SmsConsentSource {
-  CHECKOUT_FORM
+  CUSTOMER_WEB_FORM
+  VERIFIED_API_IMPORT
   IN_PERSON_KIOSK
-  API_IMPORT
+  CHECKOUT_FORM
   WEBSITE_FORM
+  LEGACY_IMPORT
   MANUAL_ENTRY
+  STAFF_RECORDED
+}
+
+// ─────────────────────────────────────────────────────
+// SMS-002.1: Immutable Consent Event Ledger
+// Append-only legal evidence ledger for TCPA/CTIA audits
+// ─────────────────────────────────────────────────────
+model CustomerSmsConsentEvent {
+  id                  String                @id @default(cuid())
+  consentId           String?
+  businessId          String
+  contact             String                // Normalized E.164
+  eventType           ConsentEventType      // GRANTED, REVOKED, REGRANTED, IMPORTED, MIGRATED_LEGACY
+  consentType         SmsConsentType
+  consentSource       SmsConsentSource
+  disclosureTemplateId String?
+  disclosureVersion   String                // e.g. "v1"
+  disclosureText      String                // Exact verbatim text shown at consent time
+  ipAddress           String?
+  userAgent           String?
+  sourceUrl           String?               // Public URL/page where consent was captured
+  externalSystem      String?               // For API imports (e.g. "Shopify POS")
+  externalRecordId    String?               // External system ID
+  externalTimestamp   DateTime?             // When customer consented in external system
+  evidenceMetadata    String?               // Structured JSON metadata
+  actorId             String?               // Staff User ID or null for customer-originated
+  occurredAt          DateTime              @default(now())
+  createdAt           DateTime              @default(now())
+
+  business            Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  consent             CustomerSmsConsent?   @relation(fields: [consentId], references: [id], onDelete: Cascade)
+  disclosureTemplate  SmsDisclosureTemplate? @relation(fields: [disclosureTemplateId], references: [id])
+
+  @@index([businessId, contact, createdAt])
+  @@index([consentId])
+}
+
+enum ConsentEventType {
+  GRANTED
+  REVOKED
+  REGRANTED
+  IMPORTED
+  MIGRATED_LEGACY
+}
+
+// ─────────────────────────────────────────────────────
+// SMS-002.1: Cryptographic Customer Consent Invitations
+// Secure, single-use, expiring tokens for customer consent flow
+// ─────────────────────────────────────────────────────
+model CustomerSmsConsentInvitation {
+  id                  String                @id @default(cuid())
+  businessId          String
+  contact             String                // Normalized E.164
+  recipientName       String?
+  tokenHash           String                @unique // SHA-256 of raw 32-byte token
+  disclosureVersion   String                @default("v1")
+  disclosureTemplateId String?
+  status              ConsentInviteStatus   @default(PENDING)
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  createdAt           DateTime              @default(now())
+
+  business            Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  disclosureTemplate  SmsDisclosureTemplate? @relation(fields: [disclosureTemplateId], references: [id])
+
+  @@index([businessId, contact])
+  @@index([tokenHash])
+}
+
+enum ConsentInviteStatus {
+  PENDING
+  CONSUMED
+  EXPIRED
+  REVOKED
 }
 
