@@ -160,7 +160,6 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
     sms: Phone,
     email: Mail,
     qr: QrCode,
-    whatsapp: Globe,
   }
   const statusColors: Record<string, string> = {
     active: 'bg-green-500/10 text-green-600 border-green-500/30',

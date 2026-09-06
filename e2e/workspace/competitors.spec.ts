@@ -93,7 +93,7 @@ test.describe('Milestone 2D / JRN-022 & DB-002: Competitor Benchmarking & Snapsh
     await page.waitForLoadState('domcontentloaded')
 
     // Assert competitor is visible
-    await expect(page.locator('text=Peking Express to Delete')).toBeVisible()
+    await expect(page.getByText('Peking Express to Delete', { exact: true })).toBeVisible({ timeout: 15000 })
 
     // 3. Handle confirm dialog automatically and click delete
     page.on('dialog', async dialog => {
@@ -104,7 +104,7 @@ test.describe('Milestone 2D / JRN-022 & DB-002: Competitor Benchmarking & Snapsh
     await deleteBtn.click()
 
     // 4. Verify competitor is removed from UI
-    await expect(page.locator('text=Peking Express to Delete')).not.toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('Peking Express to Delete', { exact: true })).not.toBeVisible({ timeout: 10000 })
 
     // 5. Verify competitor and snapshots are deleted from DB
     const dbComp = await prisma.competitor.findUnique({

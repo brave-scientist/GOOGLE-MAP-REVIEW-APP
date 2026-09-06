@@ -1,98 +1,166 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  CreditCard, Check, Download, Zap, Crown, Building2, Star, TrendingUp,
-  ArrowRight, Calendar, DollarSign,
+  CreditCard, Check, Crown, Zap, Calendar, AlertCircle, Building2, Shield, Info, ExternalLink, Loader2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
+interface MeResponse {
+  user: { name: string | null; email: string; orgPlan: string | null; role: string } | null
+  isAdmin: boolean
+}
+
+interface DashboardResponse {
+  businesses?: Array<{ id: string; name: string }>
+}
+
+interface BillingResponse {
+  plan: string
+  stripeSubscriptionStatus: string | null
+  hasStripeCustomer: boolean
+  trialEndsAt: string | null
+  isConfigured: boolean
+  canManageBilling: boolean
+}
+
 const PLANS = [
   {
     name: 'Free',
+    planKey: 'FREE',
     price: 0,
     desc: 'For solo operators',
     features: ['1 business', '50 reviews/mo', 'Manual reply', 'Basic analytics'],
-    current: false,
   },
   {
     name: 'Starter',
+    planKey: 'STARTER',
     price: 49,
     desc: 'For single-location',
     features: ['1 business', '500 reviews/mo', 'AI draft replies', '1 widget', 'Email support'],
-    current: false,
   },
   {
     name: 'Pro',
+    planKey: 'PRO',
     price: 99,
     desc: 'For multi-location teams',
     features: ['3 businesses', 'Unlimited reviews', 'Brand voice training', 'All widgets', 'Competitor intel', 'Priority support'],
-    current: true,
   },
   {
     name: 'Enterprise',
+    planKey: 'ENTERPRISE',
     price: 299,
     desc: 'For agencies & chains',
     features: ['Unlimited businesses', 'Agency mode', 'White-label', 'Dedicated CSM', '99.9% SLA', 'Bulk actions across clients'],
-    current: false,
   },
 ]
 
 export default function BillingPage() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly')
-  const [loadingPlan, setLoadingPlan] = useState<string | null>(null)
-  const [portalLoading, setPortalLoading] = useState(false)
+  const [currentPlanKey, setCurrentPlanKey] = useState<string>('STARTER')
+  const [businessCount, setBusinessCount] = useState<number>(0)
+  const [billingData, setBillingData] = useState<BillingResponse | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [bannerNotice] = useState<{ type: 'success' | 'canceled'; message: string } | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('success') === 'true') {
+        return {
+          type: 'success',
+          message: 'Stripe checkout completed successfully! Your subscription is synchronizing with your organization account.',
+        }
+      }
+      if (params.get('canceled') === 'true') {
+        return {
+          type: 'canceled',
+          message: 'Checkout session was canceled. No changes were made to your subscription.',
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  })
 
-  const handleCheckout = async (planName: string) => {
-    if (planName === 'Free') return
-    const planKey = planName.toUpperCase()
-    setLoadingPlan(planName)
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/auth/me').then(r => r.ok ? r.json() : null),
+      fetch('/api/dashboard').then(r => r.ok ? r.json() : null),
+      fetch('/api/billing').then(r => r.ok ? r.json() : null),
+    ])
+      .then(([meData, dashData, billData]: [MeResponse | null, DashboardResponse | null, BillingResponse | null]) => {
+        if (billData?.plan) {
+          setCurrentPlanKey(billData.plan.toUpperCase())
+        } else if (meData?.user?.orgPlan) {
+          setCurrentPlanKey(meData.user.orgPlan.toUpperCase())
+        }
+        if (billData) {
+          setBillingData(billData)
+        }
+        if (Array.isArray(dashData?.businesses)) {
+          setBusinessCount(dashData.businesses.length)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleCheckout(targetPlan: string) {
+    if (targetPlan === 'FREE') return
+    setActionLoading(`checkout_${targetPlan}`)
     try {
       const res = await fetch('/api/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: planKey, billingCycle }),
+        body: JSON.stringify({ plan: targetPlan, billingCycle }),
       })
       const data = await res.json()
-      if (res.ok && data.url) {
-        toast.success(`Redirecting to ${planName} checkout...`)
-        window.location.href = data.url
-      } else {
-        toast.error('Checkout failed', { description: data.error || 'Could not initiate checkout' })
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to initiate checkout session')
+        return
+      }
+      if (data.url) {
+        window.location.assign(data.url)
       }
     } catch {
-      toast.error('Network error', { description: 'Could not connect to checkout service' })
+      toast.error('Network error connecting to Stripe checkout service')
     } finally {
-      setLoadingPlan(null)
+      setActionLoading(null)
     }
   }
 
-  const handleManageSubscription = async () => {
-    setPortalLoading(true)
+  async function handleOpenPortal() {
+    setActionLoading('portal')
     try {
       const res = await fetch('/api/billing/portal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
       const data = await res.json()
-      if (res.ok && data.url) {
-        toast.info('Opening customer portal...')
-        window.location.href = data.url
-      } else {
-        toast.error('Portal unavailable', { description: data.error || 'Could not open billing portal' })
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to open Stripe billing portal')
+        return
+      }
+      if (data.url) {
+        window.location.assign(data.url)
       }
     } catch {
-      toast.error('Network error', { description: 'Could not connect to portal service' })
+      toast.error('Network error connecting to customer portal')
     } finally {
-      setPortalLoading(false)
+      setActionLoading(null)
     }
   }
+
+  const currentPlanObj = PLANS.find(p => p.planKey === currentPlanKey) || PLANS[1]
+  const isOwnerOrAdmin = billingData?.canManageBilling ?? false
 
   return (
     <div className="flex min-h-screen">
@@ -100,9 +168,44 @@ export default function BillingPage() {
       <main className="flex-1 min-w-0 pb-20 lg:pb-0">
         <AppTopbar
           title="Billing & Plans"
-          description="Manage your subscription, usage, and invoices"
+          description="View your active subscription tier and plan features"
         />
-        <div className="p-4 sm:p-6">
+        <div className="p-4 sm:p-6 space-y-6">
+          {/* Status banner from Stripe redirect */}
+          {bannerNotice && (
+            <div className={cn(
+              'p-4 rounded-xl border flex items-start gap-3 text-xs leading-relaxed',
+              bannerNotice.type === 'success'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+            )}>
+              {bannerNotice.type === 'success' ? (
+                <Check className="w-5 h-5 flex-shrink-0 mt-0.5 text-emerald-500" />
+              ) : (
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-500" />
+              )}
+              <div>
+                <p className="font-semibold text-sm text-foreground">
+                  {bannerNotice.type === 'success' ? 'Payment Completed' : 'Checkout Canceled'}
+                </p>
+                <p>{bannerNotice.message}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Configuration / Environment Notice if Stripe is not configured */}
+          {billingData && !billingData.isConfigured && (
+            <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400 flex items-start gap-3">
+              <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-500" />
+              <div className="text-xs leading-relaxed space-y-1">
+                <p className="font-semibold text-sm text-foreground">Stripe Live Configuration Pending</p>
+                <p className="text-muted-foreground">
+                  Production Stripe API keys are awaiting environment deployment. Self-serve credit card checkout will activate automatically once Stripe credentials are configured.
+                </p>
+              </div>
+            </div>
+          )}
+
           <Tabs defaultValue="plans" className="space-y-6">
             <TabsList className="glass-card">
               <TabsTrigger value="plans" className="text-xs">
@@ -128,38 +231,46 @@ export default function BillingPage() {
               <Card className="p-5 glass-card mb-6 border-[var(--brass)]/30">
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center shadow-md shadow-[var(--brass)]/20">
                       <Crown className="w-6 h-6 text-white" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-display font-bold text-lg">Pro Plan</h3>
-                        <Badge variant="outline" className="bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
-                          Trial · 12 days left
+                        <h3 className="font-display font-bold text-lg">{currentPlanObj.name} Plan</h3>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'font-mono text-[10px]',
+                            billingData?.stripeSubscriptionStatus === 'past_due'
+                              ? 'bg-destructive/10 text-destructive border-destructive/30'
+                              : 'bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30'
+                          )}
+                        >
+                          {billingData?.stripeSubscriptionStatus?.toUpperCase() || 'ACTIVE'}
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">$99/month · billed monthly · renews Aug 18, 2026</p>
+                      <p className="text-xs text-muted-foreground">
+                        {currentPlanObj.desc} · {billingData?.hasStripeCustomer ? 'Connected to Stripe Billing' : 'Organization Tier'}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8"
-                      disabled={portalLoading}
-                      onClick={handleManageSubscription}
-                    >
-                      {portalLoading ? 'Opening...' : 'Manage subscription'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8"
-                      disabled={loadingPlan === 'Enterprise'}
-                      onClick={() => handleCheckout('Enterprise')}
-                    >
-                      {loadingPlan === 'Enterprise' ? 'Redirecting...' : 'Upgrade to Enterprise'}
-                      <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                    </Button>
+                  <div className="flex items-center gap-2">
+                    {billingData?.hasStripeCustomer && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs gap-1.5"
+                        onClick={handleOpenPortal}
+                        disabled={actionLoading === 'portal' || !isOwnerOrAdmin}
+                      >
+                        {actionLoading === 'portal' ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        )}
+                        Manage in Stripe Portal
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -193,17 +304,20 @@ export default function BillingPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {PLANS.map(plan => {
                   const price = billingCycle === 'annual' ? Math.round(plan.price * 0.8) : plan.price
+                  const isCurrent = plan.planKey === currentPlanKey
+                  const isCheckoutLoading = actionLoading === `checkout_${plan.planKey}`
+
                   return (
                     <Card
                       key={plan.name}
                       className={cn(
                         'p-5 glass-card flex flex-col',
-                        plan.current && 'border-2 border-[var(--brass)]/40 shadow-lg shadow-[var(--brass)]/10'
+                        isCurrent && 'border-2 border-[var(--brass)]/40 shadow-lg shadow-[var(--brass)]/10'
                       )}
                     >
-                      {plan.current && (
+                      {isCurrent && (
                         <div className="mb-3">
-                          <Badge className="bg-[var(--brass)] text-white">Current Plan</Badge>
+                          <Badge className="bg-[var(--brass)] text-white text-[10px]">Current Plan</Badge>
                         </div>
                       )}
                       <div className="mb-3">
@@ -219,20 +333,42 @@ export default function BillingPage() {
                           <p className="text-[10px] text-[var(--brass)] mt-1">Billed annually (${price * 12}/yr)</p>
                         )}
                       </div>
-                      <Button
-                        className={cn(
-                          'w-full mb-4',
-                          plan.current
-                            ? 'bg-muted/20 text-muted-foreground cursor-default'
-                            : plan.name === 'Enterprise'
-                            ? 'bg-purple-600 text-white hover:bg-purple-700'
-                            : 'bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]'
-                        )}
-                        disabled={plan.current || loadingPlan === plan.name}
-                        onClick={() => !plan.current && handleCheckout(plan.name)}
-                      >
-                        {plan.current ? 'Current plan' : loadingPlan === plan.name ? 'Redirecting...' : `Upgrade to ${plan.name}`}
-                      </Button>
+
+                      {isCurrent ? (
+                        <Button
+                          className="w-full mb-4 text-xs font-medium bg-muted/30 text-muted-foreground cursor-default"
+                          disabled
+                        >
+                          Current Active Tier
+                        </Button>
+                      ) : plan.planKey === 'FREE' ? (
+                        <Button
+                          className="w-full mb-4 text-xs font-medium"
+                          variant="outline"
+                          onClick={handleOpenPortal}
+                          disabled={!billingData?.hasStripeCustomer || !isOwnerOrAdmin}
+                        >
+                          {billingData?.hasStripeCustomer ? 'Change in Portal' : 'Included'}
+                        </Button>
+                      ) : (
+                        <Button
+                          className="w-full mb-4 text-xs font-medium bg-[var(--brass)] hover:bg-[var(--brass-dark)] text-white shadow-sm"
+                          onClick={() => handleCheckout(plan.planKey)}
+                          disabled={isCheckoutLoading || !isOwnerOrAdmin}
+                        >
+                          {isCheckoutLoading ? (
+                            <span className="flex items-center gap-1.5">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              Connecting...
+                            </span>
+                          ) : !isOwnerOrAdmin ? (
+                            'Admin Only'
+                          ) : (
+                            `Upgrade to ${plan.name}`
+                          )}
+                        </Button>
+                      )}
+
                       <ul className="space-y-2 flex-1">
                         {plan.features.map(f => (
                           <li key={f} className="flex items-start gap-2 text-xs">
@@ -250,142 +386,89 @@ export default function BillingPage() {
             <TabsContent value="usage">
               <div className="space-y-4">
                 <Card className="p-5 glass-card">
-                  <h3 className="font-display font-bold mb-4">Current Billing Period</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">Period</div>
-                      <div className="text-sm font-medium">Aug 6 — Sep 6, 2026</div>
-                      <div className="text-[10px] text-muted-foreground">12 days remaining</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">Plan limit</div>
-                      <div className="text-sm font-medium">$99/month</div>
-                      <div className="text-[10px] text-muted-foreground">Pro plan</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">Next charge</div>
-                      <div className="text-sm font-medium">Sep 6, 2026</div>
-                      <div className="text-[10px] text-muted-foreground">$99.00</div>
-                    </div>
-                  </div>
-                </Card>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {[
-                    { label: 'Businesses', used: 3, limit: 3, unit: '' },
-                    { label: 'SMS Sent', used: 142, limit: 500, unit: 'messages' },
-                    { label: 'AI Drafts', used: 47, limit: null, unit: 'drafts' },
-                  ].map(u => {
-                    const pct = u.limit ? (u.used / u.limit) * 100 : 0
-                    return (
-                      <Card key={u.label} className="p-5 glass-card">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-2">{u.label}</div>
-                        <div className="flex items-baseline gap-1 mb-2">
-                          <span className="font-display text-2xl font-bold">{u.used}</span>
-                          {u.limit && <span className="text-sm text-muted-foreground">/ {u.limit} {u.unit}</span>}
-                          {!u.limit && <span className="text-sm text-muted-foreground">{u.unit}</span>}
-                        </div>
-                        {u.limit && (
-                          <>
-                            <div className="w-full h-1.5 rounded-full bg-muted/30 mb-1 overflow-hidden">
-                              <div
-                                className={cn('h-full rounded-full', pct > 80 ? 'bg-amber-500' : 'bg-[var(--brass)]')}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">{Math.round(pct)}% used</div>
-                          </>
-                        )}
-                        {!u.limit && <div className="text-[10px] text-muted-foreground">Unlimited</div>}
-                      </Card>
-                    )
-                  })}
-                </div>
-
-                <Card className="p-5 glass-card">
-                  <h3 className="font-display font-bold mb-1">Overage Rates</h3>
-                  <p className="text-xs text-muted-foreground mb-4">If you exceed your plan limits, these rates apply automatically.</p>
+                  <h3 className="font-display font-bold mb-2">Usage & Limits</h3>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    Active resources associated with your organization tenant.
+                  </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {[
-                      { label: 'Additional SMS', rate: '$0.035', unit: 'per message' },
-                      { label: 'Additional AI draft', rate: '$0.02', unit: 'per draft' },
-                      { label: 'Additional business', rate: '$29', unit: 'per month' },
-                    ].map(o => (
-                      <div key={o.label} className="p-3 rounded-lg bg-accent/20">
-                        <div className="text-xs text-muted-foreground mb-1">{o.label}</div>
-                        <div className="flex items-baseline gap-1">
-                          <span className="font-bold text-lg">{o.rate}</span>
-                          <span className="text-[10px] text-muted-foreground">{o.unit}</span>
-                        </div>
+                    <Card className="p-4 glass-card">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-2">Active Businesses</div>
+                      <div className="flex items-baseline gap-1 mb-1">
+                        <span className="font-display text-2xl font-bold">{businessCount}</span>
+                        <span className="text-xs text-muted-foreground">locations</span>
                       </div>
-                    ))}
+                      <div className="text-[10px] text-muted-foreground">Queried from live tenant database</div>
+                    </Card>
+
+                    <Card className="p-4 glass-card">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-2">SMS Quota</div>
+                      <div className="flex items-baseline gap-1 mb-1">
+                        <span className="font-display text-2xl font-bold">Audit-Gated</span>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Enforced via daily TCPA rate limits</div>
+                    </Card>
+
+                    <Card className="p-4 glass-card">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-2">AI Drafts</div>
+                      <div className="flex items-baseline gap-1 mb-1">
+                        <span className="font-display text-2xl font-bold">Active</span>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">ReviewReply AI brand voice generation enabled</div>
+                    </Card>
                   </div>
                 </Card>
               </div>
             </TabsContent>
 
             <TabsContent value="invoices">
-              <Card className="p-5 glass-card">
-                <h3 className="font-display font-bold mb-4">Invoice History</h3>
-                <div className="space-y-2">
-                  {[
-                    { id: 'INV-2026-08', date: 'Aug 6, 2026', amount: '$0.00', status: 'Trial', desc: 'Pro plan — 14-day trial' },
-                    { id: 'INV-2026-07', date: 'Jul 6, 2026', amount: '$0.00', status: 'Trial', desc: 'Pro plan — 14-day trial' },
-                  ].map(inv => (
-                    <div key={inv.id} className="flex items-center gap-3 p-3 rounded-lg bg-accent/20 hover:bg-accent/30 transition-colors">
-                      <div className="w-9 h-9 rounded-lg bg-muted/40 flex items-center justify-center flex-shrink-0">
-                        <Download className="w-4 h-4 text-muted-foreground" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium">{inv.id}</div>
-                        <div className="text-[10px] text-muted-foreground">{inv.date} · {inv.desc}</div>
-                      </div>
-                      <Badge variant="outline" className="text-[10px]">{inv.status}</Badge>
-                      <span className="text-sm font-mono w-16 text-right">{inv.amount}</span>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => toast.info('Downloading invoice...')}>
-                        <Download className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  ))}
+              <Card className="p-8 glass-card text-center max-w-xl mx-auto">
+                <div className="w-12 h-12 rounded-full bg-accent/40 flex items-center justify-center mx-auto mb-3">
+                  <Calendar className="w-6 h-6 text-muted-foreground" />
                 </div>
-                <div className="mt-4 p-3 rounded-lg bg-accent/20 text-center">
-                  <p className="text-xs text-muted-foreground">
-                    Need a custom invoice or receipt?{' '}
-                    <button className="text-[var(--brass)] hover:underline">Contact billing</button>
-                  </p>
-                </div>
+                <h3 className="font-display font-bold text-base mb-1">Invoices & Receipts</h3>
+                <p className="text-xs text-muted-foreground mb-4 max-w-sm mx-auto leading-relaxed">
+                  {billingData?.hasStripeCustomer
+                    ? 'All past billing statements and official invoices are securely hosted in your Stripe Customer Portal.'
+                    : 'Electronic invoices will be available once your organization initiates a paid subscription via Stripe.'}
+                </p>
+                {billingData?.hasStripeCustomer && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs gap-1.5 mx-auto"
+                    onClick={handleOpenPortal}
+                    disabled={actionLoading === 'portal' || !isOwnerOrAdmin}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open Stripe Portal
+                  </Button>
+                )}
               </Card>
             </TabsContent>
 
             <TabsContent value="payment">
-              <Card className="p-5 glass-card max-w-lg">
-                <h3 className="font-display font-bold mb-1">Payment Method</h3>
-                <p className="text-xs text-muted-foreground mb-5">No payment method on file — you&apos;re on a free trial.</p>
-
-                <div className="p-4 rounded-lg border-2 border-dashed border-border/40 text-center mb-4">
-                  <CreditCard className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
-                  <p className="text-sm font-medium mb-1">Add a payment method</p>
-                  <p className="text-xs text-muted-foreground mb-3">We&apos;ll charge $99 when your trial ends on Aug 18, 2026</p>
-                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={() => toast.success('Redirecting to Stripe...', { description: 'Secure checkout via Stripe' })}>
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    Add credit card
+              <Card className="p-8 glass-card text-center max-w-xl mx-auto">
+                <div className="w-12 h-12 rounded-full bg-accent/40 flex items-center justify-center mx-auto mb-3">
+                  <CreditCard className="w-6 h-6 text-muted-foreground" />
+                </div>
+                <h3 className="font-display font-bold text-base mb-1">Payment Methods</h3>
+                <p className="text-xs text-muted-foreground mb-4 max-w-sm mx-auto leading-relaxed">
+                  {billingData?.hasStripeCustomer
+                    ? 'Payment cards and bank accounts are managed directly through Stripe PCI-compliant infrastructure.'
+                    : 'Payment methods will be attached upon starting your first Stripe subscription.'}
+                </p>
+                {billingData?.hasStripeCustomer && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs gap-1.5 mx-auto"
+                    onClick={handleOpenPortal}
+                    disabled={actionLoading === 'portal' || !isOwnerOrAdmin}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Manage Cards in Stripe Portal
                   </Button>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Check className="w-3.5 h-3.5 text-green-500" />
-                    Secured by Stripe (PCI DSS Level 1)
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Check className="w-3.5 h-3.5 text-green-500" />
-                    Cancel anytime — no contracts
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Check className="w-3.5 h-3.5 text-green-500" />
-                    30-day money-back guarantee
-                  </div>
-                </div>
+                )}
               </Card>
             </TabsContent>
           </Tabs>

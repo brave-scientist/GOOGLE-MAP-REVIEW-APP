@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { Role } from '@prisma/client'
 import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 import { SessionUser } from '@/lib/auth'
+import { assertWithinLimit } from '@/lib/billing'
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -162,9 +163,9 @@ export async function verifyInvitation(rawToken: string): Promise<VerificationRe
       expiresAt: invitation.expiresAt.toISOString(),
       invitedBy: invitation.invitedBy
         ? {
-            name: invitation.invitedBy.name,
-            email: invitation.invitedBy.email,
-          }
+          name: invitation.invitedBy.name,
+          email: invitation.invitedBy.email,
+        }
         : undefined,
     },
     userExists: !!existingUser,
@@ -225,7 +226,13 @@ export async function createTeamInvitation(
     throw new Error('ALREADY_MEMBER: User is already a member of this organization')
   }
 
-  // 4. Generate secure random token
+  // 4. Commercial seat entitlement check
+  const seatCheck = await assertWithinLimit(orgId, 'users', 1)
+  if (!seatCheck.allowed) {
+    throw new Error(`PLAN_LIMIT_EXCEEDED: ${seatCheck.reason || 'User seat limit exceeded for current plan'}`)
+  }
+
+  // 5. Generate secure random token
   const { rawToken, tokenHash, expiresAt } = generateInvitationToken()
 
   // 5. Persist invitation (replace any prior pending invitations for this email + org)

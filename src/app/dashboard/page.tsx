@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
+import { useActiveBusiness } from '@/lib/business-context'
 
 interface DashboardData {
   businesses: Array<{ id: string; name: string; industry: string | null; avgRating: number; reviewCount: number }>
@@ -24,19 +25,30 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
+  const { activeBusinessId } = useActiveBusiness()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/dashboard')
-      .then(r => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      setError(null)
+      const url = activeBusinessId
+        ? `/api/dashboard?businessId=${activeBusinessId}`
+        : '/api/dashboard'
+      try {
+        const r = await fetch(url)
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then(d => { setData(d); setLoading(false) })
-      .catch(e => { console.error(e); setError(e.message); setLoading(false) })
-  }, [])
+        const d = await r.json()
+        if (!cancelled) { setData(d); setLoading(false) }
+      } catch (e: unknown) {
+        if (!cancelled) { console.error(e); setError((e as Error).message); setLoading(false) }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [activeBusinessId])
 
   return (
     <div className="flex min-h-screen">
@@ -76,18 +88,14 @@ function DashboardContent({ data }: { data: DashboardData }) {
     {
       label: 'Total Reviews',
       value: data.stats.totalReviews.toString(),
-      change: '+12%',
-      trend: 'up' as const,
       icon: Star,
-      sub: 'vs last month',
+      sub: 'across all businesses',
     },
     {
       label: 'Average Rating',
       value: data.stats.avgRating.toFixed(1),
-      change: '+0.3',
-      trend: 'up' as const,
       icon: TrendingUp,
-      sub: 'vs last month',
+      sub: 'across all sources',
     },
     {
       label: 'Pending Replies',
@@ -100,8 +108,6 @@ function DashboardContent({ data }: { data: DashboardData }) {
     {
       label: 'Conversion Rate',
       value: `${data.stats.conversionRate}%`,
-      change: '+5%',
-      trend: 'up' as const,
       icon: Target,
       sub: 'request → review',
     },
@@ -189,21 +195,28 @@ function DashboardContent({ data }: { data: DashboardData }) {
       <Card className="p-5 glass-card">
         <h3 className="font-display font-bold mb-4">Quick Actions</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[
-            { label: 'Send review request', desc: 'SMS or email campaign', icon: MessageSquare, color: 'text-blue-500' },
-            { label: 'Generate AI reply', desc: '8 drafts pending', icon: Sparkles, color: 'text-[var(--brass)]' },
-            { label: 'View analytics', desc: 'Sentiment & topics', icon: TrendingUp, color: 'text-green-500' },
-            { label: 'Check competitors', desc: 'Weekly benchmark', icon: Target, color: 'text-purple-500' },
-          ].map(action => (
-            <button
-              key={action.label}
-              className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group"
-            >
-              <action.icon className={cn('w-5 h-5 mb-2', action.color)} />
-              <div className="text-sm font-medium mb-0.5">{action.label}</div>
-              <div className="text-[10px] text-muted-foreground">{action.desc}</div>
-            </button>
-          ))}
+          <Link href="/campaigns" className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group block">
+            <MessageSquare className="w-5 h-5 mb-2 text-blue-500" />
+            <div className="text-sm font-medium mb-0.5">Send review request</div>
+            <div className="text-[10px] text-muted-foreground">SMS or email campaign</div>
+          </Link>
+          <Link href="/inbox" className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group block">
+            <Sparkles className="w-5 h-5 mb-2 text-[var(--brass)]" />
+            <div className="text-sm font-medium mb-0.5">Generate AI reply</div>
+            <div className="text-[10px] text-muted-foreground">
+              {data.stats.pendingReplies} {data.stats.pendingReplies === 1 ? 'draft' : 'drafts'} pending
+            </div>
+          </Link>
+          <Link href="/analytics" className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group block">
+            <TrendingUp className="w-5 h-5 mb-2 text-green-500" />
+            <div className="text-sm font-medium mb-0.5">View analytics</div>
+            <div className="text-[10px] text-muted-foreground">Sentiment &amp; topics</div>
+          </Link>
+          <Link href="/competitors" className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group block">
+            <Target className="w-5 h-5 mb-2 text-purple-500" />
+            <div className="text-sm font-medium mb-0.5">Check competitors</div>
+            <div className="text-[10px] text-muted-foreground">Weekly benchmark</div>
+          </Link>
         </div>
       </Card>
     </>
@@ -211,7 +224,7 @@ function DashboardContent({ data }: { data: DashboardData }) {
 }
 
 function StatCard({ label, value, change, trend, icon: Icon, sub }: {
-  label: string; value: string; change: string; trend: 'up' | 'down'; icon: React.ElementType; sub: string
+  label: string; value: string; change?: string; trend?: 'up' | 'down'; icon: React.ElementType; sub: string
 }) {
   return (
     <Card className="p-4 sm:p-5 glass-card hover:border-[var(--brass)]/30 transition-all">
@@ -223,13 +236,15 @@ function StatCard({ label, value, change, trend, icon: Icon, sub }: {
       </div>
       <div className="flex items-baseline gap-2 mb-1">
         <span className="font-display text-2xl sm:text-3xl font-bold">{value}</span>
-        <span className={cn(
-          'text-[10px] font-mono flex items-center gap-0.5',
-          trend === 'up' ? 'text-green-500' : 'text-amber-500'
-        )}>
-          {trend === 'up' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
-          {change}
-        </span>
+        {change !== undefined && trend !== undefined && (
+          <span className={cn(
+            'text-[10px] font-mono flex items-center gap-0.5',
+            trend === 'up' ? 'text-green-500' : 'text-amber-500'
+          )}>
+            {trend === 'up' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
+            {change}
+          </span>
+        )}
       </div>
       <p className="text-[10px] text-muted-foreground">{sub}</p>
     </Card>

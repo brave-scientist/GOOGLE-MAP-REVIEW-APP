@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getFacebookAuthUrl, isFacebookConfigured } from '@/lib/integrations/facebook-graph'
+import { db } from '@/lib/db'
+import {
+  getFacebookAuthUrl,
+  isFacebookConfigured,
+  generateCryptographicEntropy,
+  setFBStateCookie,
+  FB_STATE_TTL_SECONDS,
+} from '@/lib/integrations/facebook-graph'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
@@ -7,11 +14,6 @@ export const dynamic = 'force-dynamic'
 // GET /api/oauth/facebook — Redirect to Facebook OAuth consent screen
 // SEC-01: requires auth + verifies the caller's org owns the businessId
 //         before initiating OAuth (same pattern as Google).
-//
-// Order of checks (deliberate):
-//   1. Auth         (401 if no session)
-//   2. businessId present + owned by caller's org (400/403 if not)
-//   3. Facebook configured (503 if not — only revealed to authorized callers)
 export async function GET(request: NextRequest) {
   // 1. SEC-01: require auth
   const ctx = await getTenantContext(request)
@@ -36,19 +38,48 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       error: 'Facebook OAuth not configured',
       message: 'Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET in .env to enable Facebook Pages integration.',
-      setupInstructions: {
-        step1: 'Go to https://developers.facebook.com → My Apps → Create App',
-        step2: 'Select "Business" as the app type',
-        step3: 'Add the "Facebook Login" product to your app',
-        step4: 'In Facebook Login settings, add this URL to Valid OAuth Redirect URIs: ' + new URL('/api/oauth/facebook/callback', request.url).origin + '/api/oauth/facebook/callback',
-        step5: 'Submit your app for App Review to request pages_read_engagement and pages_manage_engagement permissions (takes 2-4 weeks)',
-        step6: 'Copy App ID and App Secret to .env as FACEBOOK_APP_ID and FACEBOOK_APP_SECRET',
-      },
     }, { status: 503 })
   }
 
   const redirectUri = `${new URL('/api/oauth/facebook/callback', request.url).origin}/api/oauth/facebook/callback`
 
-  const authUrl = getFacebookAuthUrl(redirectUri, businessId)
-  return NextResponse.redirect(authUrl)
+  // 4. Generate high-entropy cryptographically random state (>= 32 bytes entropy)
+  const state = generateCryptographicEntropy(32)
+
+  // 5. Persist state in database for distributed atomic single-use across all serverless instances
+  try {
+    if (db?.oAuthTransactionState) {
+      await db.oAuthTransactionState.create({
+        data: {
+          state,
+          provider: 'facebook',
+          businessId,
+          userId: ctx.user.id,
+          expiresAt: new Date(Date.now() + FB_STATE_TTL_SECONDS * 1000),
+        },
+      })
+    }
+  } catch (dbErr) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[Facebook OAuth] Failed to persist OAuth state in database:', dbErr)
+      return NextResponse.json({ error: 'Database unavailable' }, { status: 500 })
+    }
+  }
+
+  const rawReturnTo = searchParams.get('returnTo') || ''
+  const returnTo = rawReturnTo === '/onboarding' ? '/onboarding' : '/settings'
+
+  // 6. Bind state, businessId, and userId into a protected JWE cookie
+  const authUrl = getFacebookAuthUrl(redirectUri, state)
+  const response = NextResponse.redirect(authUrl)
+
+  await setFBStateCookie(response, {
+    state,
+    businessId,
+    userId: ctx.user.id,
+    createdAt: Date.now(),
+    returnTo,
+  })
+
+  return response
 }

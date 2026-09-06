@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -9,10 +9,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  Star, Code2, Copy, Check, Eye, MousePointerClick, BarChart3, Plus, Palette, Globe,
+  Star, Code2, Copy, Check, Eye, MousePointerClick, BarChart3, Plus, Palette, Globe, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useActiveBusiness } from '@/lib/business-context'
 
 const WIDGET_TYPES = [
   {
@@ -63,16 +64,67 @@ const SAMPLE_REVIEWS = [
 ]
 
 export default function WidgetsPage() {
+  const { activeBusiness } = useActiveBusiness()
   const [selectedType, setSelectedType] = useState('carousel')
   const [selectedTheme, setSelectedTheme] = useState('brass')
   const [minRating, setMinRating] = useState(4)
   const [copied, setCopied] = useState(false)
 
-  // Generate real embed code pointing to the actual /widget.js route.
-  // Includes the selected type and theme so the rendered widget matches the preview.
-  const embedCode = `<script src="${typeof window !== 'undefined' ? window.location.origin : 'https://app.reviewreply.com'}/widget.js?business=Bamboo+Garden&type=${selectedType}&theme=${selectedTheme}&minRating=${minRating}&limit=5" async></script>`
+  const [analyticsData, setAnalyticsData] = useState<{
+    hasBusiness: boolean
+    availableLayouts?: number
+    activeWidgets: number
+    totalReviews: number
+    avgRating: number
+    ratingsBreakdown?: Record<string, number>
+    layouts?: Array<{ id: string; name: string; type: string; status: string; eligibleReviews: number; description: string }>
+  } | null>(null)
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false)
+
+  // Fetch real tenant-scoped widget analytics for active business
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadAnalytics() {
+      if (!activeBusiness?.id) {
+        setAnalyticsData(null)
+        return
+      }
+      try {
+        const res = await fetch(`/api/widgets/analytics?businessId=${encodeURIComponent(activeBusiness.id)}`)
+        const data = await res.json()
+        if (!isCancelled && data && !data.error) {
+          setAnalyticsData(data)
+        }
+      } catch (err) {
+        console.error('Failed to load widget analytics:', err)
+      } finally {
+        if (!isCancelled) {
+          setLoadingAnalytics(false)
+        }
+      }
+    }
+
+    loadAnalytics()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [activeBusiness?.id])
+
+  // Generate real, deterministic embed code pointing to /widget.js using businessId or slug
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.reviewreply.com'
+  const hasBusiness = Boolean(activeBusiness && activeBusiness.id)
+  const embedIdentifier = activeBusiness?.slug ? `slug=${encodeURIComponent(activeBusiness.slug)}` : `businessId=${encodeURIComponent(activeBusiness?.id || '')}`
+  const embedCode = hasBusiness
+    ? `<script src="${origin}/widget.js?${embedIdentifier}&type=${selectedType}&theme=${selectedTheme}&minRating=${minRating}&limit=5" async></script>`
+    : '<!-- Please select an active business location to generate your widget embed code -->'
 
   const copyCode = () => {
+    if (!hasBusiness) {
+      toast.error('No active business selected', { description: 'Please select a business location first.' })
+      return
+    }
     navigator.clipboard.writeText(embedCode)
     setCopied(true)
     toast.success('Embed code copied!', { description: 'Paste it into your website HTML' })
@@ -88,6 +140,15 @@ export default function WidgetsPage() {
           description="Embeddable review widgets for your website"
         />
         <div className="p-4 sm:p-6 space-y-6">
+          {hasBusiness && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-accent/20 border border-border/40 text-xs">
+              <Globe className="w-4 h-4 text-[var(--brass)] flex-shrink-0" />
+              <span className="text-muted-foreground">Generating widget for:</span>
+              <Badge variant="outline" className="bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30 font-mono text-[10px]">
+                {activeBusiness!.name}
+              </Badge>
+            </div>
+          )}
           <Tabs defaultValue="builder" className="space-y-6">
             <TabsList className="glass-card">
               <TabsTrigger value="builder" className="text-xs">
@@ -193,8 +254,8 @@ export default function WidgetsPage() {
                   <Card className="p-5 glass-card">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h3 className="font-display font-bold">Live Preview</h3>
-                        <p className="text-xs text-muted-foreground">This is exactly how your widget will look</p>
+                        <h3 className="font-display font-bold">Style Preview</h3>
+                        <p className="text-xs text-muted-foreground">Interactive layout preview with sample reviews — authentic reviews will render in your live embed</p>
                       </div>
                       <Badge variant="outline" className="text-[10px] font-mono">
                         {selectedType} · {selectedTheme} · ≥{minRating}★
@@ -242,54 +303,92 @@ export default function WidgetsPage() {
             </TabsContent>
 
             <TabsContent value="analytics">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-                {[
-                  { label: 'Active Widgets', value: '3', icon: Code2 },
-                  { label: 'Total Impressions', value: '12.4k', icon: Eye },
-                  { label: 'Click-through Rate', value: '8.2%', icon: MousePointerClick },
-                  { label: 'Reviews Generated', value: '47', icon: Star },
-                ].map(s => (
-                  <Card key={s.label} className="p-4 glass-card">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">{s.label}</span>
-                      <s.icon className="w-3.5 h-3.5 text-[var(--brass)]" />
-                    </div>
-                    <div className="font-display text-2xl font-bold">{s.value}</div>
-                  </Card>
-                ))}
-              </div>
+              {loadingAnalytics ? (
+                <Card className="p-12 glass-card text-center">
+                  <Loader2 className="w-8 h-8 text-[var(--brass)] mx-auto mb-3 animate-spin" />
+                  <p className="text-sm text-muted-foreground">Loading widget analytics...</p>
+                </Card>
+              ) : !hasBusiness ? (
+                <Card className="p-12 glass-card text-center">
+                  <Code2 className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
+                  <h3 className="font-display font-bold mb-1">No Active Business Selected</h3>
+                  <p className="text-sm text-muted-foreground">Please select a business location to view widget analytics.</p>
+                </Card>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                    {[
+                      { label: 'Available Layouts', value: String(analyticsData?.availableLayouts ?? analyticsData?.activeWidgets ?? 4), icon: Code2, sub: 'Supported in /widget.js' },
+                      { label: 'Eligible Reviews', value: String(analyticsData?.totalReviews ?? 0), icon: Star, sub: 'In business profile' },
+                      { label: 'Average Rating', value: analyticsData?.avgRating ? `${analyticsData.avgRating.toFixed(1)}★` : '0.0★', icon: Eye, sub: 'Aggregate customer score' },
+                      { label: 'High-Star Share', value: analyticsData?.totalReviews ? `${Math.round(((analyticsData.ratingsBreakdown?.[5] || 0) + (analyticsData.ratingsBreakdown?.[4] || 0)) / analyticsData.totalReviews * 100)}%` : '0%', icon: MousePointerClick, sub: '4★ & 5★ reviews' },
+                    ].map(s => (
+                      <Card key={s.label} className="p-4 glass-card">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">{s.label}</span>
+                          <s.icon className="w-3.5 h-3.5 text-[var(--brass)]" />
+                        </div>
+                        <div className="font-display text-2xl font-bold">{s.value}</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5">{s.sub}</div>
+                      </Card>
+                    ))}
+                  </div>
 
-              <Card className="p-5 glass-card">
-                <h3 className="font-display font-bold mb-4">Widget Performance</h3>
-                <div className="space-y-3">
-                  {[
-                    { name: 'Homepage Carousel', impressions: 8420, clicks: 712, reviews: 28 },
-                    { name: 'Footer Badge', impressions: 3200, clicks: 245, reviews: 12 },
-                    { name: 'Sidebar Grid', impressions: 780, clicks: 89, reviews: 7 },
-                  ].map(w => (
-                    <div key={w.name} className="p-3 rounded-lg bg-accent/20 border border-border/30">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm font-medium">{w.name}</div>
-                        <Badge variant="outline" className="text-[9px] bg-green-500/10 text-green-600 border-green-500/30">Active</Badge>
+                  <Card className="p-5 glass-card">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-display font-bold">Supported Widget Layouts</h3>
+                        <p className="text-xs text-muted-foreground">Available layout templates for {activeBusiness?.name}</p>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div>
-                          <div className="text-[10px] text-muted-foreground">Impressions</div>
-                          <div className="font-bold">{w.impressions.toLocaleString()}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground">Clicks</div>
-                          <div className="font-bold">{w.clicks}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground">Reviews</div>
-                          <div className="font-bold text-[var(--brass)]">{w.reviews}</div>
-                        </div>
-                      </div>
+                      <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/30">
+                        Templates Ready
+                      </Badge>
                     </div>
-                  ))}
-                </div>
-              </Card>
+
+                    <div className="space-y-3">
+                      {analyticsData?.layouts && analyticsData.layouts.length > 0 ? (
+                        analyticsData.layouts.map(layout => (
+                          <div key={layout.id} className="p-3 rounded-lg bg-accent/20 border border-border/30">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="text-sm font-medium flex items-center gap-2">
+                                <span>{layout.name}</span>
+                                <Badge variant="outline" className="text-[9px] font-mono capitalize">
+                                  {layout.type}
+                                </Badge>
+                              </div>
+                              <Badge variant="outline" className="text-[9px] bg-muted text-muted-foreground border-border/40">
+                                {layout.status}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>{layout.description}</span>
+                              <span className="font-mono text-[11px]">
+                                <strong className="text-foreground">{layout.eligibleReviews}</strong> review(s) eligible
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-8 text-center text-muted-foreground text-xs">
+                          No layout configurations found for this business.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 p-3 rounded-lg bg-muted/20 border border-border/30 text-xs text-muted-foreground flex items-center justify-between">
+                      <span>Live embed script scoped to business ID: <code className="font-mono font-bold text-[11px] text-[var(--brass)]">{activeBusiness?.id}</code></span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={copyCode}
+                      >
+                        <Copy className="w-3 h-3 mr-1" /> Copy Script
+                      </Button>
+                    </div>
+                  </Card>
+                </>
+              )}
             </TabsContent>
           </Tabs>
         </div>
@@ -428,7 +527,7 @@ function WidgetPreview({ type, theme, minRating }: { type: string; theme: string
 
       <div className="mt-4 pt-3 border-t flex items-center justify-between" style={{ borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }}>
         <span className="text-[10px] opacity-50">Powered by ReviewReply</span>
-        <span className="text-[10px] opacity-50 font-mono">Live preview</span>
+        <span className="text-[10px] opacity-50 font-mono">Sample preview</span>
       </div>
     </div>
   )

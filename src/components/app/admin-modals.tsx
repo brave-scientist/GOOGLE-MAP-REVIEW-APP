@@ -336,8 +336,8 @@ export function NewReportModal({ open, onOpenChange, onSuccess }: {
               <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="EMAIL_HTML">Email (HTML digest)</SelectItem>
-                <SelectItem value="PDF_ATTACHMENT" disabled>PDF attachment (Stage 3)</SelectItem>
-                <SelectItem value="BOTH" disabled>Email + PDF (Stage 3)</SelectItem>
+                <SelectItem value="PDF_ATTACHMENT">PDF attachment</SelectItem>
+                <SelectItem value="BOTH">Email + PDF</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -363,23 +363,23 @@ export function EditReportModal({ open, onOpenChange, report, onSuccess }: {
   report: { id: string; name: string; schedule: string; status: string; recipients?: string[]; format?: string } | null
   onSuccess?: () => void
 }) {
-  const [name, setName] = useState('')
-  const [schedule, setSchedule] = useState('WEEKLY')
-  const [status, setStatus] = useState('ACTIVE')
-  const [recipients, setRecipients] = useState('')
-  const [format, setFormat] = useState('EMAIL_HTML')
+  const [prevReport, setPrevReport] = useState(report)
+  const [name, setName] = useState(report?.name || '')
+  const [schedule, setSchedule] = useState(report?.schedule || 'WEEKLY')
+  const [status, setStatus] = useState(report?.status || 'ACTIVE')
+  const [recipients, setRecipients] = useState(Array.isArray(report?.recipients) ? report.recipients.join(', ') : '')
+  const [format, setFormat] = useState(report?.format || 'EMAIL_HTML')
   const [loading, setLoading] = useState(false)
 
-  // Sync form when report opens/changes
-  useEffect(() => {
-    if (report) {
-      setName(report.name || '')
-      setSchedule(report.schedule || 'WEEKLY')
-      setStatus(report.status || 'ACTIVE')
-      setRecipients(Array.isArray(report.recipients) ? report.recipients.join(', ') : '')
-      setFormat(report.format || 'EMAIL_HTML')
-    }
-  }, [report, open])
+  if (report !== prevReport) {
+    setPrevReport(report)
+    setName(report?.name || '')
+    setSchedule(report?.schedule || 'WEEKLY')
+    setStatus(report?.status || 'ACTIVE')
+    setRecipients(Array.isArray(report?.recipients) ? report.recipients.join(', ') : '')
+    setFormat(report?.format || 'EMAIL_HTML')
+  }
+
 
   const handleUpdate = async () => {
     if (!report?.id) return
@@ -446,8 +446,8 @@ export function EditReportModal({ open, onOpenChange, report, onSuccess }: {
               <SelectTrigger className="mt-1.5 glass-card"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="EMAIL_HTML">Email (HTML digest)</SelectItem>
-                <SelectItem value="PDF_ATTACHMENT" disabled>PDF attachment (Stage 3)</SelectItem>
-                <SelectItem value="BOTH" disabled>Email + PDF (Stage 3)</SelectItem>
+                <SelectItem value="PDF_ATTACHMENT">PDF attachment</SelectItem>
+                <SelectItem value="BOTH">Email + PDF</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { CommandPalette } from "@/components/app/command-palette";
+import { BusinessProvider } from "@/lib/business-context";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -30,7 +31,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "ReviewReply Enterprise — Turn every customer into a five-star review",
   description:
-    "ReviewReply aggregates reviews from Google, Facebook, Yelp, and Trustpilot into one inbox. AI trained on your brand voice drafts replies in seconds. Built-in competitor intelligence.",
+    "ReviewReply aggregates reviews from Google Business Profile and Facebook Pages into one unified inbox. ReviewReply AI drafts on-brand replies in seconds.",
   keywords: [
     "review management",
     "Google reviews",
@@ -72,10 +73,12 @@ export default function RootLayout({
         className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased bg-background text-foreground font-sans`}
       >
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-          {children}
-          <Toaster />
-          <SonnerToaster />
-          <CommandPalette />
+          <BusinessProvider>
+            {children}
+            <Toaster />
+            <SonnerToaster />
+            <CommandPalette />
+          </BusinessProvider>
         </ThemeProvider>
       </body>
     </html>

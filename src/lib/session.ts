@@ -6,9 +6,14 @@ import type { Role } from '@prisma/client'
 export const SESSION_COOKIE = 'rr_session'
 export const SESSION_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-// Get secret key — in production this MUST be set via env var
-const SECRET_KEY = process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'
-const secret = new TextEncoder().encode(SECRET_KEY)
+// Get secret key — fails closed in production if unset or < 32 characters
+export function getSessionSecret(): Uint8Array {
+  const secretKey = process.env.SESSION_SECRET
+  if (process.env.NODE_ENV === 'production' && (!secretKey || secretKey.trim().length < 32)) {
+    throw new Error('FATAL: SESSION_SECRET must be configured and at least 32 characters in production')
+  }
+  return new TextEncoder().encode(secretKey || 'reviewreply-dev-secret-change-in-production-min-32-chars')
+}
 
 export interface SessionUser {
   id: string
@@ -23,6 +28,7 @@ export interface SessionUser {
 
 // Create a signed JWT session token
 export async function encodeSession(user: SessionUser): Promise<string> {
+  const secret = getSessionSecret()
   return await new SignJWT({ ...user, sessionVersion: user.sessionVersion ?? 1 })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -34,6 +40,7 @@ export async function encodeSession(user: SessionUser): Promise<string> {
 // Verify and decode a JWT session token
 export async function decodeSession(token: string): Promise<SessionUser | null> {
   try {
+    const secret = getSessionSecret()
     const { payload } = await jwtVerify(token, secret)
     return {
       id: payload.id as string,

@@ -34,7 +34,7 @@ export interface TestSeedResult {
   business: {
     id: string
     name: string
-    slug: string
+    slug: string | null
   }
   membership: {
     id: string
@@ -53,20 +53,22 @@ export function generateTestEmail(prefix = 'e2e'): string {
  */
 export async function seedTestTenant(options: {
   email?: string
+  userEmail?: string
   password?: string
   name?: string
   businessName?: string
+  businessSlug?: string
   role?: Role
   plan?: Plan
   isLegacy?: boolean
   isNullPassword?: boolean
   sessionVersion?: number
 } = {}): Promise<TestSeedResult> {
-  const email = options.email || generateTestEmail('user')
+  const email = options.userEmail || options.email || generateTestEmail('user')
   const rawPassword = options.password || 'TestPassword2026!'
   const name = options.name || 'E2E Test User'
   const businessName = options.businessName || `E2E Business ${Date.now()}`
-  const slug = `e2e-biz-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const slug = options.businessSlug || `e2e-biz-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   const role = options.role || Role.OWNER
   const plan = options.plan || Plan.PRO
   const sessionVersion = options.sessionVersion ?? 1
@@ -117,7 +119,7 @@ export async function seedTestTenant(options: {
     })
 
     return { user, org, business, membership }
-  })
+  }, { timeout: 15000, maxWait: 10000 })
 
   return {
     user: result.user,
@@ -359,7 +361,12 @@ export async function cleanupTestTenant(orgId: string): Promise<void> {
 
     const userIds = org.members.map(m => m.userId)
 
-    // Deleting organization cascades to: Business, Review, Campaign, OrgMember, ScheduledReport, TeamInvitation, etc.
+    // Explicitly delete businesses belonging to this org (cascades to Review, Campaign, OAuthToken, etc.)
+    await prisma.business.deleteMany({
+      where: { orgId },
+    })
+
+    // Deleting organization cascades to: OrgMember, ScheduledReport, TeamInvitation, etc.
     await prisma.organization.delete({
       where: { id: orgId },
     })

@@ -1,13 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
-  Star, ExternalLink, Search, Loader2, Check, Plus, Trash2, QrCode, Copy, ChevronDown, ChevronUp, ChevronRight,
+  Star, ExternalLink, Search, Loader2, Check, Plus, Trash2, QrCode, Copy,
+  ChevronDown, ChevronUp, ChevronRight, Printer, Sparkles, Sliders, MessageSquareHeart,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -20,6 +22,7 @@ import {
   type PlatformCategory,
 } from '@/lib/review-platforms'
 import QRCodeLib from 'qrcode'
+import { PrintableQrKitModal } from '@/components/app/printable-qr-kit-modal'
 
 interface SavedLink {
   id?: string
@@ -39,6 +42,10 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [slug, setSlug] = useState('')
+  const [businessName, setBusinessName] = useState('')
+  const [reviewPageTitle, setReviewPageTitle] = useState('')
+  const [reviewPageSubtitle, setReviewPageSubtitle] = useState('')
+  const [reviewPagePrivateFeedbackEnabled, setReviewPagePrivateFeedbackEnabled] = useState(true)
   const [links, setLinks] = useState<SavedLink[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedCategory, setExpandedCategory] = useState<PlatformCategory | null>('general')
@@ -46,30 +53,51 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
   const [customUrl, setCustomUrl] = useState('')
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
+  const [qrTargetMode, setQrTargetMode] = useState<'hub' | 'direct'>('hub')
+  const [showPrintKit, setShowPrintKit] = useState(false)
   const [reviewUsUrl, setReviewUsUrl] = useState<string | null>(null)
 
-  // Fetch existing links + slug on mount
-  const fetchLinks = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/review-links?businessId=${businessId}`)
-      if (!res.ok) return
-      const data = await res.json()
-      setSlug(data.slug || generateBusinessSlug(data.businessName || ''))
-      setLinks(data.links || [])
-      if (data.slug) {
-        setReviewUsUrl(`${window.location.origin}/review-us/${data.slug}`)
+  useEffect(() => {
+    let ignore = false
+    async function loadLinks() {
+      try {
+        const res = await fetch(`/api/review-links?businessId=${businessId}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (!ignore) {
+          setSlug(data.slug || generateBusinessSlug(data.businessName || ''))
+          setBusinessName(data.businessName || '')
+          setReviewPageTitle(data.reviewPageTitle || '')
+          setReviewPageSubtitle(data.reviewPageSubtitle || '')
+          setReviewPagePrivateFeedbackEnabled(data.reviewPagePrivateFeedbackEnabled ?? true)
+          setLinks(data.links || [])
+          if (data.slug) {
+            const url = `${window.location.origin}/review-us/${data.slug}`
+            setReviewUsUrl(url)
+            QRCodeLib.toDataURL(url, {
+              width: 512,
+              margin: 2,
+              color: { dark: '#1F1E1C', light: '#FFFFFF' },
+            }).then(qr => {
+              if (!ignore) setQrDataUrl(qr)
+            }).catch(() => {})
+          }
+        }
+      } catch {
+        // ignore — user will see empty state
+      } finally {
+        if (!ignore) {
+          setLoading(false)
+        }
       }
-    } catch {
-      // ignore — user will see empty state
-    } finally {
-      setLoading(false)
+    }
+
+    loadLinks()
+    return () => {
+      ignore = true
     }
   }, [businessId])
 
-  useEffect(() => {
-    fetchLinks()
-  }, [fetchLinks])
 
   // Check if a platform is already enabled
   const isPlatformEnabled = (platformId: string) =>
@@ -179,6 +207,9 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
         body: JSON.stringify({
           businessId,
           slug,
+          reviewPageTitle: reviewPageTitle.trim() || null,
+          reviewPageSubtitle: reviewPageSubtitle.trim() || null,
+          reviewPagePrivateFeedbackEnabled,
           links: links.map((l, i) => ({
             platformId: l.platformId || null,
             customName: l.customName || null,
@@ -193,7 +224,15 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
       if (res.ok) {
         toast.success('Review Us page saved!')
         if (data.reviewUsUrl) {
-          setReviewUsUrl(`${window.location.origin}${data.reviewUsUrl}`)
+          const url = `${window.location.origin}${data.reviewUsUrl}`
+          setReviewUsUrl(url)
+          if (qrTargetMode === 'hub') {
+            QRCodeLib.toDataURL(url, {
+              width: 512,
+              margin: 2,
+              color: { dark: '#1F1E1C', light: '#FFFFFF' },
+            }).then(setQrDataUrl).catch(() => {})
+          }
         }
       } else {
         toast.error(data.error || 'Failed to save')
@@ -205,22 +244,34 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
     }
   }
 
-  // Generate QR code pointing to the Review Us page
-  const generateQr = async () => {
-    if (!reviewUsUrl) {
+  // Generate QR code pointing to either the Review Us hub or direct Google page
+  const generateQr = async (targetMode: 'hub' | 'direct' = qrTargetMode) => {
+    let target = reviewUsUrl
+    if (targetMode === 'direct') {
+      const googleLink = links.find(l => l.platformId === 'google' && l.enabled)?.url
+      if (!googleLink) {
+        toast.error('Google review link not configured', {
+          description: 'Enable and add your Google review URL below before generating a direct QR code.',
+        })
+        return
+      }
+      target = googleLink
+    }
+
+    if (!target) {
       toast.error('Save your settings first to generate a QR code')
       return
     }
     setQrLoading(true)
     try {
-      const dataUrl = await QRCodeLib.toDataURL(reviewUsUrl, {
+      const dataUrl = await QRCodeLib.toDataURL(target, {
         width: 512,
         margin: 2,
         color: { dark: '#1F1E1C', light: '#FFFFFF' },
       })
       setQrDataUrl(dataUrl)
-      toast.success('QR code generated!')
-    } catch (err) {
+      toast.success(`QR code updated (${targetMode === 'direct' ? 'Direct Google' : 'Multi-Platform Hub'})!`)
+    } catch {
       toast.error('Failed to generate QR code')
     } finally {
       setQrLoading(false)
@@ -259,6 +310,13 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
   // Catalog links (platformId is set)
   const catalogLinks = links.filter(l => l.platformId)
 
+  const enabledPlatforms = links.filter(l => l.enabled).map(l => {
+    if (l.platformId && PLATFORM_MAP[l.platformId]) {
+      return { name: PLATFORM_MAP[l.platformId].name, iconUrl: PLATFORM_MAP[l.platformId].iconUrl || null }
+    }
+    return { name: l.customName || 'Review Site', iconUrl: l.customIconUrl || null }
+  })
+
   return (
     <div className="max-w-4xl space-y-6">
       {/* Header */}
@@ -268,21 +326,106 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
             <Star className="w-5 h-5 text-[var(--brass)]" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display font-bold mb-1">Review Us Page</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-display font-bold mb-1">Review Us Page &amp; QR Acceleration</h3>
+              <Button
+                size="sm"
+                className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]"
+                onClick={save}
+                disabled={saving || loading}
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                Save Changes
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              A public page where your customers pick a platform and get sent straight to that platform's review-submission page.
-              No API access needed — you just paste your review URL for each platform you want to offer.
+              A customized public landing page where customers choose their favorite platform to leave a review, or send direct private feedback to your management team. Generate high-resolution tabletop and countertop QR kits with zero platform API lock-in.
             </p>
           </div>
         </div>
       </Card>
 
-      {/* Page URL + QR */}
+      {/* Page Customization & Private Feedback Triage */}
       <Card className="p-5 glass-card">
-        <h4 className="text-sm font-medium mb-3">Your public Review Us page</h4>
-        <div className="space-y-3">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-8 h-8 rounded-lg bg-[var(--brass)]/10 text-[var(--brass)] flex items-center justify-center flex-shrink-0">
+            <Sliders className="w-4 h-4" />
+          </div>
+          <div className="flex-1">
+            <h4 className="text-sm font-semibold">Page Customization &amp; Private Feedback Triage</h4>
+            <p className="text-xs text-muted-foreground">
+              Personalize the welcoming headline, subtext, and enable private customer feedback triage.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
           <div>
-            <Label className="text-xs">Page URL</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Custom Headline</Label>
+              <span className="text-[10px] text-muted-foreground">{reviewPageTitle.length}/120</span>
+            </div>
+            <Input
+              value={reviewPageTitle}
+              onChange={e => setReviewPageTitle(e.target.value.slice(0, 120))}
+              placeholder="How was your experience?"
+              className="mt-1 text-xs"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Leave blank to default to &quot;How was your experience?&quot;.
+            </p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Custom Subtitle / Message</Label>
+              <span className="text-[10px] text-muted-foreground">{reviewPageSubtitle.length}/250</span>
+            </div>
+            <Textarea
+              value={reviewPageSubtitle}
+              onChange={e => setReviewPageSubtitle(e.target.value.slice(0, 250))}
+              placeholder={`We'd love to hear from you. Pick a platform below to leave a review for ${businessName || 'our business'}.`}
+              rows={2}
+              className="mt-1 text-xs resize-none"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Shown directly under the headline on the public page.
+            </p>
+          </div>
+
+          <div className="pt-3 border-t border-border/30">
+            <label className="flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                id="review-page-feedback-toggle"
+                checked={reviewPagePrivateFeedbackEnabled}
+                onChange={e => setReviewPagePrivateFeedbackEnabled(e.target.checked)}
+                className="mt-0.5 rounded border-border/80 text-[var(--brass)] focus:ring-[var(--brass)]"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">
+                    Enable Private Direct Feedback Triage
+                  </span>
+                  <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+                    FTC Compliant
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Displays a direct message option for unhappy or concerned customers to reach management privately, reducing public negative reviews without suppressing or gating any review platform links.
+                </p>
+              </div>
+            </label>
+          </div>
+        </div>
+      </Card>
+
+      {/* Page URL + QR Acceleration */}
+      <Card className="p-5 glass-card">
+        <h4 className="text-sm font-medium mb-3">Your Public Review Us Page &amp; QR Acceleration</h4>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs">Page URL Slug</Label>
             <div className="flex gap-2 mt-1.5">
               <div className="flex-1 flex items-center gap-1 px-3 py-2 rounded-md glass-card text-xs font-mono text-muted-foreground">
                 <span className="truncate">
@@ -297,46 +440,116 @@ export function ReviewUsTab({ businessId }: ReviewUsTabProps) {
               </div>
               {reviewUsUrl && (
                 <>
-                  <Button variant="outline" size="sm" onClick={copyUrl} className="h-9">
+                  <Button variant="outline" size="sm" onClick={copyUrl} className="h-9" title="Copy URL">
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => window.open(reviewUsUrl, '_blank')} className="h-9">
+                  <Button variant="outline" size="sm" onClick={() => window.open(reviewUsUrl, '_blank')} className="h-9" title="Preview Public Page">
                     <ExternalLink className="w-3.5 h-3.5" />
                   </Button>
                 </>
               )}
             </div>
             <p className="text-[10px] text-muted-foreground mt-1.5">
-              This is the link you share with customers or print on a QR code.
-              Save your settings first to activate the URL.
+              This is the destination link shared in campaigns or printed on tabletop signs.
             </p>
           </div>
 
-          {reviewUsUrl && (
-            <div className="pt-3 border-t border-border/30">
-              <Button variant="outline" size="sm" onClick={generateQr} disabled={qrLoading}>
-                {qrLoading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <QrCode className="w-3.5 h-3.5 mr-1.5" />}
-                Generate QR code
-              </Button>
-              {qrDataUrl && (
-                <div className="mt-3 flex items-start gap-4">
-                  <img src={qrDataUrl} alt="QR code" className="w-32 h-32 rounded-lg border border-border/30" />
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-2 max-w-xs">
-                      Print this QR code and place it where customers can scan it — on a receipt, a table tent, a poster, or a business card.
-                      It points to your Review Us page.
-                    </p>
-                    <Button variant="outline" size="sm" onClick={downloadQr}>
+          {/* QR Destination Target Selector */}
+          <div className="pt-3 border-t border-border/30">
+            <Label className="text-xs mb-2 block font-medium">QR Code Destination Mode</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setQrTargetMode('hub')
+                  generateQr('hub')
+                }}
+                className={cn(
+                  'p-3 rounded-lg border text-left transition-all',
+                  qrTargetMode === 'hub'
+                    ? 'border-[var(--brass)] bg-[var(--brass)]/10 text-foreground'
+                    : 'border-border/60 hover:border-border text-muted-foreground'
+                )}
+              >
+                <div className="text-xs font-semibold">Multi-Platform Hub</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  Points to /review-us/{slug || '...'} (Customer selects Google, Yelp, FB, etc.)
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setQrTargetMode('direct')
+                  generateQr('direct')
+                }}
+                className={cn(
+                  'p-3 rounded-lg border text-left transition-all',
+                  qrTargetMode === 'direct'
+                    ? 'border-[var(--brass)] bg-[var(--brass)]/10 text-foreground'
+                    : 'border-border/60 hover:border-border text-muted-foreground'
+                )}
+              >
+                <div className="text-xs font-semibold">Direct Primary Platform</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  Points directly to your Google review URL for maximum 1-tap conversion
+                </div>
+              </button>
+            </div>
+
+            {reviewUsUrl && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-xl bg-accent/20 border border-border/40">
+                {qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="QR Code"
+                    id="preview-qr-image"
+                    className="w-28 h-28 rounded-lg bg-white p-1.5 shadow-sm border border-border/40 flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-28 h-28 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+                <div className="space-y-2 flex-1">
+                  <div className="text-xs font-semibold">
+                    {qrTargetMode === 'direct' ? 'Direct Platform QR Code' : 'Multi-Platform Hub QR Code'}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Place this QR on counter cards, dining table tents, window decals, or checkout receipts. Customers scan with their phone camera to instantly write a review.
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button variant="outline" size="sm" onClick={downloadQr} className="text-xs h-8">
                       <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
                       Download PNG
                     </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setShowPrintKit(true)}
+                      className="text-xs h-8 bg-[var(--brass)] hover:bg-[var(--brass-dark)] text-white"
+                    >
+                      <Printer className="w-3.5 h-3.5 mr-1.5" />
+                      Print Countertop Kit
+                    </Button>
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       </Card>
+
+      {/* Printable Countertop Kit Modal */}
+      <PrintableQrKitModal
+        open={showPrintKit}
+        onOpenChange={setShowPrintKit}
+        businessName={businessName}
+        qrDataUrl={qrDataUrl}
+        targetUrl={qrTargetMode === 'direct' ? (links.find(l => l.platformId === 'google')?.url || reviewUsUrl) : reviewUsUrl}
+        platforms={enabledPlatforms}
+        headline={reviewPageTitle || 'How was your experience?'}
+      />
 
       {/* Currently configured platforms */}
       <Card className="p-5 glass-card">

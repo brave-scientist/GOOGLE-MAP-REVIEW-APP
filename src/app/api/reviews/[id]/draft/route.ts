@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { DraftStatus } from '@prisma/client'
 import { getTenantContext, assertReviewOwnership } from '@/lib/tenant-context'
+import { SYSTEM_PRESETS, buildSystemPrompt } from '@/lib/templates/presets'
+import { hydrateTemplate } from '@/lib/templates/token-engine'
+import { assertWithinLimit, incrementUsage } from '@/lib/billing'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30 // 30 seconds for AI generation
 
-// POST /api/reviews/[id]/draft — Generate AI draft reply using real LLM (z-ai-web-dev-sdk)
+// POST /api/reviews/[id]/draft — Generate AI draft reply or apply hydrated template (AI-02)
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -19,6 +22,9 @@ export async function POST(
     const { id } = await params
     const body = await request.json().catch(() => ({}))
     const forceRegenerate = body.forceRegenerate === true
+    const presetId = body.presetId as string | undefined
+    const templateId = body.templateId as string | undefined
+    const applyTemplateDirectly = body.applyTemplateDirectly === true
 
     // SEC-01 (IDOR): verify the review belongs to a business in the caller's org
     const reviewCheck = await assertReviewOwnership(ctx, id, true)
@@ -31,7 +37,71 @@ export async function POST(
       return NextResponse.json({ error: 'Review not found' }, { status: 404 })
     }
 
-    if (review.draftText && !forceRegenerate) {
+    // Direct Template Application Mode
+    if (templateId && applyTemplateDirectly) {
+      const template = await db.replyTemplate.findUnique({
+        where: { id: templateId },
+      })
+      if (!template || !ctx.businessIds.includes(template.businessId)) {
+        return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+      }
+
+      // Hydrate template variables
+      const hydratedDraft = hydrateTemplate(template.body, {
+        author: review.author,
+        customerName: review.author,
+        businessName: review.business.name,
+        businessPhone: review.business.phone,
+        businessAddress: review.business.address,
+        rating: review.rating,
+        platform: review.source,
+        managerName: ctx.user.name || 'Management',
+        contactEmail: ctx.user.email,
+        industry: review.business.industry,
+      })
+
+      // Increment template usage count
+      await db.replyTemplate.update({
+        where: { id: template.id },
+        data: { usageCount: { increment: 1 } },
+      })
+
+      await db.review.update({
+        where: { id },
+        data: {
+          draftText: hydratedDraft,
+          draftStatus: DraftStatus.PENDING,
+        },
+      })
+
+      await db.auditLog.create({
+        data: {
+          actorId: ctx.user.id,
+          action: 'draft.template_applied',
+          targetType: 'review',
+          targetId: review.id,
+          metadata: JSON.stringify({
+            reviewId: review.id,
+            templateId: template.id,
+            templateTitle: template.title,
+            rating: review.rating,
+            businessId: review.businessId,
+          }),
+        },
+      })
+
+      return NextResponse.json({
+        draft: hydratedDraft,
+        status: DraftStatus.PENDING,
+        generatedAt: new Date().toISOString(),
+        model: 'template-hydrated',
+        templateId: template.id,
+        templateTitle: template.title,
+      })
+    }
+
+    // If cached draft exists and no preset/template override or forceRegenerate requested
+    if (review.draftText && !forceRegenerate && !presetId && !templateId) {
       return NextResponse.json({
         draft: review.draftText,
         status: review.draftStatus,
@@ -40,24 +110,115 @@ export async function POST(
       })
     }
 
+    // Resolve AI Preset
+    let resolvedPreset: {
+      id?: string
+      name: string
+      tone: string
+      responseLength: string
+      customInstructions: string | null
+      signature: string | null
+    } | null = null
+
+    if (presetId) {
+      // Check system presets first
+      const sys = SYSTEM_PRESETS.find(p => p.id === presetId)
+      if (sys) {
+        resolvedPreset = {
+          id: sys.id,
+          name: sys.name,
+          tone: sys.tone,
+          responseLength: sys.responseLength,
+          customInstructions: sys.customInstructions,
+          signature: null,
+        }
+      } else {
+        const customPreset = await db.aiReplyPreset.findUnique({
+          where: { id: presetId },
+        })
+        if (customPreset && ctx.businessIds.includes(customPreset.businessId)) {
+          resolvedPreset = {
+            id: customPreset.id,
+            name: customPreset.name,
+            tone: customPreset.tone,
+            responseLength: customPreset.responseLength,
+            customInstructions: customPreset.customInstructions,
+            signature: customPreset.signature,
+          }
+        }
+      }
+    }
+
+    // If no preset specified, check if business has a default custom preset
+    if (!resolvedPreset) {
+      const defaultPreset = await db.aiReplyPreset.findFirst({
+        where: { businessId: review.businessId, isDefault: true },
+      })
+      if (defaultPreset) {
+        resolvedPreset = {
+          id: defaultPreset.id,
+          name: defaultPreset.name,
+          tone: defaultPreset.tone,
+          responseLength: defaultPreset.responseLength,
+          customInstructions: defaultPreset.customInstructions,
+          signature: defaultPreset.signature,
+        }
+      } else {
+        const defaultSys = SYSTEM_PRESETS[0]
+        resolvedPreset = {
+          id: defaultSys.id,
+          name: defaultSys.name,
+          tone: defaultSys.tone,
+          responseLength: defaultSys.responseLength,
+          customInstructions: defaultSys.customInstructions,
+          signature: null,
+        }
+      }
+    }
+
+    // Resolve optional template reference pattern
+    let templatePattern: { title: string; body: string } | null = null
+    if (templateId) {
+      const t = await db.replyTemplate.findUnique({
+        where: { id: templateId },
+      })
+      if (t && ctx.businessIds.includes(t.businessId)) {
+        templatePattern = { title: t.title, body: t.body }
+      }
+    }
+
     // Fetch the brand voice profile for this business (if one exists)
     const brandVoice = await db.brandVoiceProfile.findUnique({
       where: { businessId: review.businessId },
     })
 
-    // Generate draft using REAL LLM via z-ai-web-dev-sdk
+    // Entitlement limit check for AI draft generation
+    const limitCheck = await assertWithinLimit(ctx.orgId, 'ai_replies', 1)
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: limitCheck.reason || 'Monthly AI reply generation limit reached for your plan. Please upgrade.',
+          code: limitCheck.code || 'PLAN_UPGRADE_REQUIRED',
+        },
+        { status: 403 }
+      )
+    }
+
+    // Generate draft using LLM with preset and brand voice integration
     const { draft, model, tokensUsed } = await generateLLMDraft({
       reviewText: review.text,
       reviewRating: review.rating,
       reviewAuthor: review.author,
       businessName: review.business.name,
       businessIndustry: review.business.industry || 'business',
+      preset: resolvedPreset,
       brandVoiceProfile: brandVoice ? {
         toneGuidelines: brandVoice.toneGuidelines,
         signature: brandVoice.signature,
         forbiddenPhrases: brandVoice.forbiddenPhrases,
         examples: JSON.parse(brandVoice.examples || '[]'),
       } : null,
+      templateExample: templatePattern,
     })
 
     await db.review.update({
@@ -67,6 +228,8 @@ export async function POST(
         draftStatus: DraftStatus.PENDING,
       },
     })
+
+    await incrementUsage(ctx.orgId, 'ai_replies', 1)
 
     await db.auditLog.create({
       data: {
@@ -81,6 +244,9 @@ export async function POST(
           model,
           tokensUsed,
           businessId: review.businessId,
+          presetId: resolvedPreset?.id,
+          presetName: resolvedPreset?.name,
+          templateId: templateId || null,
         }),
       },
     })
@@ -91,6 +257,8 @@ export async function POST(
       generatedAt: new Date().toISOString(),
       model,
       tokensUsed,
+      preset: resolvedPreset ? { id: resolvedPreset.id, name: resolvedPreset.name } : null,
+      templateId: templateId || null,
     })
   } catch (error) {
     console.error('Draft generation error:', error)
@@ -101,70 +269,43 @@ export async function POST(
   }
 }
 
-// Real LLM-powered draft generation
+// Real LLM-powered draft generation with preset & token support
 async function generateLLMDraft(params: {
   reviewText: string
   reviewRating: number
   reviewAuthor: string
   businessName: string
   businessIndustry: string
+  preset?: {
+    name?: string
+    tone?: string
+    responseLength?: string
+    customInstructions?: string | null
+    signature?: string | null
+  } | null
   brandVoiceProfile?: {
     toneGuidelines: string
     signature: string
     forbiddenPhrases: string
     examples: Array<{ reviewText: string; replyText: string }>
   } | null
+  templateExample?: {
+    title: string
+    body: string
+  } | null
 }): Promise<{ draft: string; model: string; tokensUsed: number }> {
-  const { reviewText, reviewRating, reviewAuthor, businessName, businessIndustry, brandVoiceProfile } = params
-  const firstName = reviewAuthor.split(' ')[0]
+  const { reviewText, reviewRating, reviewAuthor, businessName, businessIndustry, preset, brandVoiceProfile, templateExample } = params
 
-  // Build the system prompt — incorporates brand voice profile if available
-  let systemPrompt = `You are an expert customer service representative for ${businessName}, a ${businessIndustry} business.
-
-Your task is to write a public reply to a customer's online review. The reply should:
-
-1. Be warm, professional, and authentic — sound like a real person, not a bot
-2. Address the customer by first name (${firstName})
-3. Reference specific details from their review to show you actually read it
-4. Be concise (2-4 sentences, max 60 words)
-5. Match the sentiment:
-   - For 4-5 star reviews: Express genuine gratitude, invite them back
-   - For 3 star reviews: Thank them, acknowledge their feedback, commit to improvement
-   - For 1-2 star reviews: Sincerely apologize, take responsibility, offer to make it right with a specific contact method
-6. NEVER use generic phrases like "We apologize for any inconvenience" or "We take feedback seriously"
-7. NEVER mention that this is an AI-generated response
-8. If the review mentions anything that sounds like a legal threat (lawsuit, lawyer, BBB, attorney), respond professionally and ask them to contact management directly — do NOT apologize or admit fault
-9. Do not include emojis or hashtags
-10. Do not sign off with a name — the platform will append the signature automatically`
-
-  // If a brand voice profile exists, append it to the system prompt
-  if (brandVoiceProfile) {
-    systemPrompt += '\n\n--- BRAND VOICE PROFILE ---\n'
-    systemPrompt += 'This business has trained a brand voice profile. You MUST match their voice.\n\n'
-
-    if (brandVoiceProfile.toneGuidelines) {
-      systemPrompt += `TONE GUIDELINES:\n${brandVoiceProfile.toneGuidelines}\n\n`
-    }
-
-    if (brandVoiceProfile.signature) {
-      systemPrompt += `SIGNATURE (append at the end):\n${brandVoiceProfile.signature}\n\n`
-    }
-
-    if (brandVoiceProfile.forbiddenPhrases) {
-      systemPrompt += `FORBIDDEN PHRASES (never use these):\n${brandVoiceProfile.forbiddenPhrases}\n\n`
-    }
-
-    if (brandVoiceProfile.examples && brandVoiceProfile.examples.length > 0) {
-      systemPrompt += `EXAMPLE REPLIES (match this tone and style):\n`
-      brandVoiceProfile.examples.slice(0, 5).forEach((ex, i) => {
-        systemPrompt += `\nExample ${i + 1}:\nReview: "${ex.reviewText}"\nReply: "${ex.replyText}"\n`
-      })
-    }
-
-    systemPrompt += '\n--- END BRAND VOICE PROFILE ---\n'
-  }
-
-  systemPrompt += '\nWrite ONLY the reply text, no preamble, no explanation.'
+  const systemPrompt = buildSystemPrompt({
+    businessName,
+    businessIndustry,
+    reviewAuthor,
+    reviewRating,
+    reviewText,
+    preset,
+    brandVoice: brandVoiceProfile,
+    templateExample,
+  })
 
   const userPrompt = `Review details:
 - Customer name: ${reviewAuthor}
@@ -184,7 +325,7 @@ Write the reply:`
 
     const completion = await zai.chat.completions.create({
       messages: [
-        { role: 'assistant', content: systemPrompt },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       thinking: { type: 'disabled' },
@@ -196,7 +337,6 @@ Write the reply:`
       throw new Error('Empty response from LLM')
     }
 
-    // Clean up the draft (remove quotes if the LLM wrapped it)
     const cleanedDraft = draft.replace(/^["']|["']$/g, '').trim()
 
     return {
@@ -206,8 +346,14 @@ Write the reply:`
     }
   } catch (error) {
     console.error('LLM call failed, falling back to rule-based:', error)
-    // Fallback to rule-based generation if LLM fails
-    const fallback = generateFallbackDraft(reviewRating, reviewAuthor, businessName, reviewText)
+    const fallback = generateFallbackDraft({
+      rating: reviewRating,
+      author: reviewAuthor,
+      business: businessName,
+      text: reviewText,
+      preset,
+      signature: preset?.signature || brandVoiceProfile?.signature,
+    })
     return {
       draft: fallback,
       model: 'rule-based-fallback',
@@ -216,20 +362,52 @@ Write the reply:`
   }
 }
 
-// Fallback rule-based draft (used only if LLM is unavailable)
-function generateFallbackDraft(rating: number, author: string, business: string, text: string): string {
-  const firstName = author.split(' ')[0]
+// Fallback rule-based draft adapted to preset & signature
+function generateFallbackDraft(options: {
+  rating: number
+  author: string
+  business: string
+  text: string
+  preset?: {
+    responseLength?: string
+    tone?: string
+  } | null
+  signature?: string | null
+}): string {
+  const { rating, author, business, text, preset, signature } = options
+  const firstName = author.trim().split(/\s+/)[0] || 'there'
   const escalationKeywords = ['lawsuit', 'BBB', 'lawyer', 'health inspector', 'attorney', 'sue']
   const lowerText = text.toLowerCase()
+
+  let baseDraft = ''
+
   if (escalationKeywords.some(k => lowerText.includes(k))) {
-    return `Thank you for reaching out, ${firstName}. We take matters like this very seriously. A member of our management team will contact you within 24 hours to address your concerns directly.`
+    baseDraft = `Thank you for reaching out, ${firstName}. We take matters like this very seriously. A member of our management team will contact you directly to address your concerns.`
+  } else if (rating >= 4) {
+    if (preset?.responseLength === 'CONCISE') {
+      baseDraft = `Thank you for the fantastic review, ${firstName}! We can't wait to see you again at ${business}.`
+    } else if (preset?.responseLength === 'DETAILED') {
+      baseDraft = `Thank you so much for taking the time to share your wonderful feedback, ${firstName}! Our entire team at ${business} is dedicated to providing outstanding service, and knowing you had such a positive experience means everything to us. We look forward to welcoming you back soon!`
+    } else {
+      baseDraft = `Thank you so much for the wonderful review, ${firstName}! We are thrilled to hear you had such a great experience at ${business}. We cannot wait to welcome you back soon!`
+    }
+  } else if (rating === 3) {
+    if (preset?.responseLength === 'CONCISE') {
+      baseDraft = `Thank you for your feedback, ${firstName}. We appreciate your input and will use it to improve.`
+    } else {
+      baseDraft = `Thank you for your feedback, ${firstName}. We appreciate you taking the time to share your experience at ${business}. We are constantly striving to improve and hope to deliver a 5-star experience on your next visit.`
+    }
+  } else {
+    if (preset?.responseLength === 'CONCISE') {
+      baseDraft = `${firstName}, we are very sorry your experience fell short. Please reach out so we can make this right.`
+    } else {
+      baseDraft = `${firstName}, we are truly sorry to hear that your experience at ${business} fell short of expectations. This is not the standard we hold ourselves to. Please reach out to us directly so we can make things right.`
+    }
   }
 
-  if (rating >= 4) {
-    return `Thank you so much for the wonderful review, ${firstName}! We are thrilled to hear you had such a great experience at ${business}. Our team takes pride in what we do, and feedback like yours makes it all worthwhile. We cannot wait to welcome you back soon!`
-  } else if (rating === 3) {
-    return `Thank you for your feedback, ${firstName}. We appreciate you taking the time to share your experience at ${business}. We are always looking for ways to improve, and your input helps us do that. We hope to have the opportunity to provide you with a 5-star experience next time.`
-  } else {
-    return `${firstName}, we are truly sorry to hear that your experience at ${business} fell short of expectations. This is not the standard we hold ourselves to, and we would like to make it right. Please reach out to us directly so we can turn this around for you.`
+  if (signature) {
+    baseDraft += `\n\n${signature}`
   }
+
+  return baseDraft
 }

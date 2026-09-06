@@ -1,22 +1,223 @@
+import crypto from 'crypto'
+import { EncryptJWT, jwtDecrypt } from 'jose'
+import { NextRequest, NextResponse } from 'next/server'
+import { getRedisClient } from '@/lib/rate-limit'
+import { db } from '@/lib/db'
+
 // lib/integrations/facebook-graph.ts — Facebook Graph API integration
 // Requires env vars: FACEBOOK_APP_ID, FACEBOOK_APP_SECRET
 // API docs: https://developers.facebook.com/docs/graph-api/reference/v19.0
-//
-// Flow overview:
-//   1. User clicks "Connect Facebook" → redirect to Facebook OAuth consent
-//   2. Facebook redirects back with ?code=... → exchange for user access_token
-//   3. Use user access_token to GET /me/accounts → list of Pages the user manages
-//   4. User selects which Page to connect (or auto-select if only one)
-//   5. Store the Page's page_access_token (long-lived) in OAuthToken table
-//   6. Sync reviews: GET /{page-id}/ratings → reviews with rating, text, reviewer
-//
-// Required Facebook App permissions (App Review required for production):
-//   - pages_manage_metadata  (read Page info)
-//   - pages_read_engagement  (read reviews/ratings)
-//   - pages_manage_engagement (post replies — for future reply feature)
 
 const FB_GRAPH_BASE = 'https://graph.facebook.com/v19.0'
 const FB_OAUTH_DIALOG = 'https://www.facebook.com/v19.0/dialog/oauth'
+
+export const FB_OAUTH_STATE_COOKIE = 'rr_oauth_fb_state'
+export const FB_STATE_TTL_SECONDS = 600 // 10 minutes
+
+// In-memory single-use transaction store for fast atomic check & local/fallback execution
+const consumedFBTransactions = new Map<string, number>()
+
+// Periodic cleanup of expired in-memory consumed transaction entries
+if (typeof setInterval !== 'undefined') {
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now()
+    for (const [key, expiresAt] of consumedFBTransactions.entries()) {
+      if (expiresAt < now) {
+        consumedFBTransactions.delete(key)
+      }
+    }
+  }, 5 * 60 * 1000)
+  if (cleanupTimer && typeof cleanupTimer === 'object' && 'unref' in cleanupTimer && typeof (cleanupTimer as any).unref === 'function') {
+    ;(cleanupTimer as any).unref()
+  }
+}
+
+/**
+ * Derives a dedicated 256-bit symmetric encryption key from SESSION_SECRET for Facebook OAuth state JWE.
+ * Fails closed in production if SESSION_SECRET is missing or < 32 chars.
+ */
+function getFBEncryptionKey(): Uint8Array {
+  const secret = process.env.SESSION_SECRET
+  if (process.env.NODE_ENV === 'production' && (!secret || secret.trim().length < 32)) {
+    throw new Error('FATAL: SESSION_SECRET must be configured and at least 32 characters in production')
+  }
+  const keyMaterial = secret || 'reviewreply-dev-secret-change-in-production-min-32-chars'
+  return crypto
+    .createHash('sha256')
+    .update('rr-fb-oauth-state-encryption-key-v1:' + keyMaterial)
+    .digest()
+}
+
+export interface FBStatePayload {
+  state: string
+  businessId: string
+  userId: string
+  createdAt: number
+  returnTo?: string
+}
+
+/**
+ * Generates cryptographically secure random string with specified entropy.
+ */
+export function generateCryptographicEntropy(bytes: number = 32): string {
+  return crypto.randomBytes(bytes).toString('base64url')
+}
+
+/**
+ * Encrypts and encodes temporary Facebook OAuth transaction state using JWE (AES-256-GCM).
+ */
+export async function encodeFBState(payload: FBStatePayload): Promise<string> {
+  const encryptionKey = getFBEncryptionKey()
+  return await new EncryptJWT({ ...payload })
+    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + FB_STATE_TTL_SECONDS)
+    .encrypt(encryptionKey)
+}
+
+/**
+ * Decrypts and verifies the temporary Facebook OAuth transaction state from JWE.
+ */
+export async function decodeFBState(token: string): Promise<FBStatePayload | null> {
+  try {
+    const encryptionKey = getFBEncryptionKey()
+    const { payload } = await jwtDecrypt(token, encryptionKey)
+    if (!payload.state || !payload.businessId || !payload.userId) {
+      return null
+    }
+    return {
+      state: payload.state as string,
+      businessId: payload.businessId as string,
+      userId: payload.userId as string,
+      createdAt: (payload.createdAt as number) || (payload.iat as number) * 1000,
+      returnTo: payload.returnTo as string | undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Atomically consumes a Facebook OAuth transaction state to enforce single-use semantics
+ * and block concurrent replay race conditions.
+ */
+export async function consumeFBTransaction(
+  state: string,
+  ttlMs: number = FB_STATE_TTL_SECONDS * 1000
+): Promise<boolean> {
+  if (!state || typeof state !== 'string' || state.trim().length === 0) {
+    return false
+  }
+
+  // 1. If Redis is configured, use atomic SET NX PX as primary fast guard
+  const redis = getRedisClient()
+  if (redis) {
+    try {
+      const res = await redis.set(`oauth:fb:consumed:${state}`, '1', {
+        nx: true,
+        px: ttlMs,
+      })
+      if (!res || (res !== 'OK' && res !== 'true')) {
+        return false
+      }
+    } catch (err) {
+      console.warn('[Facebook OAuth] Redis consume error, relying on database check:', err)
+    }
+  }
+
+  // 2. Persistent database atomic single-use consumption (distributed across all serverless instances)
+  try {
+    if (db?.oAuthTransactionState) {
+      const updated = await db.oAuthTransactionState.updateMany({
+        where: {
+          state,
+          provider: 'facebook',
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: {
+          consumedAt: new Date(),
+        },
+      })
+
+      if (updated.count === 1) {
+        return true
+      }
+
+      // If state record exists but was not updated, it is already consumed or expired
+      const existing = await db.oAuthTransactionState.findUnique({
+        where: { state },
+        select: { id: true, consumedAt: true, expiresAt: true },
+      })
+
+      if (existing) {
+        return false
+      }
+    }
+  } catch (dbErr) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[Facebook OAuth] Database state consumption error in production:', dbErr)
+      return false
+    }
+  }
+
+  // 3. In-memory check for non-database unit tests / local mock environments
+  const now = Date.now()
+  const existingExpiresAt = consumedFBTransactions.get(state)
+  if (existingExpiresAt && existingExpiresAt > now) {
+    return false
+  }
+
+  consumedFBTransactions.set(state, now + ttlMs)
+  return true
+}
+
+/**
+ * Clears in-memory consumed Facebook transactions (for testing purposes).
+ */
+export function _clearConsumedFBTransactions(): void {
+  consumedFBTransactions.clear()
+}
+
+function shouldUseSecureCookie(): boolean {
+  return process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_APP_URL?.startsWith('https') === true
+}
+
+/**
+ * Sets the secure, encrypted Facebook OAuth state cookie on a response.
+ */
+export async function setFBStateCookie(response: NextResponse, payload: FBStatePayload) {
+  const token = await encodeFBState(payload)
+  response.cookies.set(FB_OAUTH_STATE_COOKIE, token, {
+    httpOnly: true,
+    secure: shouldUseSecureCookie(),
+    sameSite: 'lax',
+    maxAge: FB_STATE_TTL_SECONDS,
+    path: '/',
+  })
+}
+
+/**
+ * Clears the Facebook OAuth state cookie.
+ */
+export function clearFBStateCookie(response: NextResponse) {
+  response.cookies.set(FB_OAUTH_STATE_COOKIE, '', {
+    httpOnly: true,
+    secure: shouldUseSecureCookie(),
+    sameSite: 'lax',
+    maxAge: 0,
+    path: '/',
+  })
+}
+
+/**
+ * Reads and decodes the Facebook OAuth state cookie from an incoming request.
+ */
+export async function getFBStateFromRequest(request: NextRequest): Promise<FBStatePayload | null> {
+  const token = request.cookies.get(FB_OAUTH_STATE_COOKIE)?.value
+  if (!token) return null
+  return await decodeFBState(token)
+}
 
 export interface FacebookTokens {
   access_token: string      // user access token (short-lived, ~1-2 hours)
@@ -225,29 +426,42 @@ export async function fetchFacebookReviews(
 /**
  * Post a reply to a Facebook review (via the comment endpoint on the
  * open_graph_story). Requires pages_manage_engagement permission.
- *
- * NOTE: Facebook's API for replying to reviews has been inconsistent across
- * API versions. The open_graph_story comment endpoint is the documented way,
- * but may require additional review. This is scaffolded for future use.
  */
 export async function postFacebookReply(
   pageAccessToken: string,
   openGraphStoryId: string,
   message: string
-): Promise<boolean> {
-  const response = await fetch(`${FB_GRAPH_BASE}/${openGraphStoryId}/comments`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      access_token: pageAccessToken,
-      message,
-    }),
-  })
+): Promise<{ ok: boolean; status?: number; error?: string; remoteId?: string }> {
+  try {
+    const response = await fetch(`${FB_GRAPH_BASE}/${openGraphStoryId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        access_token: pageAccessToken,
+        message,
+      }),
+    })
 
-  const data = await response.json()
-  if (!response.ok || data.error) {
-    console.error('Failed to post Facebook reply:', data.error)
-    return false
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || data.error) {
+      const errorMessage = data.error?.message || `Facebook Graph API error ${response.status}`
+      console.error('Failed to post Facebook reply:', errorMessage)
+      return {
+        ok: false,
+        status: response.status,
+        error: errorMessage,
+      }
+    }
+
+    return {
+      ok: true,
+      status: response.status,
+      remoteId: (data.id as string) || openGraphStoryId,
+    }
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err.message || 'Network error posting Facebook reply',
+    }
   }
-  return true
 }

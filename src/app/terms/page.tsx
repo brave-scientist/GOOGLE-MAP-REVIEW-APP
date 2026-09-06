@@ -92,7 +92,7 @@ export default function TermsPage() {
       <section>
         <h2 className="text-xl font-bold text-foreground mb-3">7. AI-Generated Content</h2>
         <p>
-          The Service uses AI (GLM-4.6 via z-ai-web-dev-sdk) to generate draft replies to reviews. You are responsible for reviewing, editing, and approving all AI-generated content before it is posted. We are not liable for the content of AI-generated replies.
+          The Service uses the ReviewReply AI Engine to generate draft replies to reviews. You are responsible for reviewing, editing, and approving all AI-generated content before it is posted. We are not liable for the content of AI-generated replies.
         </p>
         <p className="mt-2">
           AI draft quality depends on the quality of your brand voice training data and the review context. You should always review drafts for accuracy, tone, and appropriateness before posting.
@@ -102,7 +102,7 @@ export default function TermsPage() {
       <section>
         <h2 className="text-xl font-bold text-foreground mb-3">8. Third-Party Integrations</h2>
         <p>
-          The Service integrates with Google Business Profile, Facebook Pages, Yelp, Trustpilot, Twilio, Resend, Stripe, and Slack. Your use of these third-party services is subject to their respective terms and privacy policies. We are not responsible for the actions or policies of third-party services.
+          The Service integrates with Google Business Profile, Facebook Pages, Twilio, Telnyx, Resend, and Stripe. Your use of these third-party services is subject to their respective terms and privacy policies. We are not responsible for the actions or policies of third-party services.
         </p>
       </section>
 

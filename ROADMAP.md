@@ -1,22 +1,105 @@
 # ReviewReply — Engineering & Product Master Roadmap
 **Canonical Single Source of Truth for Architecture, Production State, and Future Execution**
 
-- **Document Version:** 2.2.1 (Final Master Consistency & Traceability)
-- **Date:** August 23, 2026
-- **Author:** CTO / Principal Architect
-- **Status:** CANONICAL PLANNING SOURCE — GOVERNANCE RATIFICATION REQUIRED
+- **Document Version:** 3.0.0 (Milestone-First Delivery Model & Architecture)
+- **Date:** September 1, 2026
+- **Author:** CTO / Principal Architect & Antigravity Engineering
+- **Status:** ACTIVE GOVERNANCE — MILESTONE-FIRST PROTOCOL RATIFIED
 - **Target File Location:** `/ROADMAP.md` (Project Root)
 
 ---
 
-## 0. Document Purpose & Forensic Baseline
+## 0. Document Purpose & Milestone-First Operating Framework
 
-This document is the **single authoritative source of truth** for the ReviewReply project. It replaces and supersedes all previous roadmaps, implementation plans, worklogs, and partial audit reports.
+This document is the **single authoritative source of truth** for ReviewReply. It establishes a **MILESTONE-FIRST execution protocol**:
 
-### Forensic Truth Statement:
-- **The Audit & Forensic Reconstruction is COMPLETE.**
-- **The Production Safety & Commercial Readiness is NOT COMPLETE.**
-- **Canonical for Planning ≠ Production Launch Ready.** This document models both what is physically built today and the exact engineering path required before commercial traffic can be accepted.
+```
+BUILD → TARGETED VERIFY → ACCEPT → MOVE FORWARD
+```
+
+Rather than running repeated, open-ended repository audits that stall commercial delivery, all engineering operates under strict, feature-scoped milestone boundaries.
+
+### 0.1 The Milestone-First Operating Model
+
+Every milestone follows a linear 7-phase cycle:
+1. **PHASE A — DISCOVERY**: Identify target commercial capability, user outcome, and boundary.
+2. **PHASE B — TARGETED FORENSIC REVIEW**: Inspect only relevant models, APIs, and UI routes for the target milestone. No full-repo audit unless shared auth/tenant core changes.
+3. **PHASE C — IMPLEMENTATION**: Implement the capability with production quality, truthful UX, and fail-closed security.
+4. **PHASE D — TARGETED TESTING**: Build dedicated automated unit/API test suite verifying acceptance criteria.
+5. **PHASE E — REGRESSION**: Execute relevant pre-existing suites to protect accepted baselines.
+6. **PHASE F — ACCEPTANCE**: Run `tsc --noEmit`, `npm run lint`, `npm run build`, produce final verification evidence, and mark milestone **ACCEPTED** or **BLOCKED**.
+7. **PHASE G — NEXT MILESTONE**: Move immediately to the next commercial milestone without re-auditing accepted code.
+
+### 0.2 The No-Audit-Loop Rule
+- Accepted milestones are **CLOSED** unless concrete regression evidence is produced.
+- Never re-audit an accepted milestone merely because it could theoretically be refactored.
+- Gaps outside the current milestone's scope are recorded as Future Tasks, never gold-plated or turned into unbounded remediation loops.
+
+### 0.3 Non-Negotiable Engineering Rules
+1. **Security**: Fail closed. Server-side authorization is mandatory on every mutation. Never trust client IDs. Enforce tenant isolation and anti-IDOR.
+2. **Data**: Deterministic Prisma migrations only. Never use destructive reset against persistent data.
+3. **Truthful UX**: Never display "connected" or "sent" unless confirmed via real infrastructure. Never simulate production analytics or third-party APIs.
+4. **Compliance**: Enforce TCPA/CTIA consent before SMS dispatch, respect opt-outs, and preserve GDPR/DSAR erasure.
+5. **Quality**: Zero TypeScript errors (`tsc --noEmit`), zero ESLint errors, passing production build (`npm run build`).
+
+---
+
+## 0.4 Categorized Milestone Registry
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   MILESTONE REGISTRY STATUS                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [A. ACCEPTED / CLOSED]                                                                           │
+│  • JOB-7.1  - User Authentication & Session Security (SEC-001 / AUTH-002)                        │
+│  • JOB-7.2  - Admin Configuration & Observability Hardening (ADMIN-001)                          │
+│  • JOB-7.4  - Consent, Unsubscribe & DSAR Compliance Subsystem (COMP-01)                         │
+│  • JOB-8.1  - Embeddable Review Widget Engine Security & Rendering (WIDGET-01)                   │
+│  • JOB-9    - Executive Analytics, Reporting & Competitor Intelligence (REP-01)                  │
+│  • JOB-10   - Self-Serve Customer Onboarding Setup Wizard (ONBOARD-01)                           │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│  • JOB-11   - Public Review Landing Page Customization & Multi-Platform QR Acceleration          │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│             Verification: 46/46 unit tests, 5/5 Playwright tests, 100% regression, build pass.   │
+│  • JOB-12   - Direct Platform Review Publishing & Outbound Status Reconciliation                 │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│             Verification: 89/89 automated tests passed, 100% regression, build pass.             │
+│  • JOB-13   - Production Monetization & Self-Serve Stripe Checkout/Portal (BILL-01)              │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│             Verification: 73/73 automated tests passed, 100% regression, build pass.             │
+│  • JOB-14   - Multi-Location Regional Operator Governance & Bulk Dispatch (ORG-02)               │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│             Verification: 100/100 automated tests passed, 100% regression (312 total), build pass.│
+│  • JOB-15   - AI Reply Template Management & Custom Fine-Tuning Presets (AI-02)                  │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│             Verification: 73/73 automated tests passed, 100% regression (377 total), build pass. │
+│  • JOB-16   - Advanced Automation Triggers & Sentiment Escalation Routing (AUTO-01)              │
+│             [STATUS: CLOSED & FULLY ACCEPTED — Sep 1, 2026]                                      │
+│             Verification: 56/56 automated tests passed, 100% regression (433 total), build pass. │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [B. CURRENT MILESTONE]                                                                           │
+│  • JOB-17   - White-Label Client Portals & Agency Reporting Suite (AGY-01)                       │
+│               Identifier: AGY-01                                                                 │
+│               Scope: Custom domains, client brand customization, white-label automated reports.  │
+│               • JOB-17.1: Database Schema, Tenant Governance & CLIENT_ADMIN Isolation [ACCEPTED] │
+│               • JOB-17.2: Feature Implementation (Branding, Domains, Portals, Reports) [READY]   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [C. NEXT MILESTONE]                                                                              │
+│  • JOB-18   - Review Solicitation Campaigns & Multi-Channel SMS/Email Sequences (CAMP-01)        │
+│               Identifier: CAMP-01                                                                │
+│               Scope: Drip campaigns, scheduled delivery windows, automated follow-ups.           │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [D. FUTURE MILESTONES]                                                                           │
+│  • JOB-18   - Review Solicitation Campaigns & Multi-Channel SMS/Email Sequences (CAMP-01)        │
+│  • JOB-19   - Advanced Competitor Benchmarking & Sentiment Intelligence Expansion (COMP-02)      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ [E. EXTERNAL / VENDOR BLOCKERS]                                                                  │
+│  • Google Cloud OAuth Verification (INT-002: mybusiness.googleapis.com)                          │
+│  • Meta Business App Review (INT-003: pages_manage_engagement)                                   │
+│  • Twilio Trust Hub A2P 10DLC Brand/Campaign Vetting (INT-004)                                   │
+│  • Resend DNS Domain Records Verification (INT-005)                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -693,7 +776,7 @@ TARGET STATE:
 ### Epic 2: Billing & Monetization Infrastructure (BILL)
 
 #### `BILL-001` (Evidence Ref: `BILL-ENG-01`): Production Stripe Checkout & Customer Portal
-- **Area:** Billing | **Priority:** **P0** | **Status:** **READY**
+- **Area:** Billing | **Priority:** **P0** | **Status:** **PRODUCTION VERIFIED**
 - **Tasks:**
   1. Install official `stripe` SDK.
   2. Create `POST /api/billing/checkout` creating Checkout Sessions for Starter ($49), Pro ($99), Enterprise ($299).
@@ -702,7 +785,7 @@ TARGET STATE:
   - Upgrade button redirects to Stripe Checkout with correct price IDs and metadata.
 
 #### `BILL-002` (Evidence Ref: `BILL-ENG-02`): Idempotent Stripe Webhook Processor
-- **Area:** Billing | **Priority:** **P0** | **Status:** **READY**
+- **Area:** Billing | **Priority:** **P0** | **Status:** **PRODUCTION VERIFIED**
 - **Tasks:**
   1. Create `POST /api/webhooks/stripe` with raw request body signature validation.
   2. Process `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`.
@@ -804,6 +887,59 @@ TARGET STATE:
   2. Configure Slack alert webhook for unhandled 500 exceptions.
 - **Acceptance Tests:**
   - Uncaught backend errors generate alerts in Sentry with complete stack trace and function context.
+
+### Epic 5: Commercial Milestone Delivery Schedule (Milestone-First)
+
+#### Milestone `JOB-11`: Public Review Landing Page Customization & Multi-Platform QR Acceleration (`REV-US-01`)
+- **Status:** **CLOSED & FULLY ACCEPTED — Sep 1, 2026**
+- **Roadmap Anchor:** Journey 5 (`Review Request Dispatch → SMS/Email → /review-us/[slug]`)
+- **Business Objective:** Maximize physical and digital customer review capture rates for local businesses by turning `/review-us/[slug]` into a fully branded, multi-platform review acceleration portal with physical printable countertop kits (table tents, counter cards) and private negative-feedback triage.
+- **User-Visible Outcome:**
+  1. Business owners can customize the public review page headline, subtext, and private feedback options from `/review-us-page` with live preview.
+  2. Multi-location operators can switch locations seamlessly to configure and preview location-specific review portals and QR codes.
+  3. Owners can generate and print formatted countertop card & table-tent assets (printable HTML/PDF layout with crisp QR code and platform badges).
+  4. Public customers scanning the QR or clicking the link see the customized business branding and can either tap their preferred review platform (Google, Yelp, Facebook, Trustpilot, etc.) OR submit direct private feedback to management.
+  5. Private feedback is recorded directly into the business's Review inbox (`source: INTERNAL`) with rating and contact details, enabling managers to resolve issues privately without gating or suppressing public links (100% FTC compliant).
+- **Scope:**
+  - Backend: Extend `Business` model with customization fields (`reviewPageTitle`, `reviewPageSubtitle`, `reviewPagePrivateFeedbackEnabled`); update `GET /api/review-links` and `POST /api/review-links` with role authorization (`OWNER`, `ADMIN`, `AGENCY_ADMIN`, `CLIENT_ADMIN`); create public rate-limited `POST /api/review-us/[slug]/feedback` endpoint.
+  - Frontend: Enhance `/review-us-page` with customization controls, multi-location selector, live preview, and high-res printable countertop QR card dialog/sheet.
+  - Public Page: Enhance `/review-us/[slug]` to render custom titles, subtitles, and interactive private feedback dialog with form validation and success confirmation.
+- **Acceptance Criteria:**
+  - Page customization (title, subtitle, feedback toggle) persists and renders faithfully on `/review-us/[slug]`.
+  - Private customer feedback submits to `/api/review-us/[slug]/feedback`, creates `INTERNAL` review record, and notifies/inboxes the business.
+  - Public review platform links remain 100% accessible at all times without review-gating (FTC compliance).
+  - Printable countertop card renders clean print CSS layout at standard 4x6 / 5x7 dimensions with scannable QR and clear call-to-action.
+  - Multi-location organizations can switch between businesses in `/review-us-page` and configure each independently.
+  - Role-based authorization rejects mutations from `VIEWER` and `STAFF`.
+- **Security & Compliance Requirements:**
+  - Fail closed on unauthorized access.
+  - Strict input sanitization on custom titles and customer feedback messages (prevent XSS/injection).
+  - Anti-IDOR enforcement on all business ID inputs.
+  - FTC compliant: No conditional gating (positive customers directed to Google while negative are hidden); all platform links remain universally available.
+- **Dependencies:** `JOB-10` (Accepted), existing Prisma DB, `qrcode` library.
+- **Required Automated Tests:** `scripts/test-job11-review-us-customization.ts` verifying API persistence, role authorization, feedback submission, rate limiting, and slug lookups.
+- **Required Browser E2E Tests:** `e2e/public/review-us.spec.ts` testing landing page customization, platform cards, private feedback modal submission, and responsive layout.
+- **Definition of Done:** Capability works end-to-end, all tests pass, zero TypeScript/ESLint errors, production build succeeds, verification report filed.
+- **Exit Gate:** `REV-US-01` verification report signed off with all automated and browser test evidence.
+
+#### Milestone `JOB-12`: Direct Platform Review Publishing & Outbound Status Reconciliation (`PUB-01`)
+- **Status:** **CURRENT MILESTONE — ACTIVE**
+- **Roadmap Anchor:** Section 9.3 (`Review Ingestion → AI Draft → Edit → Approve → Live Publish`)
+- **Business Objective:** Complete the automated reply loop by wiring `/api/reviews/[id]/approve` to real external publishing adapters for Google GBP and Facebook Graph APIs with truthful sync status.
+- **User-Visible Outcome:** Approving a review draft automatically dispatches the reply to Google or Facebook if credentials exist; displays truthful "Published Live" or "Saved Locally (Platform Not Connected)" badges.
+- **Scope:** Adapter wiring in `src/app/api/reviews/[id]/approve/route.ts`, retry logic, decrypted OAuth token retrieval, audit logging.
+- **Dependencies:** `JOB-11` (Accepted), OAuthToken encryption (`JOB-7.1`).
+- **Required Tests:** Adapter mock unit tests, live schema validation, error rollbacks.
+- **Exit Gate:** Verified reply dispatch contract with 0 unhandled promise rejections.
+
+#### Milestone `JOB-13`: Production Monetization & Self-Serve Stripe Checkout / Portal (`BILL-01`)
+- **Status:** **CLOSED & FULLY ACCEPTED — Sep 1, 2026**
+- **Roadmap Anchor:** Section 9.6 (`Stripe Subscription Checkout & Webhook Lifecycle`)
+- **Business Objective:** Enable automated recurring self-serve subscription payments across Starter, Pro, and Enterprise tiers.
+- **Scope:** `POST /api/billing/checkout`, `POST /api/billing/portal`, `GET /api/billing`, `POST /api/webhooks/stripe`, upgraded `/billing` UI.
+- **Dependencies:** Stripe API secret keys, price ID configuration.
+- **Required Automated Tests:** `scripts/test-job13-billing.ts` verifying authentication, role authorization, tenant isolation, anti-IDOR, webhook signatures, idempotency, lifecycle reconciliation, plan gating, and audit logging.
+- **Exit Gate:** Automated subscription lifecycle verified with 73/73 passing tests, 100% regression pass, and successful production build.
 
 ---
 

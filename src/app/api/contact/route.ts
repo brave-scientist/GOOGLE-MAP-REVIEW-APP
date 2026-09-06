@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { sendEmail, isResendConfigured } from '@/lib/integrations/resend'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,13 +78,18 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // In production, also send an email notification here:
-    // await resend.emails.send({
-    //   from: 'noreply@reviewreply.com',
-    //   to: 'support@reviewreply.com',
-    //   subject: `New contact form: ${subject || '(no subject)'}`,
-    //   text: `From: ${name} <${email}>\n\n${message}`,
-    // })
+    // Send notification email to support destination via Resend
+    const supportEmail = process.env.SUPPORT_EMAIL || 'support@reviewreply.pw'
+    if (isResendConfigured()) {
+      await sendEmail({
+        to: supportEmail,
+        subject: `New Contact Form: ${sanitizedSubject}`,
+        text: `From: ${sanitizedName} <${sanitizedEmail}>\n\nMessage:\n${sanitizedMessage}`,
+        html: `<p><strong>From:</strong> ${sanitizedName} (${sanitizedEmail})</p><p><strong>Subject:</strong> ${sanitizedSubject}</p><hr/><p>${sanitizedMessage.replace(/\n/g, '<br/>')}</p>`,
+      }).catch(err => console.warn('[Contact Form] Resend dispatch warning:', err))
+    } else if (process.env.NODE_ENV !== 'production') {
+      console.log('[Contact Form] Received contact form submission (Resend unconfigured)')
+    }
 
     return NextResponse.json({
       success: true,

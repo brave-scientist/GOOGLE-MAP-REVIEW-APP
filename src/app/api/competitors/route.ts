@@ -73,8 +73,184 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    // Compute business metrics and authentic strategy recommendations if scoped to a single business
+    let businessData: {
+      id: string
+      name: string
+      avgRating: number
+      reviewCount: number
+      responseRate: number
+      reviewVelocity: number
+    } | null = null
+
+    let benchmark: {
+      yourRank: number
+      totalTracked: number
+      ratingGap: number
+      marketAvgRating: number
+      marketAvgVelocity: number
+      marketAvgResponseRate: number
+    } | null = null
+
+    let alert: {
+      type: 'warning' | 'info' | 'success'
+      competitorName: string
+      title: string
+      message: string
+      actionText: string
+      actionType: string
+    } | null = null
+
+    const suggestions: Array<{
+      priority: 'High' | 'Medium' | 'Low'
+      title: string
+      desc: string
+      impact: string
+      actionType?: string
+      actionLabel?: string
+    }> = []
+
+    if (scopedBusinessIds.length === 1) {
+      const primaryBizId = scopedBusinessIds[0]
+      const biz = await db.business.findUnique({
+        where: { id: primaryBizId },
+        select: {
+          id: true,
+          name: true,
+          avgRating: true,
+          reviewCount: true,
+          industry: true,
+        },
+      })
+
+      if (biz) {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86400000)
+        const [recentReviewsCount, repliedCount] = await Promise.all([
+          db.review.count({
+            where: {
+              businessId: primaryBizId,
+              createdAt: { gte: sevenDaysAgo },
+            },
+          }),
+          db.review.count({
+            where: {
+              businessId: primaryBizId,
+              replyText: { not: null },
+            },
+          }),
+        ])
+
+        const totalReviews = biz.reviewCount || 0
+        const bizResponseRate = totalReviews > 0 ? Math.min(100, Math.round((repliedCount / totalReviews) * 100)) : 0
+        const bizVelocity = Math.max(recentReviewsCount, Math.round(totalReviews / 20))
+
+        businessData = {
+          id: biz.id,
+          name: biz.name,
+          avgRating: biz.avgRating ? Math.round(biz.avgRating * 10) / 10 : 0,
+          reviewCount: totalReviews,
+          responseRate: bizResponseRate,
+          reviewVelocity: bizVelocity,
+        }
+
+        if (formatted.length > 0) {
+          const compCount = formatted.length
+          const avgCompRating = Math.round((formatted.reduce((s, c) => s + c.rating, 0) / compCount) * 10) / 10
+          const avgCompVelocity = Math.round(formatted.reduce((s, c) => s + c.reviewVelocity, 0) / compCount)
+          const avgCompResponseRate = Math.round(formatted.reduce((s, c) => s + c.responseRate, 0) / compCount)
+          const ratingGap = Math.round(((biz.avgRating || 0) - avgCompRating) * 10) / 10
+
+          const topVelocityComp = [...formatted].sort((a, b) => b.reviewVelocity - a.reviewVelocity)[0]
+          const topRatingComp = [...formatted].sort((a, b) => b.rating - a.rating)[0]
+
+          const yourRank = formatted.filter(c => c.rating > (biz.avgRating || 0)).length + 1
+
+          benchmark = {
+            yourRank,
+            totalTracked: compCount + 1,
+            ratingGap,
+            marketAvgRating: avgCompRating,
+            marketAvgVelocity: avgCompVelocity,
+            marketAvgResponseRate: avgCompResponseRate,
+          }
+
+          // Authentic Alert based on real competitor metrics
+          if (topVelocityComp && topVelocityComp.reviewVelocity > bizVelocity && topVelocityComp.reviewVelocity >= 4) {
+            alert = {
+              type: 'warning',
+              competitorName: topVelocityComp.name,
+              title: `${topVelocityComp.name} review velocity is outpacing your business`,
+              message: `${topVelocityComp.name}'s review velocity is currently ${topVelocityComp.reviewVelocity} reviews/week vs your ${bizVelocity}/week. They may be running an active review campaign. Consider launching a campaign to maintain your local ranking.`,
+              actionText: 'Launch campaign',
+              actionType: 'campaign',
+            }
+          } else if (topRatingComp && topRatingComp.rating > (biz.avgRating || 0)) {
+            const gap = (topRatingComp.rating - (biz.avgRating || 0)).toFixed(1)
+            alert = {
+              type: 'info',
+              competitorName: topRatingComp.name,
+              title: `${topRatingComp.name} leads your local market rating`,
+              message: `${topRatingComp.name} holds a ${topRatingComp.rating}★ rating (${gap}★ above your business). Prioritize responding to reviews and service recovery to close the gap.`,
+              actionText: 'Launch campaign',
+              actionType: 'campaign',
+            }
+          }
+
+          // Deterministic Strategy Suggestions grounded in real numbers
+          if (topVelocityComp && bizVelocity < topVelocityComp.reviewVelocity) {
+            suggestions.push({
+              priority: 'High',
+              title: `Close the review velocity gap with ${topVelocityComp.name}`,
+              desc: `Your review pace (${bizVelocity}/wk) trails ${topVelocityComp.name} (${topVelocityComp.reviewVelocity}/wk). Initiating post-service SMS or email review requests can accelerate your review pace.`,
+              impact: `+${Math.max(4, topVelocityComp.reviewVelocity - bizVelocity + 2)} reviews/week`,
+              actionType: 'campaign',
+              actionLabel: 'Launch campaign',
+            })
+          }
+
+          if (topRatingComp && (biz.avgRating || 0) < topRatingComp.rating) {
+            const ratingDiff = (topRatingComp.rating - (biz.avgRating || 0)).toFixed(1)
+            suggestions.push({
+              priority: 'High',
+              title: `Close the ${ratingDiff}★ rating gap with ${topRatingComp.name}`,
+              desc: `${topRatingComp.name} leads the local benchmark with a ${topRatingComp.rating}★ rating. Analyze negative feedback trends in your inbox to resolve recurring service bottlenecks.`,
+              impact: '+0.2★ projected lift',
+              actionType: 'inbox',
+              actionLabel: 'View inbox',
+            })
+          }
+
+          if (bizResponseRate < 90) {
+            suggestions.push({
+              priority: 'Medium',
+              title: 'Elevate review response rate above 90%',
+              desc: `Your current response rate is ${bizResponseRate}%. Reaching 90%+ improves Google Maps ranking signals and demonstrates dedicated customer care.`,
+              impact: `+${90 - bizResponseRate}% response lift`,
+              actionType: 'inbox',
+              actionLabel: 'Go to inbox',
+            })
+          }
+
+          if (topRatingComp && (biz.avgRating || 0) >= topRatingComp.rating) {
+            suggestions.push({
+              priority: 'Medium',
+              title: `Leverage market-leading ${businessData?.avgRating ?? (biz.avgRating || 0)}★ rating`,
+              desc: `Your business holds the highest rating among your tracked local competitors. Embed your live review badge on your website to drive higher conversion rates.`,
+              impact: 'Conversion lift',
+              actionType: 'widgets',
+              actionLabel: 'Manage widgets',
+            })
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
       competitors: formatted,
+      business: businessData,
+      benchmark,
+      alert,
+      suggestions,
     })
   } catch (error) {
     console.error('Competitors API error:', error)
@@ -108,10 +284,15 @@ export async function POST(request: NextRequest) {
       targetBusinessId = ctx.businessIds[0]
     }
 
-    const cleanRating = typeof rating === 'number' && !isNaN(rating) ? Math.min(5, Math.max(1, rating)) : 4.2
-    const cleanReviews = typeof reviewCount === 'number' && !isNaN(reviewCount) ? Math.max(0, Math.floor(reviewCount)) : 50
-    const cleanResponseRate = typeof responseRate === 'number' && !isNaN(responseRate) ? Math.min(100, Math.max(0, responseRate)) : 65
-    const cleanSentiment = typeof sentimentScore === 'number' && !isNaN(sentimentScore) ? Math.min(1, Math.max(-1, sentimentScore)) : 0.6
+    const parsedRating = typeof rating === 'number' ? rating : (rating ? parseFloat(rating) : NaN)
+    const parsedReviews = typeof reviewCount === 'number' ? reviewCount : (reviewCount ? parseInt(reviewCount, 10) : NaN)
+    const parsedResponseRate = typeof responseRate === 'number' ? responseRate : (responseRate ? parseFloat(responseRate) : NaN)
+    const parsedSentiment = typeof sentimentScore === 'number' ? sentimentScore : (sentimentScore ? parseFloat(sentimentScore) : NaN)
+
+    const cleanRating = !isNaN(parsedRating) ? Math.min(5, Math.max(1, parsedRating)) : 4.2
+    const cleanReviews = !isNaN(parsedReviews) ? Math.max(0, Math.floor(parsedReviews)) : 50
+    const cleanResponseRate = !isNaN(parsedResponseRate) ? Math.min(100, Math.max(0, parsedResponseRate)) : 65
+    const cleanSentiment = !isNaN(parsedSentiment) ? Math.min(1, Math.max(-1, parsedSentiment)) : 0.6
 
     // Create competitor and initial snapshot in a transaction
     const competitor = await db.$transaction(async (tx) => {

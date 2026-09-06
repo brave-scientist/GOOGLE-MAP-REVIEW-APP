@@ -19,12 +19,25 @@ model Organization {
   stripeSubscriptionId    String?
   stripeSubscriptionStatus String?
   trialEndsAt             DateTime?
+  onboardingStep          Int          @default(1)
+  onboardingCompletedAt   DateTime?
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
   businesses              Business[]
   members                 OrgMember[]
   scheduledReports        ScheduledReport[]
   teamInvitations         TeamInvitation[]
+  deletionRequests        DeletionRequest[]
+  locationGroups          LocationGroup[]
+  operatorLocationAssignments OperatorLocationAssignment[]
+  operatorGroupAssignments    OperatorGroupAssignment[]
+  agencyBranding              AgencyBranding?
+  customDomains               CustomDomain[]
+  clientPortalShares          ClientPortalShare[]
+  reportDeliveryLogs          ReportDeliveryLog[]
+  billingCustomers            BillingCustomer[]
+  subscriptions               Subscription[]
+  usageCounters               UsageCounter[]
 }
 
 model OrgMember {
@@ -53,6 +66,10 @@ model User {
   passwordResetTokens PasswordResetToken[]
   sentInvitations    TeamInvitation[]
   accounts           Account[]
+  deletionRequests   DeletionRequest[]
+  operatorLocationAssignments OperatorLocationAssignment[]
+  operatorGroupAssignments    OperatorGroupAssignment[]
+  assignedEscalations         Escalation[]
 }
 
 model Account {
@@ -83,13 +100,110 @@ model PasswordResetToken {
   @@index([userId])
 }
 
+model EmailOtp {
+  id           String    @id @default(cuid())
+  email        String
+  otpHash      String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attempts     Int       @default(0)
+  name         String?
+  businessName String?
+  isNewUser    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+
+  @@index([email, expiresAt])
+}
+
+model OAuthTransactionState {
+  id         String    @id @default(cuid())
+  state      String    @unique
+  provider   String
+  businessId String
+  userId     String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([state, expiresAt])
+}
+
 model StripeWebhookEvent {
   id          String    @id @default(cuid())
   eventId     String    @unique
   eventType   String
+  status      String    @default("PROCESSING")
+  attempts    Int       @default(1)
+  lastError   String?
   processedAt DateTime?
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
+
+  @@index([status, createdAt])
 }
+
+model BillingCustomer {
+  id                 String         @id @default(cuid())
+  orgId              String
+  provider           String         @default("stripe")
+  providerCustomerId String         @unique
+  email              String?
+  name               String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  org                Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  subscriptions      Subscription[]
+
+  @@unique([orgId, provider])
+  @@index([orgId])
+  @@index([providerCustomerId])
+}
+
+model Subscription {
+  id                     String           @id @default(cuid())
+  orgId                  String
+  customerId             String?
+  provider               String           @default("stripe")
+  providerCustomerId     String
+  providerSubscriptionId String           @unique
+  plan                   Plan             @default(FREE)
+  status                 String
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean          @default(false)
+  canceledAt             DateTime?
+  trialStart             DateTime?
+  trialEnd               DateTime?
+  lastEventTimestamp     DateTime?
+  lastEventId            String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  org                    Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customer               BillingCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([orgId, status])
+  @@index([providerCustomerId])
+  @@index([status])
+}
+
+model UsageCounter {
+  id        String       @id @default(cuid())
+  orgId     String
+  metric    String
+  period    String       @default("all-time")
+  count     Int          @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, metric, period])
+  @@index([orgId, metric])
+}
+
 
 model Business {
   id                  String               @id @default(cuid())
@@ -100,10 +214,18 @@ model Business {
   address             String?
   phone               String?
   timezone            String               @default("America/New_York")
-  googleLocationId    String?
-  facebookPageId      String?
-  slug                String?              @unique // for public /review-us/[slug] pages
-  avgRating           Float                @default(0)
+  googleLocationId       String?
+  googlePlaceId          String?              // Google Maps Place ID (e.g. ChIJ...)
+  googleLocationVerified Boolean              @default(false) // true only after server-side Google API verification
+  googleSyncStatus       String?              // null | 'pending' | 'syncing' | 'completed' | 'failed'
+  googleSyncError        String?              // safe error message (no tokens/credentials)
+  googleSyncedAt         DateTime?            // timestamp of last successful sync
+  facebookPageId         String?
+  slug                              String?              @unique // for public /review-us/[slug] pages
+  reviewPageTitle                   String?
+  reviewPageSubtitle                String?
+  reviewPagePrivateFeedbackEnabled  Boolean              @default(true)
+  avgRating                         Float                @default(0)
   reviewCount         Int                  @default(0)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
@@ -123,6 +245,12 @@ model Business {
   smsConsents         CustomerSmsConsent[]
   smsConsentEvents    CustomerSmsConsentEvent[]
   smsConsentInvitations CustomerSmsConsentInvitation[]
+  locationGroupMemberships LocationGroupMembership[]
+  operatorAssignments OperatorLocationAssignment[]
+  aiReplyPresets      AiReplyPreset[]
+  automationRules     AutomationRule[]
+  escalations         Escalation[]
+  clientPortalShares  ClientPortalShare[]
 }
 
 model Review {
@@ -147,6 +275,7 @@ model Review {
   fetchedAt       DateTime               @default(now())
   business        Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
   publishAttempts ReviewPublishAttempt[]
+  escalations     Escalation[]
 
   @@unique([source, externalId])
   @@index([businessId, createdAt])
@@ -224,10 +353,33 @@ model ReplyTemplate {
   title      String
   body       String
   language   String   @default("en")
-  category   String?  // positive | negative | neutral | escalation
+  category   String?  // POSITIVE | NEGATIVE | NEUTRAL | ESCALATION
   usageCount Int      @default(0)
+  isDefault  Boolean  @default(false)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([businessId, category])
+}
+
+model AiReplyPreset {
+  id                 String   @id @default(cuid())
+  businessId         String
+  name               String
+  description        String?
+  tone               String
+  responseLength     String   @default("BALANCED") // CONCISE | BALANCED | DETAILED
+  customInstructions String?
+  signature          String?
+  isDefault          Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([businessId, isDefault])
 }
 
 model AuditLog {
@@ -441,12 +593,16 @@ model ScheduledReport {
   recipients  String         // JSON array of recipient emails/contacts
   format      ReportFormat
   status      ReportStatus   @default(ACTIVE)
+  timezone    String         @default("UTC")
+  reportType  String         @default("EXECUTIVE_SUMMARY")
   lastSentAt  DateTime?
+  nextRunAt   DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   org         Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   business    Business?      @relation(fields: [businessId], references: [id])
+  deliveryLogs ReportDeliveryLog[]
 
   @@index([orgId, status])
   @@index([businessId])
@@ -688,3 +844,365 @@ enum ConsentInviteStatus {
   REVOKED
 }
 
+// ─────────────────────────────────────────────────────
+// Compliance & GDPR DSAR Deletion Requests
+// ─────────────────────────────────────────────────────
+model DeletionRequest {
+  id           String                @id @default(cuid())
+  userId       String
+  orgId        String
+  status       DeletionRequestStatus @default(PENDING)
+  reason       String?
+  scheduledFor DateTime
+  requestedAt  DateTime              @default(now())
+  processedAt  DateTime?
+  processedBy  String?
+  cancelledAt  DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org          Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([orgId, status])
+}
+
+enum DeletionRequestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────────────────
+// ORG-02: Multi-Location Regional Operator Governance
+// ─────────────────────────────────────────────────────
+model LocationGroup {
+  id                  String                      @id @default(cuid())
+  orgId               String
+  name                String
+  description         String?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+
+  org                 Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  locations           LocationGroupMembership[]
+  operatorAssignments OperatorGroupAssignment[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model LocationGroupMembership {
+  id         String        @id @default(cuid())
+  groupId    String
+  businessId String
+  createdAt  DateTime      @default(now())
+
+  group      LocationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  business   Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, businessId])
+  @@index([businessId])
+}
+
+model OperatorLocationAssignment {
+  id           String       @id @default(cuid())
+  orgId        String
+  userId       String
+  businessId   String
+  assignedById String?
+  createdAt    DateTime     @default(now())
+
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+  @@index([orgId, userId])
+  @@index([businessId])
+}
+
+model OperatorGroupAssignment {
+  id           String        @id @default(cuid())
+  orgId        String
+  userId       String
+  groupId      String
+  assignedById String?
+  createdAt    DateTime      @default(now())
+
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group        LocationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+  @@index([orgId, userId])
+  @@index([groupId])
+}
+
+// ─────────────────────────────────────────────────────
+// AUTO-01: Advanced Automation Triggers & Sentiment Escalation Routing
+// ─────────────────────────────────────────────────────
+model AutomationRule {
+  id                 String                 @id @default(cuid())
+  businessId         String
+  name               String
+  description        String?
+  triggerType        AutomationTriggerType  @default(NEW_REVIEW)
+  isEnabled          Boolean                @default(true)
+  minRating          Int?                   // 1 to 5
+  maxRating          Int?                   // 1 to 5
+  sentimentThreshold SentimentScoreCategory @default(ANY)
+  minSeverity        EscalationSeverity     @default(MEDIUM)
+  sources            String                 @default("ALL") // "ALL" or comma-separated "GOOGLE,FACEBOOK,INTERNAL"
+  actionType         AutomationActionType   @default(CREATE_ESCALATION)
+  actionConfig       String?                // JSON: { notifyEmail, autoAssignUserId, customNote }
+  cooldownMinutes    Int                    @default(0)
+  lastTriggeredAt    DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  business           Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  executions         AutomationExecution[]
+  escalations        Escalation[]
+
+  @@index([businessId, isEnabled])
+  @@index([businessId, triggerType])
+}
+
+enum AutomationTriggerType {
+  NEW_REVIEW
+  SENTIMENT_ALERT
+  RATING_THRESHOLD
+  NEGATIVE_FEEDBACK
+}
+
+enum SentimentScoreCategory {
+  ANY
+  NEGATIVE
+  NEUTRAL
+  POSITIVE
+}
+
+enum EscalationSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AutomationActionType {
+  CREATE_ESCALATION
+  DISPATCH_NOTIFICATION
+  ESCALATE_AND_NOTIFY
+}
+
+model Escalation {
+  id               String             @id @default(cuid())
+  businessId       String
+  reviewId         String
+  ruleId           String?
+  status           EscalationStatus   @default(OPEN)
+  severity         EscalationSeverity @default(HIGH)
+  sentiment        String?            // POSITIVE | NEUTRAL | NEGATIVE
+  sentimentScore   Float?
+  reason           String
+  assignedToUserId String?
+  assignedToEmail  String?
+  resolutionNotes  String?
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  business         Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  review           Review             @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  rule             AutomationRule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  assignedTo       User?              @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  dispatches       EscalationDispatch[]
+
+  @@unique([reviewId, ruleId])
+  @@index([businessId, status])
+  @@index([businessId, severity])
+  @@index([reviewId])
+}
+
+enum EscalationStatus {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  DISMISSED
+}
+
+model AutomationExecution {
+  id             String          @id @default(cuid())
+  businessId     String
+  ruleId         String
+  reviewId       String?
+  idempotencyKey String          @unique
+  status         ExecutionStatus @default(PENDING)
+  matched        Boolean         @default(false)
+  sentiment      String?
+  severity       String?
+  errorMessage   String?
+  executedAt     DateTime        @default(now())
+
+  rule           AutomationRule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, executedAt])
+  @@index([ruleId, status])
+}
+
+enum ExecutionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model EscalationDispatch {
+  id                String         @id @default(cuid())
+  escalationId      String
+  channel           String         @default("EMAIL") // EMAIL | INTERNAL | SLACK
+  recipient         String
+  status            DispatchStatus @default(PENDING)
+  idempotencyKey    String         @unique
+  externalMessageId String?
+  errorMessage      String?
+  retryCount        Int            @default(0)
+  sentAt            DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  escalation        Escalation     @relation(fields: [escalationId], references: [id], onDelete: Cascade)
+
+  @@index([escalationId, status])
+}
+
+enum DispatchStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model AutomationWebhookEvent {
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  provider    String    @default("generic")
+  payloadHash String
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([eventId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────
+// AGY-01: White-Label Client Portals & Agency Reporting Suite
+// ─────────────────────────────────────────────────────
+model AgencyBranding {
+  id                   String       @id @default(cuid())
+  orgId                String       @unique
+  brandName            String?
+  logoUrl              String?
+  faviconUrl           String?
+  primaryColor         String?      // Hex color code, e.g. #97781B
+  accentColor          String?      // Hex color code
+  supportEmail         String?
+  portalTitle          String?
+  hideReviewReplyBadge Boolean      @default(false)
+  emailSenderName      String?
+  replyToEmail         String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model CustomDomain {
+  id                String       @id @default(cuid())
+  orgId             String
+  domain            String       @unique // e.g. reviews.agency.com
+  status            DomainStatus @default(PENDING_VERIFICATION)
+  verificationToken String       @unique // e.g. rr_verify_...
+  cnameTarget       String       @default("cname.reviewreply.com")
+  verifiedAt        DateTime?
+  lastCheckedAt     DateTime?
+  sslStatus         SslStatus    @default(PENDING)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  org               Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([domain, status])
+}
+
+enum DomainStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  FAILED
+  REVOKED
+}
+
+enum SslStatus {
+  PENDING
+  ACTIVE
+  FAILED
+}
+
+model ClientPortalShare {
+  id           String       @id @default(cuid())
+  businessId   String
+  orgId        String
+  tokenHash    String       @unique // SHA-256 of public share token
+  passcodeHash String?
+  isEnabled    Boolean      @default(true)
+  expiresAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([orgId])
+}
+
+model ReportDeliveryLog {
+  id                String          @id @default(cuid())
+  reportId          String
+  orgId             String
+  businessId        String?
+  recipient         String
+  format            ReportFormat
+  status            DeliveryStatus  @default(QUEUED)
+  idempotencyKey    String          @unique
+  reportPeriod      String?
+  periodStart       DateTime?
+  periodEnd         DateTime?
+  attempts          Int             @default(0)
+  lastAttemptAt     DateTime?
+  claimedAt         DateTime?
+  providerMessageId String?
+  error             String?
+  sentAt            DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt @default(now())
+
+  report            ScheduledReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  org               Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([businessId])
+  @@index([status, claimedAt])
+}
+
+enum DeliveryStatus {
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+}

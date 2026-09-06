@@ -95,6 +95,39 @@ export async function POST(request: NextRequest) {
     const channels = Array.isArray(channelMix) ? channelMix : channelMix.split(',').map((c: string) => c.trim())
     const sendResults: Array<{ contact: string; status: 'sent' | 'failed' | 'opted_out'; channel: string; error?: string }> = []
 
+    // Map each recipient to whether they were pre-identified as opted-out
+    const sendableContacts = new Set(sendable.map(s => s.contact))
+
+    // Pre-create review request records for all recipients so they are properly tracked
+    // and have IDs available to correlate with SmsDeliveryEvent
+    const reviewRequestMap = new Map<string, { id: string; contact: string; channel: Channel }>()
+
+    for (const recipient of recipients) {
+      const contactStr = String(recipient.contact)
+      const isPreOptedOut = !sendableContacts.has(contactStr)
+
+      for (const channel of channels) {
+        const ch = channel.toLowerCase()
+        const channelEnum = ch.includes('sms') ? Channel.SMS : Channel.EMAIL
+
+        const req = await db.reviewRequest.create({
+          data: {
+            businessId,
+            customerName: recipient.name || 'Customer',
+            customerContact: contactStr,
+            channel: channelEnum,
+            status: isPreOptedOut ? RequestStatus.OPTED_OUT : RequestStatus.PENDING,
+            message: campaign.messageTemplate,
+            sentAt: null,
+            deliveredAt: null, // Delivery is confirmed by webhook status callbacks, not on initial dispatch
+            campaignId: campaign.id,
+          },
+        })
+
+        reviewRequestMap.set(`${contactStr}:${ch}`, { id: req.id, contact: contactStr, channel: channelEnum })
+      }
+    }
+
     // Note: Employee confirmation checkbox does NOT manufacture affirmative customer consent.
     // Outbound SMS dispatches strictly require pre-existing affirmative customer consent enforced in SmsService.sendSms().
 
@@ -102,9 +135,22 @@ export async function POST(request: NextRequest) {
       for (const recipient of sendable) {
         for (const channel of channels) {
           const ch = channel.toLowerCase()
+          const reqInfo = reviewRequestMap.get(`${recipient.contact}:${ch}`)
+
           if (ch === 'sms') {
             if (!SmsService.isSmsEnabled()) {
-              sendResults.push({ contact: recipient.contact, status: 'sent', channel: 'sms' })
+              sendResults.push({
+                contact: recipient.contact,
+                status: 'failed',
+                channel: 'sms',
+                error: 'SMS sending is disabled in configuration. Set FEATURE_SMS_ENABLED=true in environment.',
+              })
+              if (reqInfo) {
+                await db.reviewRequest.update({
+                  where: { id: reqInfo.id },
+                  data: { status: RequestStatus.FAILED },
+                }).catch(() => {})
+              }
               continue
             }
             const smsBody = `${campaign.messageTemplate || `Thanks for visiting ${business.name}!`}\n\nLeave a review: ${reviewLink}\n\nReply STOP to opt out, HELP for help.`
@@ -113,16 +159,46 @@ export async function POST(request: NextRequest) {
               body: smsBody,
               businessId,
               campaignId: campaign.id,
+              reviewRequestId: reqInfo?.id,
             })
+
+            const outcomeStatus = result.success
+              ? 'sent'
+              : (result.errorCode === 'RECIPIENT_OPTED_OUT' ? 'opted_out' : 'failed')
+
             sendResults.push({
               contact: recipient.contact,
-              status: result.success ? 'sent' : 'failed',
+              status: outcomeStatus,
               channel: 'sms',
               error: result.errorMessage || result.errorCode,
             })
+
+            if (reqInfo) {
+              await db.reviewRequest.update({
+                where: { id: reqInfo.id },
+                data: {
+                  status: result.success
+                    ? RequestStatus.SENT
+                    : (result.errorCode === 'RECIPIENT_OPTED_OUT' ? RequestStatus.OPTED_OUT : RequestStatus.FAILED),
+                  sentAt: result.success ? new Date() : null,
+                  deliveredAt: null,
+                },
+              }).catch(() => {})
+            }
           } else if (ch === 'email') {
             if (!isResendConfigured()) {
-              sendResults.push({ contact: recipient.contact, status: 'sent', channel: 'email' })
+              sendResults.push({
+                contact: recipient.contact,
+                status: 'failed',
+                channel: 'email',
+                error: 'Email sending is not configured. Add RESEND_API_KEY to environment.',
+              })
+              if (reqInfo) {
+                await db.reviewRequest.update({
+                  where: { id: reqInfo.id },
+                  data: { status: RequestStatus.FAILED },
+                }).catch(() => {})
+              }
               continue
             }
             const emailContent = generateReviewRequestEmail({
@@ -143,45 +219,32 @@ export async function POST(request: NextRequest) {
               channel: 'email',
               error: result.error,
             })
+            if (reqInfo) {
+              await db.reviewRequest.update({
+                where: { id: reqInfo.id },
+                data: {
+                  status: result.success ? RequestStatus.SENT : RequestStatus.FAILED,
+                  sentAt: result.success ? new Date() : null,
+                  deliveredAt: null,
+                },
+              }).catch(() => {})
+            }
           }
         }
       }
     }
 
-    // Create review request records
-    const targetRecipients = sendNow
-      ? sendable
-      : recipients.map(r => ({ name: r.name || 'Customer', contact: String(r.contact) }))
+    // Update campaign counts & status
+    const sentCount = sendResults.filter(r => r.status === 'sent').length
+    const failedCount = sendResults.filter(r => r.status === 'failed').length
 
-    for (const recipient of targetRecipients) {
-      for (const channel of channels) {
-        const channelEnum = channel.toUpperCase().includes('SMS') ? Channel.SMS : Channel.EMAIL
-        const result = sendResults.find(r => r.contact === recipient.contact)
-
-        await db.reviewRequest.create({
-          data: {
-            businessId,
-            customerName: recipient.name,
-            customerContact: recipient.contact,
-            channel: channelEnum,
-            status: sendNow
-              ? (result?.status === 'sent' ? RequestStatus.SENT : result?.status === 'failed' ? RequestStatus.FAILED : RequestStatus.PENDING)
-              : RequestStatus.PENDING,
-            message: campaign.messageTemplate,
-            sentAt: sendNow && result?.status === 'sent' ? new Date() : null,
-            deliveredAt: sendNow && result?.status === 'sent' ? new Date() : null,
-            campaignId: campaign.id,
-          },
-        })
-      }
-    }
-
-    // Update campaign counts
     if (sendNow) {
-      const sentCount = sendResults.filter(r => r.status === 'sent').length
       await db.campaign.update({
         where: { id: campaign.id },
-        data: { sentCount },
+        data: {
+          sentCount,
+          status: sentCount > 0 ? 'active' : (failedCount > 0 ? 'failed' : 'draft'),
+        },
       })
     }
 
@@ -195,21 +258,30 @@ export async function POST(request: NextRequest) {
           name: campaign.name,
           recipientsCount: recipients.length,
           optedOutCount: optedOut,
+          sentCount,
+          failedCount,
           sendNow,
         }),
       },
     })
 
+    const message = sendNow
+      ? (sentCount > 0
+          ? `Campaign dispatched to ${sentCount} recipient(s).`
+          : `Campaign created, but messages could not be dispatched (${failedCount} failed — services disabled or unconfigured).`)
+      : 'Campaign saved as draft.'
+
     return NextResponse.json({
       success: true,
+      message,
       campaign: {
         id: campaign.id,
         name: campaign.name,
-        status: campaign.status,
+        status: sendNow ? (sentCount > 0 ? 'active' : (failedCount > 0 ? 'failed' : 'draft')) : 'draft',
         recipientCount: recipients.length,
         optedOutCount: optedOut,
-        sentCount: sendResults.filter(r => r.status === 'sent').length,
-        failedCount: sendResults.filter(r => r.status === 'failed').length,
+        sentCount,
+        failedCount,
       },
     })
   } catch (error) {

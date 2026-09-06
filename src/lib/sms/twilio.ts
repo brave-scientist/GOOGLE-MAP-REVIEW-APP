@@ -87,8 +87,18 @@ export class TwilioAdapter implements ISmsProvider {
   verifyWebhook(rawBody: string, headers: Headers): boolean {
     const signature = headers.get('x-twilio-signature')
     const authToken = process.env.TWILIO_AUTH_TOKEN
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://reviewreply.pw'
-    const url = `${appUrl}/api/webhooks/twilio`
+    const reqUrl = headers.get('x-request-url')
+    const publicUrl = process.env.NEXT_PUBLIC_APP_URL
+    let url: string
+    if (reqUrl) {
+      url = reqUrl
+    } else if (publicUrl) {
+      url = `${publicUrl.replace(/\/$/, '')}/api/webhooks/twilio`
+    } else {
+      const host = headers.get('x-forwarded-host') || headers.get('host') || 'localhost:3000'
+      const proto = headers.get('x-forwarded-proto') || 'https'
+      url = `${proto}://${host}/api/webhooks/twilio`
+    }
     const formData = new URLSearchParams(rawBody)
 
     return validateTwilioSignature({
@@ -106,24 +116,32 @@ export class TwilioAdapter implements ISmsProvider {
       const to = formData.get('To') || undefined
       const body = formData.get('Body') || undefined
       const messageSid = formData.get('MessageSid') || undefined
-      const messageStatus = formData.get('MessageStatus') || undefined
+      const messageStatus = formData.get('MessageStatus')?.toLowerCase() || undefined
       const errorCode = formData.get('ErrorCode') || undefined
       const errorMessage = formData.get('ErrorMessage') || undefined
 
       let type: ParsedSmsWebhookEvent['type'] = 'inbound.received'
-      if (messageStatus === 'delivered') {
-        type = 'outbound.delivered'
-      } else if (messageStatus === 'failed') {
-        type = 'outbound.failed'
-      } else if (messageStatus === 'undelivered') {
-        type = 'outbound.undelivered'
-      } else if (messageStatus === 'sent') {
-        type = 'outbound.sent'
+      if (messageStatus) {
+        if (messageStatus === 'delivered') {
+          type = 'outbound.delivered'
+        } else if (messageStatus === 'failed') {
+          type = 'outbound.failed'
+        } else if (messageStatus === 'undelivered') {
+          type = 'outbound.undelivered'
+        } else if (messageStatus === 'sent' || messageStatus === 'queued' || messageStatus === 'sending') {
+          type = 'outbound.sent'
+        }
       }
+
+      // Generate unique eventId per status callback so sent followed by delivered can both be ingested
+      // while duplicate deliveries of the same status are caught by the idempotency gate
+      const eventId = messageSid
+        ? (messageStatus ? `${messageSid}_${messageStatus}` : `${messageSid}_inbound`)
+        : `twilio_${Date.now()}_${Math.random().toString(36).slice(2)}`
 
       return {
         provider: 'twilio',
-        eventId: messageSid || `twilio_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        eventId,
         providerMessageId: messageSid,
         type,
         from,

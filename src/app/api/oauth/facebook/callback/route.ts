@@ -4,6 +4,9 @@ import {
   exchangeCodeForTokens,
   exchangeForLongLivedToken,
   listFacebookPages,
+  getFBStateFromRequest,
+  clearFBStateCookie,
+  consumeFBTransaction,
 } from '@/lib/integrations/facebook-graph'
 import { storeTokens } from '@/lib/oauth-store'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
@@ -12,57 +15,93 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/oauth/facebook/callback — Handle OAuth callback from Facebook
 //
-// Flow: Facebook redirects here with ?code=...&state=businessId.
-//   1. Exchange code for short-lived user access token
-//   2. Exchange for long-lived user token (~60 days)
-//   3. GET /me/accounts → list of Pages the user manages
-//   4. If exactly one Page: auto-select it, store the page access token
-//   5. If multiple Pages: redirect to a page-picker UI (?fb_pages=...&businessId=...)
-//   6. If zero Pages: redirect to settings with an error
-//
-// SEC-01: We verify the logged-in user owns the businessId from state
-// before storing any tokens — same pattern as the Google callback.
+// Cryptographic state lifecycle & security invariants:
+// 1. Facebook redirects with ?code=...&state=...
+// 2. We read and decrypt the JWE-encrypted rr_oauth_fb_state cookie (AES-256-GCM).
+// 3. We verify query.state === storedTx.state (CSRF prevention).
+// 4. We verify the session user matches the initiating user: ctx.user.id === storedTx.userId.
+// 5. We atomically consume the transaction to enforce single-use semantics and block replays.
+// 6. We recover businessId STRICTLY from storedTx.businessId (NEVER trust query state).
+// 7. We assert caller's org ownership of businessId (IDOR defense in depth).
+// 8. We exchange code for tokens with Facebook and clear the state cookie.
 export async function GET(request: NextRequest) {
+  const origin = new URL(request.url).origin
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
-  const state = searchParams.get('state') // businessId
+  const state = searchParams.get('state')
   const error = searchParams.get('error')
   const errorReason = searchParams.get('error_reason')
 
+  // Read and decrypt the encrypted state transaction from the HttpOnly cookie early to determine returnTo
+  const storedTx = await getFBStateFromRequest(request)
+  const basePath = storedTx?.returnTo === '/onboarding' ? '/onboarding' : '/settings'
+
+  const fallbackRedirect = (errCode: string, reason?: string) => {
+    const target = new URL(basePath, origin)
+    target.searchParams.set('error', errCode)
+    if (reason) target.searchParams.set('reason', reason)
+    const res = NextResponse.redirect(target)
+    clearFBStateCookie(res)
+    return res
+  }
+
   if (error) {
-    const desc = errorReason || error
-    return NextResponse.redirect(new URL(`/settings?error=facebook_oauth_denied&reason=${encodeURIComponent(desc)}`, request.url))
+    return fallbackRedirect(error === 'access_denied' ? 'facebook_oauth_denied' : 'facebook_oauth_failed', errorReason || error)
   }
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/settings?error=facebook_oauth_failed', request.url))
+    return fallbackRedirect('missing_oauth_parameters')
   }
 
-  // SEC-01: require auth — the user must still be logged in when Facebook redirects back
+  if (!storedTx) {
+    console.error('[Facebook OAuth] State cookie missing, expired, or failed decryption')
+    return fallbackRedirect('oauth_state_missing_or_expired')
+  }
+
+  // 1. Validate returned state matches cryptographically stored state (CSRF check)
+  if (storedTx.state !== state) {
+    console.error('[Facebook OAuth] State parameter mismatch detected')
+    return fallbackRedirect('oauth_state_mismatch')
+  }
+
+  // 2. SEC-01: require auth — the user must still be logged in when Facebook redirects back
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) {
-    return NextResponse.redirect(new URL('/login?error=session_expired', request.url))
+    return NextResponse.redirect(new URL('/login?error=session_expired', origin))
   }
 
-  const businessId = state
+  // 3. User binding check — session user must be the exact user who initiated the flow
+  if (storedTx.userId !== ctx.user.id) {
+    console.error('[Facebook OAuth] User mismatch: initiating user does not match callback session')
+    return fallbackRedirect('oauth_user_mismatch')
+  }
 
-  // SEC-01: verify the caller's org owns this business
+  // 4. Single-use atomic consumption — prevents replay attacks and race conditions
+  const claimed = await consumeFBTransaction(storedTx.state)
+  if (!claimed) {
+    console.error('[Facebook OAuth] Transaction already consumed or concurrent callback attempt')
+    return fallbackRedirect('oauth_transaction_already_consumed')
+  }
+
+  // 5. CRITICAL: businessId is recovered STRICTLY from trusted transaction state!
+  const businessId = storedTx.businessId
+
+  // 6. SEC-01: verify the caller's org owns this business
   const denied = assertBusinessOwnership(ctx, businessId)
   if (denied) {
-    return NextResponse.redirect(new URL('/settings?error=business_not_authorized', request.url))
+    return fallbackRedirect('business_not_authorized')
   }
 
   try {
-    const redirectUri = `${new URL('/api/oauth/facebook/callback', request.url).origin}/api/oauth/facebook/callback`
+    const redirectUri = `${origin}/api/oauth/facebook/callback`
 
     // Step 1: Exchange code for short-lived user token
     const shortLived = await exchangeCodeForTokens(code, redirectUri)
     if (!shortLived) {
-      return NextResponse.redirect(new URL('/settings?error=facebook_token_failed', request.url))
+      return fallbackRedirect('facebook_token_failed')
     }
 
     // Step 2: Exchange for long-lived user token (~60 days)
-    // Page access tokens derived from a long-lived user token are also long-lived
     const longLived = await exchangeForLongLivedToken(shortLived.access_token)
     const userToken = longLived?.access_token || shortLived.access_token
     const userTokenExpiry = longLived?.expires_at
@@ -73,7 +112,7 @@ export async function GET(request: NextRequest) {
     const pages = await listFacebookPages(userToken)
 
     if (pages.length === 0) {
-      return NextResponse.redirect(new URL('/settings?error=facebook_no_pages', request.url))
+      return fallbackRedirect('facebook_no_pages')
     }
 
     // Step 4: If exactly one Page, auto-select it
@@ -81,35 +120,34 @@ export async function GET(request: NextRequest) {
       const page = pages[0]
       await connectFacebookPage(businessId, ctx.user.id, page)
 
-      return NextResponse.redirect(new URL('/settings?facebook=connected', request.url))
+      const response = NextResponse.redirect(new URL(`${basePath}?facebook=connected`, origin))
+      clearFBStateCookie(response)
+      return response
     }
 
-    // Step 5: Multiple Pages — store the user token temporarily and redirect
-    // to a page-picker. We store the user token under a temporary provider name
-    // 'facebook_user' so we can retrieve it after the user picks a page, then
-    // delete it once a page is selected.
+    // Step 5: Multiple Pages — store the user token temporarily and redirect to page-picker
     await storeTokens({
       businessId,
       provider: 'facebook_user',
       accessToken: userToken,
-      refreshToken: '',  // Facebook doesn't use refresh tokens — long-lived tokens are used directly
+      refreshToken: '',
       expiresAt: userTokenExpiry,
       scopes: 'pages_manage_metadata,pages_read_engagement,pages_manage_engagement',
     })
 
-    // Redirect to a page-picker URL. The settings page will fetch the list
-    // of pages (passed as query params) and show a selection UI.
     const pagesParam = encodeURIComponent(JSON.stringify(pages.map(p => ({
       id: p.id,
       name: p.name,
       category: p.category,
     }))))
-    return NextResponse.redirect(
-      new URL(`/settings?facebook_pick_page=1&businessId=${businessId}&pages=${pagesParam}`, request.url)
+    const response = NextResponse.redirect(
+      new URL(`${basePath}?facebook_pick_page=1&businessId=${businessId}&pages=${pagesParam}`, origin)
     )
+    clearFBStateCookie(response)
+    return response
   } catch (error) {
     console.error('Facebook OAuth callback error:', error)
-    return NextResponse.redirect(new URL('/settings?error=facebook_callback_failed', request.url))
+    return fallbackRedirect('facebook_callback_failed')
   }
 }
 

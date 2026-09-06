@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getTenantContext } from '@/lib/tenant-context'
+import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
+import { getBusinessDashboardReadiness } from '@/lib/readiness'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,18 @@ export async function GET(request: NextRequest) {
         recentReviews: [],
         ratingDistribution: [],
         sentimentTrend: [],
+        dashboardReadiness: await getBusinessDashboardReadiness(null, Boolean(ctx.user)),
       })
+    }
+
+    const { searchParams } = new URL(request.url)
+    const businessIdParam = searchParams.get('businessId')
+
+    let scopedBusinessIds = ctx.businessIds
+    if (businessIdParam && businessIdParam !== 'all') {
+      const denied = assertBusinessOwnership(ctx, businessIdParam)
+      if (denied) return denied
+      scopedBusinessIds = [businessIdParam]
     }
 
     const businesses = await db.business.findMany({
@@ -32,19 +44,19 @@ export async function GET(request: NextRequest) {
     })
 
     const totalReviews = await db.review.count({
-      where: { businessId: { in: ctx.businessIds } },
+      where: { businessId: { in: scopedBusinessIds } },
     })
     const avgRatingAgg = await db.review.aggregate({
       _avg: { rating: true },
-      where: { businessId: { in: ctx.businessIds } },
+      where: { businessId: { in: scopedBusinessIds } },
     })
     const pendingReplies = await db.review.count({
-      where: { businessId: { in: ctx.businessIds }, draftStatus: 'PENDING' },
+      where: { businessId: { in: scopedBusinessIds }, draftStatus: 'PENDING' },
     })
 
     const campaignStats = await db.campaign.aggregate({
       _sum: { sentCount: true, conversionCount: true },
-      where: { businessId: { in: ctx.businessIds } },
+      where: { businessId: { in: scopedBusinessIds } },
     })
     const conversionRate = campaignStats._sum.sentCount && campaignStats._sum.sentCount > 0
       ? Math.round((campaignStats._sum.conversionCount! / campaignStats._sum.sentCount) * 100)
@@ -54,7 +66,7 @@ export async function GET(request: NextRequest) {
       by: ['rating'],
       _count: true,
       orderBy: { rating: 'asc' },
-      where: { businessId: { in: ctx.businessIds } },
+      where: { businessId: { in: scopedBusinessIds } },
     })
     const ratingDistribution = [1, 2, 3, 4, 5].map(r => ({
       rating: r,
@@ -65,7 +77,7 @@ export async function GET(request: NextRequest) {
     eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56)
     const recentReviewsData = await db.review.findMany({
       where: {
-        businessId: { in: ctx.businessIds },
+        businessId: { in: scopedBusinessIds },
         createdAt: { gte: eightWeeksAgo },
       },
       select: { createdAt: true, sentimentScore: true, rating: true },
@@ -88,19 +100,29 @@ export async function GET(request: NextRequest) {
     }
 
     const recent = await db.review.findMany({
-      where: { businessId: { in: ctx.businessIds } },
+      where: { businessId: { in: scopedBusinessIds } },
       take: 8,
       orderBy: { createdAt: 'desc' },
       include: { business: { select: { name: true } } },
     })
+
+    // Compute authoritative dashboard readiness for the scoped business
+    const primaryBiz = businesses.find(b => scopedBusinessIds.includes(b.id)) || businesses[0]
+    const dashboardReadiness = await getBusinessDashboardReadiness(primaryBiz, Boolean(ctx.user))
 
     return NextResponse.json({
       businesses: businesses.map(b => ({
         id: b.id,
         name: b.name,
         industry: b.industry,
+        address: b.address,
+        phone: b.phone,
+        timezone: b.timezone,
         avgRating: b.avgRating,
         reviewCount: b.reviewCount,
+        googleLocationVerified: b.googleLocationVerified,
+        googleSyncStatus: b.googleSyncStatus,
+        googleSyncedAt: b.googleSyncedAt?.toISOString() || null,
       })),
       stats: {
         totalReviews,
@@ -120,6 +142,7 @@ export async function GET(request: NextRequest) {
       })),
       ratingDistribution,
       sentimentTrend: weeks,
+      dashboardReadiness,
     })
   } catch (error) {
     console.error('Dashboard API error:', error)

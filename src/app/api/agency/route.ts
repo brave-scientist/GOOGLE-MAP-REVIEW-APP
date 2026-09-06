@@ -37,14 +37,12 @@ export async function GET(request: NextRequest) {
 
       const status = healthScore >= 60 ? 'active' : 'at-risk'
       const plan = b.reviewCount > 200 ? 'Enterprise' : b.reviewCount > 100 ? 'Pro' : 'Starter'
-      const mrr = plan === 'Enterprise' ? 299 : plan === 'Pro' ? 99 : 49
 
       return {
         id: b.id,
         name: b.name,
         industry: b.industry || 'business',
         plan,
-        mrr,
         rating: Math.round(b.avgRating * 10) / 10,
         reviews: b.reviewCount,
         reviewVelocity: recentReviews.length,
@@ -54,16 +52,18 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const totalMRR = clients.reduce((sum, c) => sum + c.mrr, 0)
     const avgHealth = clients.length > 0 ? Math.round(clients.reduce((sum, c) => sum + c.healthScore, 0) / clients.length) : 0
     const atRisk = clients.filter(c => c.status === 'at-risk').length
     const totalReviews = clients.reduce((sum, c) => sum + c.reviews, 0)
+    const avgRating = clients.length > 0
+      ? Math.round((clients.reduce((sum, c) => sum + c.rating, 0) / clients.length) * 10) / 10
+      : 0
 
     return NextResponse.json({
       clients,
       stats: {
         totalClients: clients.length,
-        totalMRR,
+        avgRating,
         avgHealth,
         atRisk,
         totalReviews,

@@ -29,6 +29,9 @@ export async function GET(
       id: true,
       name: true,
       industry: true,
+      reviewPageTitle: true,
+      reviewPageSubtitle: true,
+      reviewPagePrivateFeedbackEnabled: true,
     },
   })
 
@@ -52,6 +55,9 @@ export async function GET(
     business: {
       name: business.name,
       industry: business.industry,
+      reviewPageTitle: business.reviewPageTitle || null,
+      reviewPageSubtitle: business.reviewPageSubtitle || null,
+      reviewPagePrivateFeedbackEnabled: business.reviewPagePrivateFeedbackEnabled ?? true,
     },
     links: links.map(l => {
       const info = resolvePlatformInfo(l)

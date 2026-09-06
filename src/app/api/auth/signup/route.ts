@@ -2,52 +2,124 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { Role, Plan } from '@prisma/client'
 import { createSession, SessionUser } from '@/lib/auth'
+import { rateLimit, getClientIP, RATE_LIMITS } from '@/lib/rate-limit'
 import bcrypt from 'bcryptjs'
 
 // POST /api/auth/signup
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { email, password, name, businessName, industry } = body
+    // 1. Rate limiting defense-in-depth
+    const ip = getClientIP(request)
+    const rateCheck = await rateLimit(`signup:${ip}`, RATE_LIMITS.signup.limit, RATE_LIMITS.signup.windowMs)
+    if (!rateCheck.allowed) {
+      const retryAfter = Math.ceil((rateCheck.resetAt - Date.now()) / 1000)
+      return NextResponse.json(
+        {
+          error: 'Too many signup attempts. Please wait before trying again.',
+          code: 'RATE_LIMITED',
+          retryAfter,
+        },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(retryAfter) },
+        }
+      )
+    }
 
+    const body = await request.json().catch(() => ({}))
+    const { email, password, name, businessName, industry, plan } = body
+
+    // 2. Validate required fields
     if (!email || !password || !name || !businessName) {
       return NextResponse.json(
-        { error: 'Missing required fields: email, password, name, businessName' },
+        { error: 'Missing required fields: email, password, name, businessName', code: 'MISSING_FIELDS' },
         { status: 400 }
       )
     }
 
-    const normalizedEmail = email.trim().toLowerCase()
-
-    if (password.length < 8) {
+    // 3. Normalize & validate email
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!EMAIL_REGEX.test(normalizedEmail) || normalizedEmail.length > 255) {
       return NextResponse.json(
-        { error: 'Password must be at least 8 characters' },
+        { error: 'Invalid email address format', code: 'INVALID_EMAIL' },
+        { status: 400 }
+      )
+    }
+
+    // 4. Validate name & businessName
+    const trimmedName = typeof name === 'string' ? name.trim() : ''
+    if (trimmedName.length < 1 || trimmedName.length > 100) {
+      return NextResponse.json(
+        { error: 'Name must be between 1 and 100 characters', code: 'INVALID_NAME' },
+        { status: 400 }
+      )
+    }
+
+    const trimmedBusinessName = typeof businessName === 'string' ? businessName.trim() : ''
+    if (trimmedBusinessName.length < 1 || trimmedBusinessName.length > 100) {
+      return NextResponse.json(
+        { error: 'Business name must be between 1 and 100 characters', code: 'INVALID_BUSINESS_NAME' },
+        { status: 400 }
+      )
+    }
+
+    // 5. Validate password
+    if (typeof password !== 'string' || password.length < 8) {
+      return NextResponse.json(
+        { error: 'Password must be at least 8 characters', code: 'INVALID_PASSWORD' },
         { status: 400 }
       )
     }
 
     if (password.length > 72) {
       return NextResponse.json(
-        { error: 'Password cannot exceed 72 characters' },
+        { error: 'Password cannot exceed 72 characters', code: 'INVALID_PASSWORD' },
         { status: 400 }
       )
     }
 
+    // 6. Validate plan if supplied (never silently default invalid plan to FREE)
+    const ALLOWED_PLANS: Plan[] = [Plan.FREE, Plan.STARTER, Plan.PRO, Plan.ENTERPRISE, Plan.AGENCY]
+    let targetPlan: Plan = Plan.PRO
+    let trialEndsAt: Date | null = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+
+    if (plan !== undefined && plan !== null) {
+      const upperPlan = String(plan).trim().toUpperCase()
+      const matchedPlan = ALLOWED_PLANS.find(p => p === upperPlan)
+      if (!matchedPlan) {
+        return NextResponse.json(
+          {
+            error: `Invalid plan selected: "${plan}". Choose from: FREE, STARTER, PRO, ENTERPRISE, AGENCY`,
+            code: 'INVALID_PLAN',
+          },
+          { status: 400 }
+        )
+      }
+      targetPlan = matchedPlan
+      if (targetPlan === Plan.FREE) {
+        trialEndsAt = null
+      }
+    }
+
+    // 7. Check existing account (prevent duplicate-account ambiguity)
     const existing = await db.user.findUnique({ where: { email: normalizedEmail } })
     if (existing) {
       return NextResponse.json(
-        { error: 'An account with this email already exists. Please log in.' },
+        { error: 'An account with this email already exists. Please log in.', code: 'EMAIL_EXISTS' },
         { status: 409 }
       )
     }
 
     const passwordHash = await bcrypt.hash(password, 10)
 
+    // 8. Atomic transaction creation: User + Organization + OrgMember (OWNER) + Business + Demo reviews
+    // Client-supplied orgId or role is strictly ignored (server-authoritative)
     const result = await db.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           email: normalizedEmail,
-          name,
+          name: trimmedName,
           passwordHash,
           sessionVersion: 1,
         },
@@ -55,12 +127,15 @@ export async function POST(request: NextRequest) {
 
       const org = await tx.organization.create({
         data: {
-          name: `${name}'s Organization`,
-          plan: Plan.PRO,
-          trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          name: `${trimmedName}'s Organization`,
+          plan: targetPlan,
+          trialEndsAt,
+          onboardingStep: 1,
+          onboardingCompletedAt: null,
         },
       })
 
+      // Server-authoritative role assignment: initial user is always OWNER
       await tx.orgMember.create({
         data: { orgId: org.id, userId: user.id, role: Role.OWNER },
       })
@@ -69,13 +144,13 @@ export async function POST(request: NextRequest) {
         data: {
           orgId: org.id,
           ownerId: user.id,
-          name: businessName,
-          industry: industry || 'restaurant',
+          name: trimmedBusinessName,
+          industry: typeof industry === 'string' ? industry.trim() : 'restaurant',
           timezone: 'America/New_York',
         },
       })
 
-      // Seed demo reviews
+      // Seed demo reviews for immediate exploration
       const demoReviews = [
         { rating: 5, text: 'Amazing experience! The staff was incredibly welcoming and the service was top-notch.', topics: ['service', 'staff'] },
         { rating: 4, text: 'Great food and atmosphere. Will definitely be back!', topics: ['food', 'atmosphere'] },
@@ -108,7 +183,7 @@ export async function POST(request: NextRequest) {
           action: 'user.signup',
           targetType: 'user',
           targetId: user.id,
-          metadata: JSON.stringify({ email: normalizedEmail, businessName }),
+          metadata: JSON.stringify({ email: normalizedEmail, businessName: trimmedBusinessName, plan: targetPlan }),
         },
       })
 
@@ -128,14 +203,16 @@ export async function POST(request: NextRequest) {
 
     const response = NextResponse.json({
       user: sessionUser,
-      redirectTo: '/dashboard',
+      plan: result.org.plan,
+      trialEndsAt: result.org.trialEndsAt?.toISOString() || null,
+      redirectTo: '/onboarding',
     })
     await createSession(response, sessionUser)
     return response
   } catch (error) {
-    console.error('Signup error:', error)
+    console.error('Signup error:', error instanceof Error ? error.message : 'Unknown signup error')
     return NextResponse.json(
-      { error: 'Failed to create account' },
+      { error: 'Failed to create account', code: 'SIGNUP_FAILED' },
       { status: 500 }
     )
   }

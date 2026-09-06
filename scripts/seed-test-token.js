@@ -5,9 +5,6 @@
 // Run with: node /home/z/my-project/scripts/seed-test-token.js <businessId> <action>
 //   action: 'seed' or 'cleanup'
 
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
-
 const businessId = process.argv[2]
 const action = process.argv[3] || 'seed'
 
@@ -16,6 +13,10 @@ async function main() {
     console.error('Usage: node seed-test-token.js <businessId> [seed|cleanup]')
     process.exit(1)
   }
+
+  const { PrismaClient } = await import('@prisma/client')
+  const prisma = new PrismaClient()
+
 
   if (action === 'cleanup') {
     const result = await prisma.oAuthToken.deleteMany({

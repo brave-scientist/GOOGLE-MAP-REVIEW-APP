@@ -57,10 +57,10 @@ export async function POST(request: NextRequest) {
     const validRecipients = parseRecipients(recipients, ctx.user.email)
     const parsedFormat = parseFormat(format)
 
-    if (parsedFormat === ReportFormat.PDF_ATTACHMENT || parsedFormat === ReportFormat.BOTH) {
+    if (!businessId && !ctx.isOrgAdmin) {
       return NextResponse.json(
-        { error: 'PDF formats are currently deferred to Stage 3. Please select EMAIL_HTML.', code: 'UNSUPPORTED_FORMAT' },
-        { status: 400 },
+        { error: 'Only organization administrators can configure organization-wide reports', code: 'INSUFFICIENT_ROLE' },
+        { status: 403 }
       )
     }
 
@@ -154,12 +154,6 @@ export async function PUT(request: NextRequest) {
     if (schedule) updateData.schedule = parseSchedule(schedule)
     if (format) {
       const parsedFmt = parseFormat(format)
-      if (parsedFmt === ReportFormat.PDF_ATTACHMENT || parsedFmt === ReportFormat.BOTH) {
-        return NextResponse.json(
-          { error: 'PDF formats are currently deferred to Stage 3. Please select EMAIL_HTML.', code: 'UNSUPPORTED_FORMAT' },
-          { status: 400 },
-        )
-      }
       updateData.format = parsedFmt
     }
     if (recipients) updateData.recipients = JSON.stringify(parseRecipients(recipients, ctx.user.email))

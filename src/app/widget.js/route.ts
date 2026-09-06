@@ -39,22 +39,94 @@ export async function GET(request: NextRequest) {
   const validTypes = ['carousel', 'grid', 'badge', 'slider']
   const type = validTypes.includes(typeId) ? typeId : 'carousel'
 
-  // Fetch real reviews from DB
+  // Resolve business deterministically:
+  // 1. businessId query param (cuid) -> exact unique lookup
+  // 2. slug query param (unique public slug) -> exact unique lookup
+  // 3. business query param: if looks like a cuid, lookup by id; if matches a slug, lookup by slug;
+  //    otherwise exact case-insensitive name match ONLY if unique (no fuzzy cross-tenant substring).
+  const businessIdParam = searchParams.get('businessId') || searchParams.get('id') || ''
+  const slugParam = searchParams.get('slug') || ''
+  const businessQuery = (searchParams.get('business') || '').trim()
+
   let reviews: Array<{ author: string; rating: number; text: string; source: string; createdAt: Date }> = []
   let avgRating = 0
   let reviewCount = 0
+  let resolvedBusinessName = ''
 
   try {
-    const business = await db.business.findFirst({
-      where: { name: { contains: businessName } },
-      include: {
-        reviews: {
-          where: { rating: { gte: minRating } },
-          orderBy: { createdAt: 'desc' },
-          take: limit,
+    let business: any = null
+
+    if (businessIdParam.trim().length > 0) {
+      business = await db.business.findUnique({
+        where: { id: businessIdParam.trim() },
+        include: {
+          reviews: {
+            where: { rating: { gte: minRating } },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+          },
         },
-      },
-    })
+      })
+    } else if (slugParam.trim().length > 0) {
+      business = await db.business.findUnique({
+        where: { slug: slugParam.trim().toLowerCase() },
+        include: {
+          reviews: {
+            where: { rating: { gte: minRating } },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+          },
+        },
+      })
+    } else if (businessQuery.length > 0) {
+      // Check if businessQuery is a cuid
+      if (/^c[a-z0-9]{24}$/.test(businessQuery)) {
+        business = await db.business.findUnique({
+          where: { id: businessQuery },
+          include: {
+            reviews: {
+              where: { rating: { gte: minRating } },
+              orderBy: { createdAt: 'desc' },
+              take: limit,
+            },
+          },
+        })
+      }
+
+      // Check if businessQuery matches a unique slug
+      if (!business) {
+        business = await db.business.findUnique({
+          where: { slug: businessQuery.toLowerCase() },
+          include: {
+            reviews: {
+              where: { rating: { gte: minRating } },
+              orderBy: { createdAt: 'desc' },
+              take: limit,
+            },
+          },
+        })
+      }
+
+      // Fallback: EXACT name match only (case-insensitive) - never loose fuzzy substring
+      if (!business) {
+        const matches = await db.business.findMany({
+          where: { name: { equals: businessQuery, mode: 'insensitive' } },
+          take: 2,
+          include: {
+            reviews: {
+              where: { rating: { gte: minRating } },
+              orderBy: { createdAt: 'desc' },
+              take: limit,
+            },
+          },
+        })
+        // If exact name is unique, resolve it. If multiple tenants share the exact same name,
+        // fail closed to prevent cross-tenant data leakage and require explicit businessId/slug.
+        if (matches.length === 1) {
+          business = matches[0]
+        }
+      }
+    }
 
     if (business) {
       reviews = business.reviews.map(r => ({
@@ -66,25 +138,28 @@ export async function GET(request: NextRequest) {
       }))
       avgRating = business.avgRating
       reviewCount = business.reviewCount
+      resolvedBusinessName = business.name
     }
   } catch (e) {
-    // If DB fails, render with empty data
+    // Fail closed on error, render empty widget safely without crashing
   }
 
   const { primary: accent, bg: bgColor, text: textColor, muted: mutedColor, border: borderColor } = theme
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://reviewreply.pw').replace(/\/+$/, '')
 
   // Generate the widget JavaScript.
   // The `type` param selects between four distinct render functions.
   // Each type produces visibly different HTML structure — not just CSS tweaks.
   const widgetJS = `
 (function() {
-  var data = ${JSON.stringify({ reviews, avgRating, reviewCount, businessName })};
+  var data = ${JSON.stringify({ reviews, avgRating, reviewCount, businessName: resolvedBusinessName || businessQuery })};
   var type = ${JSON.stringify(type)};
   var bg = "${bgColor}";
   var text = "${textColor}";
   var muted = "${mutedColor}";
   var border = "${borderColor}";
   var accent = "${accent}";
+  var attributionUrl = ${JSON.stringify(appUrl)};
 
   function createWidget() {
     var containers = document.querySelectorAll('[data-reviewreply-widget], script[data-reviewreply-widget]');
@@ -165,7 +240,7 @@ export async function GET(request: NextRequest) {
         });
         html += '</div>';
       }
-      html += '<div style="text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid ' + border + ';"><a href="' + (typeof window!=="undefined"?window.location.origin:"") + '" style="font-size:10px;color:' + muted + ';text-decoration:none;" target="_blank">Powered by ReviewReply</a></div>';
+      html += '<div style="text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid ' + border + ';"><a href="' + attributionUrl + '" style="font-size:10px;color:' + muted + ';text-decoration:none;" target="_blank" rel="noopener noreferrer">Powered by ReviewReply</a></div>';
       html += '</div>';
     } else if (type === 'slider') {
       // Slider — single review at a time with prev/next buttons
@@ -197,7 +272,7 @@ export async function GET(request: NextRequest) {
         });
       }
       html += '</div>';
-      html += '<div style="text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid ' + border + ';"><a href="' + (typeof window!=="undefined"?window.location.origin:"") + '" style="font-size:10px;color:' + muted + ';text-decoration:none;" target="_blank">Powered by ReviewReply</a></div>';
+      html += '<div style="text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid ' + border + ';"><a href="' + attributionUrl + '" style="font-size:10px;color:' + muted + ';text-decoration:none;" target="_blank" rel="noopener noreferrer">Powered by ReviewReply</a></div>';
       html += '</div>';
       html += '<script>function reviewreplySlide(c){var i=parseInt(c.dataset.idx||0);var s=c.querySelectorAll("[data-slide]");s.forEach(function(el,idx){el.style.display=idx===i?"block":"none";});}</script>';
     } else {
@@ -223,7 +298,7 @@ export async function GET(request: NextRequest) {
           html += '</div>';
         });
       }
-      html += '<div style="text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid ' + border + ';"><a href="' + (typeof window!=="undefined"?window.location.origin:"") + '" style="font-size:10px;color:' + muted + ';text-decoration:none;" target="_blank">Powered by ReviewReply</a></div>';
+      html += '<div style="text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid ' + border + ';"><a href="' + attributionUrl + '" style="font-size:10px;color:' + muted + ';text-decoration:none;" target="_blank" rel="noopener noreferrer">Powered by ReviewReply</a></div>';
       html += '</div>';
     }
 

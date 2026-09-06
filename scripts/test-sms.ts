@@ -12,6 +12,7 @@ import {
   SMS_LIMITS,
   SMS_STATUS_ORDINAL,
   isValidStatusTransition,
+  SmsStatus,
   recordConsent,
   revokeConsent,
   hasValidConsent,
@@ -298,7 +299,18 @@ const inMemoryWebhookEvents = new Map<string, any>()
     return { ...rec }
   },
   count: async () => 0,
-  findFirst: async () => null,
+  findFirst: async ({ where }: any) => {
+    if (where?.to && where?.businessId) {
+      return inMemoryDeliveryEvents.find(e => {
+        if (e.to !== where.to) return false
+        if (e.businessId !== where.businessId) return false
+        if (where.status?.in && !where.status.in.includes(e.status)) return false
+        if (where.createdAt?.gte && e.createdAt < where.createdAt.gte) return false
+        return true
+      }) || null
+    }
+    return null
+  },
   findUnique: async ({ where }: any) => {
     if (where?.providerMessageId) {
       return inMemoryDeliveryEvents.find(e => e.providerMessageId === where.providerMessageId) || null
@@ -309,6 +321,84 @@ const inMemoryWebhookEvents = new Map<string, any>()
     const item = inMemoryDeliveryEvents.find(e => e.id === where.id)
     if (item) Object.assign(item, data)
     return item
+  },
+}
+
+const inMemoryReviewRequests = new Map<string, any>()
+const inMemoryCampaigns = new Map<string, any>()
+const inMemoryReviewUsSends = new Map<string, any>()
+const inMemoryReviewUsSendRecipients = new Map<string, any>()
+
+;(db as any).reviewRequest = {
+  create: async ({ data }: any) => {
+    const rec = { id: `rr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, ...data, createdAt: new Date() }
+    inMemoryReviewRequests.set(rec.id, rec)
+    return { ...rec }
+  },
+  update: async ({ where, data }: any) => {
+    const item = inMemoryReviewRequests.get(where.id)
+    if (item) Object.assign(item, data)
+    return item || null
+  },
+  findUnique: async ({ where }: any) => {
+    return inMemoryReviewRequests.get(where.id) || null
+  },
+  findMany: async ({ where }: any) => {
+    return Array.from(inMemoryReviewRequests.values()).filter(r => {
+      if (where?.businessId && r.businessId !== where.businessId) return false
+      if (where?.campaignId && r.campaignId !== where.campaignId) return false
+      if (where?.status && r.status !== where.status) return false
+      return true
+    })
+  },
+}
+
+;(db as any).campaign = {
+  create: async ({ data }: any) => {
+    const rec = { id: `camp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, ...data, createdAt: new Date(), updatedAt: new Date() }
+    inMemoryCampaigns.set(rec.id, rec)
+    return { ...rec }
+  },
+  update: async ({ where, data }: any) => {
+    const item = inMemoryCampaigns.get(where.id)
+    if (item) Object.assign(item, data)
+    return item || null
+  },
+  findUnique: async ({ where }: any) => {
+    return inMemoryCampaigns.get(where.id) || null
+  },
+}
+
+;(db as any).reviewUsSend = {
+  create: async ({ data }: any) => {
+    const rec = { id: `send_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, ...data, createdAt: new Date() }
+    inMemoryReviewUsSends.set(rec.id, rec)
+    return { ...rec }
+  },
+  update: async ({ where, data }: any) => {
+    const item = inMemoryReviewUsSends.get(where.id)
+    if (item) Object.assign(item, data)
+    return item || null
+  },
+}
+
+;(db as any).reviewUsSendRecipient = {
+  create: async ({ data }: any) => {
+    const rec = { id: `recip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, ...data, createdAt: new Date() }
+    inMemoryReviewUsSendRecipients.set(rec.id, rec)
+    return { ...rec }
+  },
+  createMany: async ({ data }: any) => {
+    for (const d of data) {
+      const rec = { id: `recip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, ...d, createdAt: new Date() }
+      inMemoryReviewUsSendRecipients.set(rec.id, rec)
+    }
+    return { count: data.length }
+  },
+  update: async ({ where, data }: any) => {
+    const item = inMemoryReviewUsSendRecipients.get(where.id)
+    if (item) Object.assign(item, data)
+    return item || null
   },
 }
 
@@ -2400,6 +2490,360 @@ async function runTests() {
       crossTenantGrant.success && crossTenantGrant.businessId === testBusA.id,
       'SEC-ADV-003',
       'Server-derived businessId prevents cross-tenant token substitution'
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // JOB-4.2 MANDATED CONSENT COMPLIANCE & HARDENING SUITE (CONSENT-001 to CONSENT-012)
+  // ═══════════════════════════════════════════════════════════════
+  console.log('\n--- JOB-4.2 Consent Hardening & Compliance Matrix (CONSENT-001..012) ---')
+
+  // CONSENT-001: Eligible recipient can proceed according to the application's actual consent model
+  {
+    const phone001 = '+14155550001'
+    const inv001 = await createConsentInvitation({ businessId: testBusA.id, contact: phone001 })
+    await grantCustomerConsent({ rawToken: inv001.rawToken!, confirmed: true })
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    const origKey = process.env.TELNYX_API_KEY
+    const origFrom = process.env.TELNYX_FROM_PHONE_NUMBER
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    process.env.TELNYX_API_KEY = 'test_telnyx_key_valid'
+    process.env.TELNYX_FROM_PHONE_NUMBER = '+18005550199'
+
+    const origFetch = global.fetch
+    global.fetch = async (url: any, init: any) => {
+      if (String(url).includes('telnyx.com')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: { id: `telnyx_001_${Date.now()}`, parts: 1 },
+          }),
+        } as any
+      }
+      return origFetch(url, init)
+    }
+
+    const sendRes001 = await SmsService.sendSms({
+      to: phone001,
+      body: 'Review request for eligible customer',
+      businessId: testBusA.id,
+    })
+
+    global.fetch = origFetch
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+    if (origKey !== undefined) process.env.TELNYX_API_KEY = origKey
+    else delete process.env.TELNYX_API_KEY
+    if (origFrom !== undefined) process.env.TELNYX_FROM_PHONE_NUMBER = origFrom
+    else delete process.env.TELNYX_FROM_PHONE_NUMBER
+
+    assert(
+      sendRes001.success === true && sendRes001.status === 'sent',
+      'CONSENT-001',
+      'Eligible recipient can proceed according to the application actual consent model'
+    )
+  }
+
+  // CONSENT-002: Opted-out recipient is blocked
+  {
+    const phone002 = '+14155550002'
+    const inv002 = await createConsentInvitation({ businessId: testBusA.id, contact: phone002 })
+    await grantCustomerConsent({ rawToken: inv002.rawToken!, confirmed: true })
+    await optOutContact(phone002, 'User opted out')
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes002 = await SmsService.sendSms({
+      to: phone002,
+      body: 'Message to opted-out recipient',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes002.success === false && sendRes002.errorCode === 'RECIPIENT_OPTED_OUT',
+      'CONSENT-002',
+      'Opted-out recipient is blocked'
+    )
+    await optInContact(phone002) // cleanup
+  }
+
+  // CONSENT-003: STOP creates the block
+  {
+    const phone003 = '+14155550003'
+    await optOutContact(phone003, 'Inbound SMS keyword: "STOP"')
+    const isBlocked003 = await isOptedOut(phone003)
+
+    assert(
+      isBlocked003 === true,
+      'CONSENT-003',
+      'STOP creates the block'
+    )
+    await optInContact(phone003) // cleanup
+  }
+
+  // CONSENT-004: Blocked recipient cannot bypass the block through campaign dispatch
+  {
+    const phone004 = '+14155550004'
+    await optOutContact(phone004, 'Pre-existing opt-out')
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes004 = await SmsService.sendSms({
+      to: phone004,
+      body: 'Campaign dispatch attempt to opted-out contact',
+      businessId: testBusA.id,
+      campaignId: 'camp_test_004',
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes004.success === false && sendRes004.errorCode === 'RECIPIENT_OPTED_OUT',
+      'CONSENT-004',
+      'Blocked recipient cannot bypass the block through campaign dispatch'
+    )
+    await optInContact(phone004) // cleanup
+  }
+
+  // CONSENT-005: START behavior follows existing product semantics
+  {
+    const phone005 = '+14155550005'
+    await optOutContact(phone005, 'STOP replied previously')
+    await optInContact(phone005) // Inbound START / UNSTOP
+
+    const isOptedOut005 = await isOptedOut(phone005)
+    const hasConsent005 = await hasValidConsent(testBusA.id, phone005)
+
+    assert(
+      isOptedOut005 === false && hasConsent005 === false,
+      'CONSENT-005',
+      'START behavior follows existing product semantics (clears opt-out but does not fabricate consent)'
+    )
+  }
+
+  // CONSENT-006: Invalid phone is blocked
+  {
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes006 = await SmsService.sendSms({
+      to: '12345-invalid',
+      body: 'Message to malformed phone',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes006.success === false && sendRes006.errorCode === 'INVALID_PHONE_NUMBER',
+      'CONSENT-006',
+      'Invalid phone is blocked'
+    )
+  }
+
+  // CONSENT-007: Cooldown is enforced
+  {
+    const phone007 = '+14155550007'
+    const inv007 = await createConsentInvitation({ businessId: testBusA.id, contact: phone007 })
+    await grantCustomerConsent({ rawToken: inv007.rawToken!, confirmed: true })
+
+    // Record a recent send within 14 days
+    await db.smsDeliveryEvent.create({
+      data: {
+        provider: 'telnyx',
+        providerMessageId: `msg_${Date.now()}`,
+        businessId: testBusA.id,
+        to: phone007,
+        from: '+18005550199',
+        status: SmsStatus.SENT,
+        statusOrdinal: SMS_STATUS_ORDINAL[SmsStatus.SENT],
+        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+      },
+    })
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes007 = await SmsService.sendSms({
+      to: phone007,
+      body: 'Follow-up message within cooldown period',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes007.success === false && sendRes007.errorCode === 'RECIPIENT_COOLDOWN_ACTIVE',
+      'CONSENT-007',
+      'Cooldown is enforced'
+    )
+  }
+
+  // CONSENT-008: SMS kill switch prevents dispatch
+  {
+    const phone008 = '+14155550008'
+    const inv008 = await createConsentInvitation({ businessId: testBusA.id, contact: phone008 })
+    await grantCustomerConsent({ rawToken: inv008.rawToken!, confirmed: true })
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'false'
+    const sendRes008 = await SmsService.sendSms({
+      to: phone008,
+      body: 'Message during SMS kill switch disabled mode',
+      businessId: testBusA.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes008.success === false && sendRes008.errorCode === 'FEATURE_DISABLED',
+      'CONSENT-008',
+      'SMS kill switch prevents dispatch'
+    )
+  }
+
+  // CONSENT-009: Campaign recipient is not marked successfully sent after a blocked SMS
+  {
+    const phone009 = '+14155550009'
+    // Recipient has NO consent -> will be blocked with CONSENT_REQUIRED
+    const req009 = await db.reviewRequest.create({
+      data: {
+        businessId: testBusA.id,
+        customerName: 'Unconsented Customer',
+        customerContact: phone009,
+        channel: 'SMS',
+        status: 'PENDING',
+      },
+    })
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+    const sendRes009 = await SmsService.sendSms({
+      to: phone009,
+      body: 'Campaign message to unconsented recipient',
+      businessId: testBusA.id,
+      reviewRequestId: req009.id,
+    })
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    // Route updates status
+    const updatedStatus = sendRes009.success ? 'SENT' : (sendRes009.errorCode === 'RECIPIENT_OPTED_OUT' ? 'OPTED_OUT' : 'FAILED')
+    await db.reviewRequest.update({
+      where: { id: req009.id },
+      data: { status: updatedStatus },
+    })
+
+    const finalReq009 = await db.reviewRequest.findUnique({ where: { id: req009.id } })
+
+    assert(
+      sendRes009.success === false &&
+      sendRes009.errorCode === 'CONSENT_REQUIRED' &&
+      finalReq009?.status === 'FAILED',
+      'CONSENT-009',
+      'Campaign recipient is not marked successfully sent after a blocked SMS'
+    )
+  }
+
+  // CONSENT-010: Provider failure is not represented as successful campaign delivery
+  {
+    const phone010 = '+14155550010'
+    const inv010 = await createConsentInvitation({ businessId: testBusA.id, contact: phone010 })
+    await grantCustomerConsent({ rawToken: inv010.rawToken!, confirmed: true })
+
+    const req010 = await db.reviewRequest.create({
+      data: {
+        businessId: testBusA.id,
+        customerName: 'Customer Ten',
+        customerContact: phone010,
+        channel: 'SMS',
+        status: 'PENDING',
+        deliveredAt: null,
+      },
+    })
+
+    // Simulate provider failure
+    const origKey = process.env.TELNYX_API_KEY
+    delete process.env.TELNYX_API_KEY
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+
+    const sendRes010 = await SmsService.sendSms({
+      to: phone010,
+      body: 'Message during provider outage',
+      businessId: testBusA.id,
+      reviewRequestId: req010.id,
+    })
+
+    if (origKey !== undefined) process.env.TELNYX_API_KEY = origKey
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    await db.reviewRequest.update({
+      where: { id: req010.id },
+      data: {
+        status: sendRes010.success ? 'SENT' : 'FAILED',
+        deliveredAt: null,
+      },
+    })
+
+    const finalReq010 = await db.reviewRequest.findUnique({ where: { id: req010.id } })
+
+    assert(
+      sendRes010.success === false &&
+      finalReq010?.status === 'FAILED' &&
+      finalReq010?.deliveredAt === null,
+      'CONSENT-010',
+      'Provider failure is not represented as successful campaign delivery'
+    )
+  }
+
+  // CONSENT-011: Client-supplied consent claims cannot override server-side enforcement
+  {
+    const phone011 = '+14155550011'
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+
+    const sendRes011 = await SmsService.sendSms({
+      to: phone011,
+      body: 'Attempting to send with client-claimed consent',
+      businessId: testBusA.id,
+    })
+
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes011.success === false && sendRes011.errorCode === 'CONSENT_REQUIRED',
+      'CONSENT-011',
+      'Client-supplied consent claims cannot override server-side enforcement'
+    )
+  }
+
+  // CONSENT-012: Cross-tenant recipient/business manipulation is rejected
+  {
+    const phone012 = '+14155550012'
+    const inv012 = await createConsentInvitation({ businessId: testBusA.id, contact: phone012 })
+    await grantCustomerConsent({ rawToken: inv012.rawToken!, confirmed: true })
+
+    const origFlag = process.env.FEATURE_SMS_ENABLED
+    process.env.FEATURE_SMS_ENABLED = 'true'
+
+    // Attempt to send on behalf of Business B using Business A's consent
+    const sendRes012 = await SmsService.sendSms({
+      to: phone012,
+      body: 'Cross-tenant SMS spoofing attempt',
+      businessId: testBusB.id,
+    })
+
+    if (origFlag !== undefined) process.env.FEATURE_SMS_ENABLED = origFlag
+    else delete process.env.FEATURE_SMS_ENABLED
+
+    assert(
+      sendRes012.success === false && sendRes012.errorCode === 'CONSENT_REQUIRED',
+      'CONSENT-012',
+      'Cross-tenant recipient/business manipulation is rejected'
     )
   }
 

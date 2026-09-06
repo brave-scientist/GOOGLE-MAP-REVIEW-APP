@@ -13,12 +13,16 @@ import {
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
+import { AgencyBrandingTab } from '@/components/app/branding-tab'
+import { CustomDomainsTab } from '@/components/app/custom-domains-tab'
+
+import { useActiveBusiness } from '@/lib/business-context'
+
 interface Client {
   id: string
   name: string
   industry: string
   plan: string
-  mrr: number
   rating: number
   reviews: number
   reviewVelocity: number
@@ -31,7 +35,7 @@ interface AgencyData {
   clients?: Client[]
   stats?: {
     totalClients: number
-    totalMRR: number
+    avgRating: number
     avgHealth: number
     atRisk: number
     totalReviews: number
@@ -44,8 +48,10 @@ interface AgencyData {
 
 export default function AgencyPage() {
   const router = useRouter()
+  const { setActiveBusinessId } = useActiveBusiness()
   const [data, setData] = useState<AgencyData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'clients' | 'branding' | 'domains'>('clients')
 
   useEffect(() => {
     fetch('/api/agency')
@@ -54,7 +60,7 @@ export default function AgencyPage() {
       .catch(e => { console.error(e); setLoading(false) })
   }, [])
 
-  const stats = data?.stats || { totalClients: 0, totalMRR: 0, avgHealth: 0, atRisk: 0, totalReviews: 0 }
+  const stats = data?.stats || { totalClients: 0, avgRating: 0, avgHealth: 0, atRisk: 0, totalReviews: 0 }
 
   return (
     <div className="flex min-h-screen">
@@ -62,10 +68,51 @@ export default function AgencyPage() {
       <main className="flex-1 min-w-0 pb-20 lg:pb-0">
         <AppTopbar
           title="Agency Dashboard"
-          description="Manage all your client businesses in one place"
+          description="Manage all your client businesses and white-label agency portal in one place"
         />
         <div className="p-4 sm:p-6 space-y-6">
-          {loading ? (
+          {/* Navigation Sub-Tabs */}
+          <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+            <button
+              onClick={() => setActiveTab('clients')}
+              className={cn(
+                'px-4 py-2 text-xs font-semibold rounded-lg transition-colors',
+                activeTab === 'clients'
+                  ? 'bg-[var(--brass)] text-white'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              Client Businesses
+            </button>
+            <button
+              onClick={() => setActiveTab('branding')}
+              className={cn(
+                'px-4 py-2 text-xs font-semibold rounded-lg transition-colors',
+                activeTab === 'branding'
+                  ? 'bg-[var(--brass)] text-white'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              White-Label Branding
+            </button>
+            <button
+              onClick={() => setActiveTab('domains')}
+              className={cn(
+                'px-4 py-2 text-xs font-semibold rounded-lg transition-colors',
+                activeTab === 'domains'
+                  ? 'bg-[var(--brass)] text-white'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              Custom Domains
+            </button>
+          </div>
+
+          {activeTab === 'branding' ? (
+            <AgencyBrandingTab />
+          ) : activeTab === 'domains' ? (
+            <CustomDomainsTab />
+          ) : loading ? (
             <Card className="p-12 glass-card text-center">
               <Loader2 className="w-8 h-8 text-[var(--brass)] mx-auto mb-3 animate-spin" />
               <p className="text-sm text-muted-foreground">Loading agency data...</p>
@@ -75,10 +122,10 @@ export default function AgencyPage() {
               {/* Agency stats */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {[
-                  { label: 'Active Clients', value: (stats.totalClients || data.clients.length).toString(), sub: `${data.clients.length} total`, icon: Building2, color: 'text-blue-500' },
-                  { label: 'Monthly Revenue', value: `$${stats.totalMRR.toLocaleString()}`, sub: '87% margin', icon: DollarSign, color: 'text-green-500' },
+                  { label: 'Active Locations', value: (stats.totalClients || data.clients.length).toString(), sub: `${data.clients.length} total`, icon: Building2, color: 'text-blue-500' },
+                  { label: 'Avg Rating', value: `${(stats.avgRating || 0).toFixed(1)} ★`, sub: 'across all locations', icon: Star, color: 'text-amber-500' },
                   { label: 'Avg Health Score', value: stats.avgHealth.toString(), sub: stats.atRisk > 0 ? `${stats.atRisk} at risk` : 'All healthy', icon: TrendingUp, color: stats.atRisk > 0 ? 'text-amber-500' : 'text-[var(--brass)]' },
-                  { label: 'Reviews Managed', value: stats.totalReviews.toLocaleString(), sub: 'across all clients', icon: Star, color: 'text-purple-500' },
+                  { label: 'Reviews Managed', value: stats.totalReviews.toLocaleString(), sub: 'across all locations', icon: Star, color: 'text-purple-500' },
                 ].map(s => (
                   <Card key={s.label} className="p-4 glass-card">
                     <div className="flex items-center justify-between mb-3">
@@ -104,11 +151,8 @@ export default function AgencyPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                      <span className="text-muted-foreground">agency.localexperts.com</span>
-                    </div>
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.info('White-label config', { description: 'Custom domain, logo, and colors — coming soon' })}>Configure</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setActiveTab('branding')}>Configure Branding</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setActiveTab('domains')}>Custom Domains</Button>
                   </div>
                 </div>
               </Card>
@@ -120,9 +164,14 @@ export default function AgencyPage() {
                     <h3 className="font-display font-bold">Client Leaderboard</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">Ranked by health score · live data from database</p>
                   </div>
-                  <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)] h-8 text-xs" onClick={() => toast.info('Add client', { description: 'Invite a new client business to your agency' })}>
+                  <Button
+                    variant="outline"
+                    className="h-8 text-xs opacity-60 cursor-not-allowed"
+                    disabled
+                    title="Client onboarding is managed through your Enterprise account configuration"
+                  >
                     <Plus className="w-3.5 h-3.5 mr-1" />
-                    Add client
+                    Add client (Managed)
                   </Button>
                 </div>
 
@@ -133,10 +182,15 @@ export default function AgencyPage() {
                     data.clients.sort((a, b) => b.healthScore - a.healthScore).map((client, i) => (
                       <div
                         key={client.id}
+                        onClick={() => {
+                          setActiveBusinessId(client.id)
+                          router.push('/dashboard')
+                        }}
                         className={cn(
                           'flex items-center gap-3 p-3 rounded-lg border transition-all hover:border-[var(--brass)]/40 hover:bg-accent/30 cursor-pointer',
                           client.status === 'at-risk' ? 'border-amber-500/30 bg-amber-500/5' : 'border-border/30'
                         )}
+                        title={`Switch to ${client.name} and open dashboard`}
                       >
                         <div className="text-xs font-mono text-muted-foreground w-5">{i + 1}</div>
                         <div className={cn(
@@ -184,8 +238,8 @@ export default function AgencyPage() {
                           </div>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <div className="text-xs text-muted-foreground">MRR</div>
-                          <div className="font-bold text-sm">${client.mrr}</div>
+                          <div className="text-xs text-muted-foreground">Reviews</div>
+                          <div className="font-bold text-sm">{client.reviews}</div>
                         </div>
                         <button className="p-1.5 rounded-md hover:bg-accent transition-colors flex-shrink-0">
                           <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
@@ -201,15 +255,21 @@ export default function AgencyPage() {
                 <h3 className="font-display font-bold mb-4">Bulk Actions</h3>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   {[
-                    { label: 'Bulk assign', desc: 'Assign reviews to team', icon: Users, action: () => toast.info('Bulk assign', { description: 'Select reviews to assign' }) },
-                    { label: 'Bulk approve', desc: 'Approve pending drafts', icon: Star, action: () => router.push('/inbox') },
-                    { label: 'Bulk export', desc: 'Export client reports', icon: TrendingUp, action: () => router.push('/reviews') },
-                    { label: 'Bulk campaign', desc: 'Send across clients', icon: ChevronRight, action: () => router.push('/campaigns') },
+                    { label: 'Bulk assign', desc: 'Roadmap item — not yet available', icon: Users, disabled: true, action: () => {} },
+                    { label: 'Bulk approve', desc: 'Approve pending drafts', icon: Star, disabled: false, action: () => router.push('/inbox') },
+                    { label: 'Bulk export', desc: 'Export client reports', icon: TrendingUp, disabled: false, action: () => router.push('/reviews') },
+                    { label: 'Bulk campaign', desc: 'Send across clients', icon: ChevronRight, disabled: false, action: () => router.push('/campaigns') },
                   ].map(a => (
                     <button
                       key={a.label}
                       onClick={a.action}
-                      className="text-left p-4 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all group"
+                      disabled={a.disabled}
+                      className={cn(
+                        'text-left p-4 rounded-lg border border-border/40 transition-all group',
+                        a.disabled
+                          ? 'opacity-60 cursor-not-allowed'
+                          : 'hover:border-[var(--brass)]/40 hover:bg-accent/30 cursor-pointer'
+                      )}
                     >
                       <a.icon className="w-5 h-5 mb-2 text-[var(--brass)]" />
                       <div className="text-sm font-medium mb-0.5">{a.label}</div>

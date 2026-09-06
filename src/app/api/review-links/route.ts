@@ -3,14 +3,16 @@ import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { generateBusinessSlug } from '@/lib/review-platforms'
 
+import { Role } from '@prisma/client'
+
 export const dynamic = 'force-dynamic'
 
-// GET /api/review-links?businessId=... — list a business's configured review platform links
-// POST /api/review-links — save the full set of links for a business (replaces all)
-//   body: { businessId, slug?, links: [{ platformId?, customName?, customIconUrl?, url, enabled, sortOrder }] }
+// GET /api/review-links?businessId=... — list a business's configured review platform links & landing page settings
+// POST /api/review-links — save the full set of links and landing page customization for a business
+//   body: { businessId, slug?, links: [{ platformId?, customName?, customIconUrl?, url, enabled, sortOrder }], reviewPageTitle?, reviewPageSubtitle?, reviewPagePrivateFeedbackEnabled? }
 //
-// SEC-01: requires auth + verifies business ownership on every request.
-// This is a link-generation feature — no API access to any platform.
+// SEC-01: requires auth + verifies business ownership + role check on mutation.
+// Permitted roles for mutation: OWNER, ADMIN, AGENCY_ADMIN, CLIENT_ADMIN.
 export async function GET(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
@@ -32,7 +34,13 @@ export async function GET(request: NextRequest) {
     }),
     db.business.findUnique({
       where: { id: businessId },
-      select: { slug: true, name: true },
+      select: {
+        slug: true,
+        name: true,
+        reviewPageTitle: true,
+        reviewPageSubtitle: true,
+        reviewPagePrivateFeedbackEnabled: true,
+      },
     }),
   ])
 
@@ -48,6 +56,9 @@ export async function GET(request: NextRequest) {
     })),
     slug: business?.slug || null,
     businessName: business?.name || null,
+    reviewPageTitle: business?.reviewPageTitle || null,
+    reviewPageSubtitle: business?.reviewPageSubtitle || null,
+    reviewPagePrivateFeedbackEnabled: business?.reviewPagePrivateFeedbackEnabled ?? true,
   })
 }
 
@@ -55,12 +66,28 @@ export async function POST(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
+  // Role authorization: require OWNER, ADMIN, AGENCY_ADMIN, or CLIENT_ADMIN
+  const allowedRoles: Role[] = [Role.OWNER, Role.ADMIN, Role.AGENCY_ADMIN, Role.CLIENT_ADMIN]
+  if (!allowedRoles.includes(ctx.user.role as Role)) {
+    return NextResponse.json(
+      { error: 'Forbidden: Insufficient permissions to modify review page settings', code: 'FORBIDDEN' },
+      { status: 403 }
+    )
+  }
+
   try {
     const body = await request.json()
-    const { businessId, slug, links } = body as {
+    const {
+      businessId,
+      slug,
+      links,
+      reviewPageTitle,
+      reviewPageSubtitle,
+      reviewPagePrivateFeedbackEnabled,
+    } = body as {
       businessId: string
       slug?: string | null
-      links: Array<{
+      links?: Array<{
         platformId?: string | null
         customName?: string | null
         customIconUrl?: string | null
@@ -68,6 +95,9 @@ export async function POST(request: NextRequest) {
         enabled?: boolean
         sortOrder?: number
       }>
+      reviewPageTitle?: string | null
+      reviewPageSubtitle?: string | null
+      reviewPagePrivateFeedbackEnabled?: boolean
     }
 
     if (!businessId) {
@@ -78,25 +108,38 @@ export async function POST(request: NextRequest) {
     if (denied) return denied
 
     // Validate URLs — must be http(s) URLs, no javascript: or data:
-    for (const link of links) {
-      if (!link.url || typeof link.url !== 'string') {
-        return NextResponse.json({ error: 'All links must have a url' }, { status: 400 })
-      }
-      try {
-        const parsed = new URL(link.url)
-        if (!['http:', 'https:'].includes(parsed.protocol)) {
+    if (Array.isArray(links)) {
+      for (const link of links) {
+        if (!link.url || typeof link.url !== 'string') {
+          return NextResponse.json({ error: 'All links must have a url' }, { status: 400 })
+        }
+        try {
+          const parsed = new URL(link.url)
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return NextResponse.json(
+              { error: `Invalid URL protocol: ${parsed.protocol}. Only http/https allowed.` },
+              { status: 400 },
+            )
+          }
+        } catch {
           return NextResponse.json(
-            { error: `Invalid URL protocol: ${parsed.protocol}. Only http/https allowed.` },
+            { error: `Invalid URL: ${link.url}` },
             { status: 400 },
           )
         }
-      } catch {
-        return NextResponse.json(
-          { error: `Invalid URL: ${link.url}` },
-          { status: 400 },
-        )
       }
     }
+
+    // Clean and sanitize text fields
+    const cleanTitle = typeof reviewPageTitle === 'string'
+      ? reviewPageTitle.trim().slice(0, 120)
+      : (reviewPageTitle === null ? null : undefined)
+    const cleanSubtitle = typeof reviewPageSubtitle === 'string'
+      ? reviewPageSubtitle.trim().slice(0, 250)
+      : (reviewPageSubtitle === null ? null : undefined)
+    const cleanFeedbackEnabled = typeof reviewPagePrivateFeedbackEnabled === 'boolean'
+      ? reviewPagePrivateFeedbackEnabled
+      : undefined
 
     // If a slug is provided, normalize it and ensure uniqueness
     let normalizedSlug: string | null = null
@@ -120,26 +163,42 @@ export async function POST(request: NextRequest) {
     }
 
     await db.$transaction(async (tx) => {
-      await tx.reviewPlatformLink.deleteMany({ where: { businessId } })
+      if (Array.isArray(links)) {
+        await tx.reviewPlatformLink.deleteMany({ where: { businessId } })
 
-      if (links.length > 0) {
-        await tx.reviewPlatformLink.createMany({
-          data: links.map((link, index) => ({
-            businessId,
-            platformId: link.platformId || null,
-            customName: link.customName || null,
-            customIconUrl: link.customIconUrl || null,
-            url: link.url,
-            enabled: link.enabled ?? true,
-            sortOrder: link.sortOrder ?? index,
-          })),
-        })
+        if (links.length > 0) {
+          await tx.reviewPlatformLink.createMany({
+            data: links.map((link, index) => ({
+              businessId,
+              platformId: link.platformId || null,
+              customName: link.customName || null,
+              customIconUrl: link.customIconUrl || null,
+              url: link.url,
+              enabled: link.enabled ?? true,
+              sortOrder: link.sortOrder ?? index,
+            })),
+          })
+        }
       }
 
+      const businessUpdateData: Record<string, any> = {}
       if (normalizedSlug !== null || slug === null) {
+        businessUpdateData.slug = normalizedSlug
+      }
+      if (cleanTitle !== undefined) {
+        businessUpdateData.reviewPageTitle = cleanTitle
+      }
+      if (cleanSubtitle !== undefined) {
+        businessUpdateData.reviewPageSubtitle = cleanSubtitle
+      }
+      if (cleanFeedbackEnabled !== undefined) {
+        businessUpdateData.reviewPagePrivateFeedbackEnabled = cleanFeedbackEnabled
+      }
+
+      if (Object.keys(businessUpdateData).length > 0) {
         await tx.business.update({
           where: { id: businessId },
-          data: { slug: normalizedSlug },
+          data: businessUpdateData,
         })
       }
     })
@@ -151,7 +210,12 @@ export async function POST(request: NextRequest) {
       }),
       db.business.findUnique({
         where: { id: businessId },
-        select: { slug: true },
+        select: {
+          slug: true,
+          reviewPageTitle: true,
+          reviewPageSubtitle: true,
+          reviewPagePrivateFeedbackEnabled: true,
+        },
       }),
     ])
 
@@ -163,8 +227,10 @@ export async function POST(request: NextRequest) {
         targetId: businessId,
         metadata: JSON.stringify({
           businessId,
-          linkCount: links.length,
+          linkCount: Array.isArray(links) ? links.length : savedLinks.length,
           slug: normalizedSlug,
+          customTitle: cleanTitle,
+          privateFeedbackEnabled: cleanFeedbackEnabled,
         }),
       },
     })
@@ -181,6 +247,9 @@ export async function POST(request: NextRequest) {
         sortOrder: l.sortOrder,
       })),
       slug: updatedBusiness?.slug || null,
+      reviewPageTitle: updatedBusiness?.reviewPageTitle || null,
+      reviewPageSubtitle: updatedBusiness?.reviewPageSubtitle || null,
+      reviewPagePrivateFeedbackEnabled: updatedBusiness?.reviewPagePrivateFeedbackEnabled ?? true,
       reviewUsUrl: updatedBusiness?.slug
         ? `/review-us/${updatedBusiness.slug}`
         : null,

@@ -1,17 +1,39 @@
 // lib/integrations/resend.ts — Real email integration via Resend
 // Requires env var: RESEND_API_KEY
 
+export interface EmailAttachment {
+  filename: string
+  content: Buffer | string
+  contentType?: string
+}
+
 export async function sendEmail(params: {
   to: string
   subject: string
   html?: string
   text?: string
   from?: string
+  replyTo?: string
+  attachments?: EmailAttachment[]
 }): Promise<{
   success: boolean
   messageId?: string
   error?: string
 }> {
+  // Deterministic mock seam for testing
+  if (process.env.TEST_MOCK_EMAIL === 'true') {
+    if (params.to.includes('fail') || params.to.includes('error')) {
+      return {
+        success: false,
+        error: `Simulated delivery failure for recipient ${params.to}`,
+      }
+    }
+    return {
+      success: true,
+      messageId: `msg_mock_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    }
+  }
+
   const apiKey = process.env.RESEND_API_KEY
   const defaultFrom = process.env.RESEND_FROM_EMAIL || 'ReviewReply <noreply@reviewreply.pw>'
 
@@ -23,6 +45,12 @@ export async function sendEmail(params: {
   }
 
   try {
+    const formattedAttachments = params.attachments?.map((att) => ({
+      filename: att.filename,
+      content: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,
+      content_type: att.contentType,
+    }))
+
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -35,6 +63,8 @@ export async function sendEmail(params: {
         subject: params.subject,
         html: params.html,
         text: params.text,
+        reply_to: params.replyTo,
+        ...(formattedAttachments && formattedAttachments.length > 0 ? { attachments: formattedAttachments } : {}),
       }),
     })
 
@@ -51,7 +81,7 @@ export async function sendEmail(params: {
 }
 
 export function isResendConfigured(): boolean {
-  return !!process.env.RESEND_API_KEY
+  return !!process.env.RESEND_API_KEY || process.env.TEST_MOCK_EMAIL === 'true'
 }
 
 // Generate an HTML email for review requests
@@ -140,13 +170,58 @@ ${resetUrl}
 If you did not request a password reset, you can safely ignore this email.`
 
   if (!isResendConfigured()) {
-    console.log(`[DEV] Password reset link for ${email}: ${resetUrl}`)
+    console.log('[EMAIL] Password reset requested (Resend unconfigured)')
     return { success: true }
   }
 
   const result = await sendEmail({
     to: email,
     subject: 'Reset your ReviewReply password',
+    html,
+    text,
+  })
+
+  return { success: result.success, error: result.error }
+}
+
+// Generate and send verification OTP email
+export async function sendOtpEmail(email: string, otpCode: string): Promise<{ success: boolean; error?: string }> {
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 20px; background: #f9f9f9;">
+  <div style="background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e5e5e5;">
+    <h1 style="font-size: 20px; color: #1a1a1a; margin: 0 0 16px 0;">Your Verification Code</h1>
+    <p style="font-size: 15px; color: #4a4a4a; line-height: 1.6; margin: 0 0 24px 0;">
+      Use the verification code below to complete your sign-in to ReviewReply. This code will expire in 10 minutes.
+    </p>
+    <div style="background: #f4f4f5; border-radius: 8px; padding: 16px; text-align: center; margin: 0 0 24px 0;">
+      <span style="font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #18181b; font-family: monospace;">${otpCode}</span>
+    </div>
+    <p style="font-size: 13px; color: #777777; line-height: 1.5; margin: 0 0 16px 0;">
+      If you did not request this verification code, please ignore this email. Never share this code with anyone.
+    </p>
+    <p style="font-size: 12px; color: #999999; line-height: 1.5; margin: 24px 0 0 0; padding-top: 16px; border-top: 1px solid #f0f0f0;">
+      ReviewReply Enterprise Security
+    </p>
+  </div>
+</body>
+</html>`
+
+  const text = `Your ReviewReply verification code is: ${otpCode}\n\nThis code will expire in 10 minutes. If you did not request this, you can safely ignore this email.`
+
+  if (!isResendConfigured()) {
+    console.log('[EMAIL] Verification OTP generated (Resend unconfigured)')
+    return { success: true }
+  }
+
+  const result = await sendEmail({
+    to: email,
+    subject: 'Your ReviewReply verification code',
     html,
     text,
   })

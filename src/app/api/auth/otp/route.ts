@@ -1,26 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { Role } from '@prisma/client'
 import { createSession, SessionUser } from '@/lib/auth'
 import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { sendOtpEmail } from '@/lib/integrations/resend'
 
 export const dynamic = 'force-dynamic'
 
-// In-memory OTP store (in production, use Redis with 10-minute TTL)
-const otpStore = new Map<string, { code: string; expires: number; name?: string; businessName?: string; isNewUser?: boolean }>()
-
 function generateOTP(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString()
+  // Cryptographically secure 6-digit numeric OTP
+  return crypto.randomInt(100000, 1000000).toString()
+}
+
+function hashOTP(code: string): string {
+  return crypto.createHash('sha256').update(code.trim()).digest('hex')
 }
 
 // POST /api/auth/otp — Send or verify OTP
 //
 // SEC-04: Rate-limited to prevent abuse:
 //   - Send:    max 3 per email per 10 minutes (prevents email bombing via OTP)
-//   - Verify:  max 5 per email per 10 minutes (prevents OTP brute-forcing —
-//              a 6-digit code has 1M combinations; 5 attempts in 10 min means
-//              even a sustained attacker needs ~14 days to brute-force, and
-//              the code rotates every 10 min anyway)
+//   - Verify:  max 5 per email per 10 minutes (prevents OTP brute-forcing)
 //
 // Rate-limit key is the email (lowercased) so a single attacker cannot
 // rotate IPs to bypass — they'd need to control many email addresses.
@@ -59,43 +60,61 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Generate 6-digit OTP
+      // Generate cryptographically secure 6-digit OTP
       const code = generateOTP()
-      const expires = Date.now() + 10 * 60 * 1000 // 10 minutes
+      const otpHash = hashOTP(code)
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
 
       // Check if user exists
       const existingUser = await db.user.findUnique({ where: { email: normalizedEmail } })
       const isNewUser = !existingUser
 
-      otpStore.set(normalizedEmail, {
-        code,
-        expires,
-        name: name || existingUser?.name || undefined,
-        businessName: businessName || undefined,
-        isNewUser,
+      // Invalidate any previous unconsumed OTPs for this email
+      await db.emailOtp.deleteMany({
+        where: { email: normalizedEmail },
       })
 
-      // In production, send the OTP via email (Resend)
-      // For dev: log it server-side so it can be viewed in terminal
-      console.log(`[OTP] ${normalizedEmail}: ${code}`)
+      // Store hashed OTP in PostgreSQL across all serverless instances
+      await db.emailOtp.create({
+        data: {
+          email: normalizedEmail,
+          otpHash,
+          expiresAt,
+          isNewUser,
+          name: name || existingUser?.name || null,
+          businessName: businessName || null,
+        },
+      })
+
+      // Dispatch OTP email via Resend
+      const emailRes = await sendOtpEmail(normalizedEmail, code)
+      if (!emailRes.success) {
+        console.warn(`[OTP] Email delivery warning for ${normalizedEmail}: ${emailRes.error}`)
+      }
+
+      // Audit log (without logging the plaintext OTP code)
+      await db.auditLog.create({
+        data: {
+          action: 'auth.otp_sent',
+          targetType: 'user',
+          targetId: normalizedEmail,
+          metadata: JSON.stringify({ email: normalizedEmail, isNewUser }),
+        },
+      })
 
       return NextResponse.json({
-        message: isNewUser
-          ? 'OTP sent! Check the server console (dev mode) or your email (production).'
-          : 'OTP sent! Check the server console (dev mode) or your email (production).',
+        message: 'Verification code sent. Please check your email.',
         isNewUser,
       })
     }
 
     if (action === 'verify') {
       const { code } = body
-      if (!code) {
+      if (!code || typeof code !== 'string') {
         return NextResponse.json({ error: 'OTP code is required' }, { status: 400 })
       }
 
-      // SEC-04: Rate-limit OTP verify (5 per email per 10 min) — applies
-      // REGARDLESS of whether the OTP exists, so an attacker can't probe
-      // which emails have pending OTPs by counting different error messages.
+      // SEC-04: Rate-limit OTP verify (5 per email per 10 min)
       const rl = await rateLimit(
         `otp:verify:${normalizedEmail}`,
         RATE_LIMITS.otpVerify.limit,
@@ -117,22 +136,42 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const stored = otpStore.get(normalizedEmail)
+      // Find the latest active OTP for this email
+      const stored = await db.emailOtp.findFirst({
+        where: { email: normalizedEmail, consumedAt: null },
+        orderBy: { createdAt: 'desc' },
+      })
+
       if (!stored) {
         return NextResponse.json({ error: 'No OTP found. Please request a new one.' }, { status: 400 })
       }
 
-      if (Date.now() > stored.expires) {
-        otpStore.delete(normalizedEmail)
+      // Expiry check
+      if (new Date() > stored.expiresAt) {
+        await db.emailOtp.delete({ where: { id: stored.id } })
         return NextResponse.json({ error: 'OTP expired. Please request a new one.' }, { status: 400 })
       }
 
-      if (code !== stored.code) {
+      // Maximum attempts guard per OTP code
+      if (stored.attempts >= 5) {
+        await db.emailOtp.delete({ where: { id: stored.id } })
+        return NextResponse.json({ error: 'Too many failed attempts. Please request a new code.' }, { status: 400 })
+      }
+
+      // Hash comparison
+      const incomingHash = hashOTP(code)
+      if (incomingHash !== stored.otpHash) {
+        await db.emailOtp.update({
+          where: { id: stored.id },
+          data: { attempts: { increment: 1 } },
+        })
         return NextResponse.json({ error: 'Invalid OTP code' }, { status: 400 })
       }
 
-      // OTP verified — create or find user, create session
-      otpStore.delete(normalizedEmail)
+      // OTP verified — atomically delete to guarantee single-use and prevent replay
+      await db.emailOtp.delete({
+        where: { id: stored.id },
+      })
 
       let user = await db.user.findUnique({
         where: { email: normalizedEmail },

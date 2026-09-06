@@ -19,8 +19,8 @@ const POSTS: Record<string, { title: string; excerpt: string; category: string; 
     readTime: '7 min',
     content: [
       'For the past two years, businesses have experimented with AI-generated review replies. The results have been underwhelming — customers can spot a ChatGPT reply from a mile away. The tone is generic, the structure is predictable, and the personalization is shallow.',
-      'In 2026, a new approach is emerging: brand-voice-trained AI. Instead of using a generic prompt, the AI is fine-tuned on each business\'s historical replies — learning their tone, length, signature phrases, and escalation rules. The result is drafts that sound like the owner wrote them.',
-      'At ReviewReply, we use GLM-4.6 (via z-ai-web-dev-sdk) with a per-business brand voice profile. The profile is built from your last 50–200 approved replies and is encrypted at rest. Every draft is generated using this profile as the system prompt, plus 5-shot examples from your best replies.',
+      'In 2026, a new approach is emerging: brand-voice-trained AI. Instead of using a generic prompt, the AI learns from each business\'s historical replies — adapting to their tone, length, signature phrases, and escalation rules. The result is drafts that sound like the owner wrote them.',
+      'At ReviewReply, we use the ReviewReply AI Engine with a per-business brand voice profile. The profile is built from your last 50–200 approved replies and is protected at rest. Every draft is generated using this profile as the context prompt, plus 5-shot examples from your best replies.',
       'The results speak for themselves: businesses using brand-voice-trained AI see a 94% draft approval rate (vs 31% for generic AI), and customers report that replies feel "personal" and "authentic" — even when they know AI was involved.',
       'If you are still copy-pasting from ChatGPT, you are leaving time on the table and risking customer trust. Brand-voice AI is now table stakes for any serious review management workflow.',
     ],

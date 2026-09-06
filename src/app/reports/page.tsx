@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { NewReportModal, EditReportModal } from '@/components/app/admin-modals'
 import { Card } from '@/components/ui/card'
@@ -9,10 +9,11 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   FileText, Clock, Download, Plus, Mail, Calendar, TrendingUp, Star,
-  Users, MessageSquare, Target, BarChart3, Send, Loader2,
+  Users, MessageSquare, Target, BarChart3, Send, Loader2, RefreshCw, AlertCircle, Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useActiveBusiness } from '@/lib/business-context'
 
 interface ScheduledReportItem {
   id: string
@@ -25,14 +26,48 @@ interface ScheduledReportItem {
   createdAt: string
 }
 
+interface ExecutiveAnalyticsData {
+  hasBusiness: boolean
+  businessId: string | null
+  businessName: string | null
+  isOrgWide: boolean
+  totalReviews: number
+  avgRating: number
+  responseRate: number
+  customerNps: number
+  ratingsBreakdown: Record<number, number>
+  periodComparison: {
+    totalReviewsChange: string
+    avgRatingChange: string
+    responseRateChange: string
+    npsChange: string
+  }
+  velocity: Array<{
+    weekNumber: number
+    weekLabel: string
+    startDate: string
+    endDate: string
+    count: number
+  }>
+  trendBadge: string
+  summary: string
+}
+
 export default function ReportsPage() {
+  const { businesses, activeBusiness, activeBusinessId } = useActiveBusiness()
   const [reports, setReports] = useState<ScheduledReportItem[]>([])
   const [loading, setLoading] = useState(true)
   const [newReportOpen, setNewReportOpen] = useState(false)
   const [editReport, setEditReport] = useState<{ id: string; name: string; schedule: string; status: string; recipients: string[]; format: string } | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  const fetchReports = async () => {
+  // Executive analytics state
+  const [executiveData, setExecutiveData] = useState<ExecutiveAnalyticsData | null>(null)
+  const [loadingExecutive, setLoadingExecutive] = useState(true)
+  const [executiveError, setExecutiveError] = useState<string | null>(null)
+  const [executiveScope, setExecutiveScope] = useState<'active' | 'all'>('active')
+
+  const fetchReports = useCallback(async () => {
     try {
       const res = await fetch('/api/reports')
       const data = await res.json()
@@ -42,14 +77,99 @@ export default function ReportsPage() {
     } catch (e) {
       console.error('Failed to fetch reports:', e)
       toast.error('Failed to load reports')
-    } finally {
-      setLoading(false)
     }
-  }
+  }, [])
+
+  const handleRefreshExecutive = useCallback(async () => {
+    setLoadingExecutive(true)
+    setExecutiveError(null)
+    try {
+      const targetBizId = executiveScope === 'active' ? activeBusinessId : null
+      const url = targetBizId
+        ? `/api/reports/executive?businessId=${encodeURIComponent(targetBizId)}`
+        : '/api/reports/executive'
+
+      const res = await fetch(url)
+      const data = await res.json()
+      if (res.ok) {
+        setExecutiveData(data)
+      } else {
+        setExecutiveError(data.error || 'Failed to load executive analytics')
+      }
+    } catch (e) {
+      console.error('Failed to fetch executive analytics:', e)
+      setExecutiveError('Network error loading executive analytics')
+    } finally {
+      setLoadingExecutive(false)
+    }
+  }, [activeBusinessId, executiveScope])
 
   useEffect(() => {
-    fetchReports()
+    let isCancelled = false
+
+    async function loadReports() {
+      try {
+        const res = await fetch('/api/reports')
+        const data = await res.json()
+        if (!isCancelled && res.ok && Array.isArray(data.reports)) {
+          setReports(data.reports)
+        }
+      } catch (e) {
+        console.error('Failed to fetch reports:', e)
+        if (!isCancelled) {
+          toast.error('Failed to load reports')
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadReports()
+    return () => {
+      isCancelled = true
+    }
   }, [])
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadExecutive() {
+      try {
+        const targetBizId = executiveScope === 'active' ? activeBusinessId : null
+        const url = targetBizId
+          ? `/api/reports/executive?businessId=${encodeURIComponent(targetBizId)}`
+          : '/api/reports/executive'
+
+        const res = await fetch(url)
+        const data = await res.json()
+        if (!isCancelled) {
+          if (res.ok) {
+            setExecutiveData(data)
+          } else {
+            setExecutiveError(data.error || 'Failed to load executive analytics')
+          }
+        }
+      } catch (e) {
+        if (!isCancelled) {
+          console.error('Failed to fetch executive analytics:', e)
+          setExecutiveError('Network error loading executive analytics')
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingExecutive(false)
+        }
+      }
+    }
+
+    loadExecutive()
+    return () => {
+      isCancelled = true
+    }
+  }, [activeBusinessId, executiveScope])
+
+
 
   const handleToggleStatus = async (report: ScheduledReportItem) => {
     const newStatus = report.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
@@ -265,60 +385,196 @@ export default function ReportsPage() {
             </TabsContent>
 
             <TabsContent value="executive">
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                  <h3 className="font-display font-bold">Executive Analytics</h3>
-                  <p className="text-xs text-muted-foreground">Aggregated cross-location performance insights</p>
-                </div>
-                <Badge variant="outline" className="text-[10px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
-                  Stage 3 Roadmap Preview
-                </Badge>
-              </div>
-
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-                {[
-                  { label: 'Total Reviews', value: '1,247', change: '+12%', icon: Star },
-                  { label: 'Avg Rating', value: '4.6', change: '+0.3', icon: TrendingUp },
-                  { label: 'Response Rate', value: '87%', change: '+5%', icon: MessageSquare },
-                  { label: 'Customer NPS', value: '+42', change: '+8', icon: Target },
-                ].map(s => (
-                  <Card key={s.label} className="p-4 glass-card">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">{s.label}</span>
-                      <s.icon className="w-3.5 h-3.5 text-[var(--brass)]" />
-                    </div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-display text-2xl font-bold">{s.value}</span>
-                      <span className="text-[10px] text-green-500 font-mono">{s.change}</span>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-
-              <Card className="p-5 glass-card mb-4">
-                <div className="flex items-center justify-between mb-5">
-                  <div>
-                    <h3 className="font-display font-bold">Review Velocity</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">Reviews received per week · sample trajectory</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-display font-bold">Executive Analytics</h3>
+                    {executiveData?.trendBadge && (
+                      <Badge variant="outline" className={cn(
+                        'text-[10px] font-mono py-0',
+                        executiveData.trendBadge === 'Trending up' ? 'text-green-500 border-green-500/30 bg-green-500/10' :
+                        executiveData.trendBadge === 'Pacing down' ? 'text-amber-500 border-amber-500/30 bg-amber-500/10' :
+                        'text-muted-foreground border-border'
+                      )}>
+                        {executiveData.trendBadge === 'Trending up' && <TrendingUp className="w-3 h-3 mr-1 inline" />}
+                        {executiveData.trendBadge}
+                      </Badge>
+                    )}
                   </div>
-                  <Badge variant="outline" className="text-[10px] font-mono text-green-500 border-green-500/30">
-                    <TrendingUp className="w-3 h-3 mr-1" />
-                    Trending up
-                  </Badge>
+                  <p className="text-xs text-muted-foreground">
+                    {executiveScope === 'active' && activeBusiness
+                      ? `Performance metrics for ${activeBusiness.name}`
+                      : 'Aggregated cross-location performance insights'}
+                  </p>
                 </div>
-                <div className="flex items-end gap-1.5 h-32">
-                  {[35, 42, 38, 51, 48, 62, 58, 71, 65, 78, 82, 89].map((h, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1 group cursor-pointer">
-                      <div className="text-[9px] font-mono opacity-0 group-hover:opacity-100 transition-opacity">{h}</div>
-                      <div
-                        className="w-full rounded-t bg-gradient-to-t from-[var(--brass-dark)] to-[var(--brass)] transition-all hover:opacity-80"
-                        style={{ height: `${(h / 89) * 100}%` }}
-                      />
-                      <div className="text-[8px] text-muted-foreground font-mono">W{i + 1}</div>
+
+                <div className="flex items-center gap-2">
+                  {businesses.length > 1 && (
+                    <div className="flex p-0.5 glass-card rounded-lg text-xs">
+                      <button
+                        onClick={() => setExecutiveScope('active')}
+                        className={cn(
+                          'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1',
+                          executiveScope === 'active'
+                            ? 'bg-[var(--brass)] text-white shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <Building2 className="w-3 h-3" />
+                        Active Location
+                      </button>
+                      <button
+                        onClick={() => setExecutiveScope('all')}
+                        className={cn(
+                          'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1',
+                          executiveScope === 'all'
+                            ? 'bg-[var(--brass)] text-white shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <Users className="w-3 h-3" />
+                        All Locations
+                      </button>
                     </div>
-                  ))}
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs glass-card"
+                    onClick={handleRefreshExecutive}
+                    disabled={loadingExecutive}
+                  >
+                    <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', loadingExecutive && 'animate-spin')} />
+                    Refresh
+                  </Button>
                 </div>
-              </Card>
+              </div>
+
+              {loadingExecutive ? (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <Card key={i} className="p-4 glass-card animate-pulse">
+                        <div className="h-3 w-20 bg-muted/40 rounded mb-3" />
+                        <div className="h-7 w-16 bg-muted/30 rounded" />
+                      </Card>
+                    ))}
+                  </div>
+                  <Card className="p-5 glass-card animate-pulse">
+                    <div className="h-4 w-32 bg-muted/40 rounded mb-2" />
+                    <div className="h-3 w-48 bg-muted/20 rounded mb-6" />
+                    <div className="h-32 bg-muted/10 rounded" />
+                  </Card>
+                </div>
+              ) : executiveError ? (
+                <Card className="p-8 glass-card text-center">
+                  <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
+                  <h4 className="font-semibold text-sm mb-1">Failed to load executive analytics</h4>
+                  <p className="text-xs text-muted-foreground mb-4">{executiveError}</p>
+                  <Button size="sm" variant="outline" onClick={handleRefreshExecutive}>Try Again</Button>
+                </Card>
+              ) : executiveData && executiveData.totalReviews === 0 ? (
+                <Card className="p-12 glass-card text-center mb-4">
+                  <MessageSquare className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                  <h4 className="font-display font-bold text-base mb-1">No reviews analyzed yet</h4>
+                  <p className="text-xs text-muted-foreground max-w-md mx-auto mb-4">
+                    {executiveScope === 'active' && activeBusiness
+                      ? `No reviews recorded for "${activeBusiness.name}". Ingest or import reviews to generate live response rate, Net Promoter Score, and velocity trajectories.`
+                      : 'No reviews recorded in your organization. Connect a platform or import reviews to begin viewing executive insights.'}
+                  </p>
+                </Card>
+              ) : executiveData ? (
+                <>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                    {[
+                      {
+                        label: 'Total Reviews',
+                        value: executiveData.totalReviews.toLocaleString(),
+                        change: executiveData.periodComparison.totalReviewsChange,
+                        icon: Star,
+                        desc: 'vs prior 30 days',
+                      },
+                      {
+                        label: 'Avg Rating',
+                        value: `${executiveData.avgRating.toFixed(1)}★`,
+                        change: executiveData.periodComparison.avgRatingChange,
+                        icon: TrendingUp,
+                        desc: 'vs prior 30 days',
+                      },
+                      {
+                        label: 'Response Rate',
+                        value: `${executiveData.responseRate}%`,
+                        change: executiveData.periodComparison.responseRateChange,
+                        icon: MessageSquare,
+                        desc: 'replied reviews',
+                      },
+                      {
+                        label: 'Customer NPS',
+                        value: `${executiveData.customerNps > 0 ? '+' : ''}${executiveData.customerNps}`,
+                        change: `${executiveData.ratingsBreakdown[5] || 0} promoters`,
+                        icon: Target,
+                        desc: '5★ vs 1-3★ rating ratio',
+                      },
+                    ].map(s => (
+                      <Card key={s.label} className="p-4 glass-card">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">{s.label}</span>
+                          <s.icon className="w-3.5 h-3.5 text-[var(--brass)]" />
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-display text-2xl font-bold">{s.value}</span>
+                          <span className="text-[10px] text-green-500 font-mono">{s.change}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">{s.desc}</p>
+                      </Card>
+                    ))}
+                  </div>
+
+                  <Card className="p-5 glass-card mb-4">
+                    <div className="flex items-center justify-between mb-5">
+                      <div>
+                        <h3 className="font-display font-bold">Review Velocity</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Weekly review volume across the past 12 weeks · derived from active review records
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] font-mono text-[var(--brass)] border-[var(--brass)]/30">
+                        12-Week Trajectory
+                      </Badge>
+                    </div>
+
+                    {executiveData.velocity.length > 0 ? (
+                      (() => {
+                        const maxCount = Math.max(...executiveData.velocity.map(v => v.count), 1)
+                        return (
+                          <div className="flex items-end gap-1.5 h-36 pt-4">
+                            {executiveData.velocity.map((v) => (
+                              <div
+                                key={v.weekNumber}
+                                className="flex-1 flex flex-col items-center gap-1 group cursor-pointer relative"
+                                title={`Week ${v.weekNumber}: ${v.count} review${v.count === 1 ? '' : 's'}`}
+                              >
+                                <div className="text-[9px] font-mono opacity-0 group-hover:opacity-100 transition-opacity absolute -top-5 text-[var(--brass)] font-bold">
+                                  {v.count}
+                                </div>
+                                <div
+                                  className="w-full rounded-t bg-gradient-to-t from-[var(--brass-dark)] to-[var(--brass)] transition-all group-hover:opacity-80 min-h-[4px]"
+                                  style={{ height: `${Math.max((v.count / maxCount) * 100, 4)}%` }}
+                                />
+                                <div className="text-[8px] text-muted-foreground font-mono">{v.weekLabel}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()
+                    ) : (
+                      <div className="py-8 text-center text-xs text-muted-foreground">
+                        No velocity data recorded in this time range.
+                      </div>
+                    )}
+                  </Card>
+                </>
+              ) : null}
             </TabsContent>
 
             <TabsContent value="history">

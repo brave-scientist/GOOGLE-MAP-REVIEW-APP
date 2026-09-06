@@ -72,7 +72,7 @@ export default function AboutPage() {
         <section>
           <h2 className="text-2xl font-bold text-foreground mb-3">Our Approach to AI</h2>
           <p className="text-base leading-relaxed">
-            We use GLM-4.6 (via z-ai-web-dev-sdk) for our AI draft generation. Unlike competitors who use generic ChatGPT prompts, we train a per-business brand voice profile from your past 50–200 approved replies. This produces drafts that sound like you wrote them — not like a chatbot.
+            We use the ReviewReply AI Engine for our AI draft generation. Unlike competitors who use generic prompts, we build a tailored brand voice profile from your approved past replies and business guidelines. This produces drafts that sound like you wrote them — not like a chatbot.
           </p>
           <p className="mt-3 text-base leading-relaxed">
             We believe AI should augment humans, not replace them. Every AI draft goes through an approval workflow. You can edit, regenerate, or reject. We never auto-post negative review replies — those always require human review.

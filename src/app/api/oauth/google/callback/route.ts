@@ -1,63 +1,103 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { exchangeCodeForTokens } from '@/lib/integrations/google-business-profile'
+import {
+  exchangeCodeForTokens,
+  getGBPStateFromRequest,
+  clearGBPStateCookie,
+  consumeGBPTransaction,
+  listGoogleAccounts,
+  listGoogleLocations,
+} from '@/lib/integrations/google-business-profile'
 import { storeTokens } from '@/lib/oauth-store'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
-// GET /api/oauth/google/callback — Handle OAuth callback from Google
+// GET /api/oauth/google/callback — Handle OAuth callback from Google Business Profile
 //
-// Flow: Google redirects here with ?code=...&state=businessId. We exchange the
-// code for tokens and store them against the businessId from state.
-//
-// SEC-01: We MUST verify the logged-in user owns the businessId from state
-// before storing tokens. Otherwise an attacker could initiate OAuth with their
-// own Google account but use state=victim_business_id, then this callback
-// would store the attacker's tokens against the victim's business — letting
-// the attacker sync (and read) the victim's reviews via their own Google
-// credentials, OR overwrite the victim's Google connection.
-//
-// The session cookie is still present because OAuth redirects happen in the
-// user's browser, so we can read it here.
+// Cryptographic state lifecycle & security invariants:
+// 1. Google redirects with ?code=...&state=...
+// 2. We read and decrypt the JWE-encrypted rr_oauth_gbp_state cookie (AES-256-GCM).
+// 3. We verify query.state === storedTx.state (CSRF prevention).
+// 4. We verify the session user matches the initiating user: ctx.user.id === storedTx.userId.
+// 5. We atomically consume the transaction to enforce single-use semantics and block replays.
+// 6. We recover businessId STRICTLY from storedTx.businessId (NEVER trust query state).
+// 7. We assert caller's org ownership of businessId (IDOR defense in depth).
+// 8. We exchange code + codeVerifier with Google using S256 PKCE.
+// 9. We store encrypted tokens in OAuthToken and clear the state cookie.
 export async function GET(request: NextRequest) {
+  const origin = new URL(request.url).origin
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
-  const state = searchParams.get('state') // businessId
+  const state = searchParams.get('state')
   const error = searchParams.get('error')
 
+  // Read and decrypt the encrypted state transaction from the HttpOnly cookie early to determine returnTo
+  const storedTx = await getGBPStateFromRequest(request)
+  const basePath = storedTx?.returnTo === '/onboarding' ? '/onboarding' : '/settings'
+
+  const fallbackRedirect = (errCode: string) => {
+    const res = NextResponse.redirect(new URL(`${basePath}?error=${encodeURIComponent(errCode)}`, origin))
+    clearGBPStateCookie(res)
+    return res
+  }
+
   if (error) {
-    return NextResponse.redirect(new URL('/settings?error=google_oauth_denied', request.url))
+    return fallbackRedirect(error === 'access_denied' ? 'google_oauth_denied' : 'google_oauth_failed')
   }
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/settings?error=google_oauth_failed', request.url))
+    return fallbackRedirect('missing_oauth_parameters')
   }
 
-  // SEC-01: require auth — the user must still be logged in when Google redirects back
+  if (!storedTx) {
+    console.error('[GBP OAuth] State cookie missing, expired, or failed decryption')
+    return fallbackRedirect('oauth_state_missing_or_expired')
+  }
+
+  // 1. Validate returned state matches cryptographically stored state (CSRF check)
+  if (storedTx.state !== state) {
+    console.error('[GBP OAuth] State parameter mismatch detected')
+    return fallbackRedirect('oauth_state_mismatch')
+  }
+
+  // 2. SEC-01: User session validation — user must still be logged in
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) {
-    // Not authenticated — redirect to login with a return path
-    return NextResponse.redirect(new URL('/login?error=session_expired', request.url))
+    return NextResponse.redirect(new URL('/login?error=session_expired', origin))
   }
 
-  const businessId = state
+  // 3. User binding check — session user must be the exact user who initiated the flow
+  if (storedTx.userId !== ctx.user.id) {
+    console.error('[GBP OAuth] User mismatch: initiating user does not match callback session')
+    return fallbackRedirect('oauth_user_mismatch')
+  }
 
-  // SEC-01: verify the caller's org owns this business
+  // 4. Single-use atomic consumption — prevents replay attacks and race conditions
+  const claimed = await consumeGBPTransaction(storedTx.state)
+  if (!claimed) {
+    console.error('[GBP OAuth] Transaction already consumed or concurrent callback attempt')
+    return fallbackRedirect('oauth_transaction_already_consumed')
+  }
+
+  // 5. CRITICAL: businessId is recovered STRICTLY from trusted transaction state!
+  const businessId = storedTx.businessId
+
+  // 6. SEC-01: verify the caller's org owns this business
   const denied = assertBusinessOwnership(ctx, businessId)
   if (denied) {
-    return NextResponse.redirect(new URL('/settings?error=business_not_authorized', request.url))
+    return fallbackRedirect('business_not_authorized')
   }
 
   try {
-    const redirectUri = `${new URL('/api/oauth/google/callback', request.url).origin}/api/oauth/google/callback`
-    const tokens = await exchangeCodeForTokens(code, redirectUri)
+    const redirectUri = `${origin}/api/oauth/google/callback`
+    const tokens = await exchangeCodeForTokens(code, redirectUri, storedTx.codeVerifier)
 
     if (!tokens) {
-      return NextResponse.redirect(new URL('/settings?error=google_token_failed', request.url))
+      return fallbackRedirect('google_token_failed')
     }
 
-    // Store tokens in the encrypted OAuthToken table (NOT in googleLocationId)
+    // Store tokens in the encrypted OAuthToken table
     await storeTokens({
       businessId,
       provider: 'google',
@@ -67,11 +107,101 @@ export async function GET(request: NextRequest) {
       scopes: 'https://www.googleapis.com/auth/business.manage',
     })
 
-    // Mark business as Google-connected
+    // Discover accounts and locations
+    try {
+      const accounts = await listGoogleAccounts(tokens.access_token)
+      let foundLocations: any[] = []
+      for (const account of accounts) {
+        try {
+          const locs = await listGoogleLocations(tokens.access_token, account.id || account.name)
+          foundLocations.push(...locs)
+        } catch (locErr) {
+          console.warn('[GBP OAuth] Location discovery error for account:', locErr)
+        }
+      }
+
+      if (foundLocations.length === 1) {
+        const loc = foundLocations[0]
+
+        // SEC-COLLISION: check if location is already connected to another organization
+        const conflictingBusiness = await db.business.findFirst({
+          where: {
+            googleLocationId: loc.id,
+            id: { not: businessId },
+            orgId: { not: ctx.orgId },
+          },
+          select: { id: true, orgId: true },
+        })
+
+        if (conflictingBusiness) {
+          console.warn(`[GBP OAuth] Discovered location ${loc.id} is already attached to another organization`)
+          await db.business.update({
+            where: { id: businessId },
+            data: {
+              googleLocationId: 'google_connected',
+              googleLocationVerified: false,
+              googleSyncStatus: 'failed',
+              googleSyncError: 'This Google location is already connected to another organization.',
+            },
+          })
+          const response = NextResponse.redirect(new URL(`${basePath}?error=location_already_attached&businessId=${businessId}`, origin))
+          clearGBPStateCookie(response)
+          return response
+        }
+
+        // Exactly one location and not conflicting — auto-select it and mark verified since discovered server-side
+        await db.business.update({
+          where: { id: businessId },
+          data: {
+            googleLocationId: loc.id,
+            googlePlaceId: loc.placeId || null,
+            googleLocationVerified: true,
+            googleSyncStatus: 'pending',
+            googleSyncError: null,
+          },
+        })
+
+        await db.auditLog.create({
+          data: {
+            actorId: ctx.user.id,
+            action: 'google.connected',
+            targetType: 'business',
+            targetId: businessId,
+            metadata: JSON.stringify({ businessId, provider: 'google', locationId: loc.id, title: loc.title, autoSelected: true }),
+          },
+        })
+
+        const response = NextResponse.redirect(new URL(`${basePath}?google=connected&location=${encodeURIComponent(loc.title)}&businessId=${businessId}`, origin))
+        clearGBPStateCookie(response)
+        return response
+      }
+
+      if (foundLocations.length > 1) {
+        // Multiple locations — redirect to location picker
+        await db.auditLog.create({
+          data: {
+            actorId: ctx.user.id,
+            action: 'google.connected',
+            targetType: 'business',
+            targetId: businessId,
+            metadata: JSON.stringify({ businessId, provider: 'google', multipleLocations: foundLocations.length }),
+          },
+        })
+
+        const response = NextResponse.redirect(new URL(`${basePath}?google=connected&google_picker=true&businessId=${businessId}`, origin))
+        clearGBPStateCookie(response)
+        return response
+      }
+    } catch (discErr) {
+      console.warn('[GBP OAuth] Auto-discovery during callback failed, proceeding to manual selection:', discErr)
+    }
+
+    // Default: Mark as connected without a specific location selected yet
     await db.business.update({
       where: { id: businessId },
       data: {
         googleLocationId: 'google_connected',
+        googleLocationVerified: false,
       },
     })
 
@@ -86,9 +216,11 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return NextResponse.redirect(new URL('/settings?google=connected', request.url))
-  } catch (error) {
-    console.error('Google OAuth callback error:', error)
-    return NextResponse.redirect(new URL('/settings?error=google_callback_failed', request.url))
+    const response = NextResponse.redirect(new URL(`${basePath}?google=connected&google_picker=true&businessId=${businessId}`, origin))
+    clearGBPStateCookie(response)
+    return response
+  } catch (err: any) {
+    console.error('Google OAuth callback error:', err)
+    return fallbackRedirect('google_callback_failed')
   }
 }

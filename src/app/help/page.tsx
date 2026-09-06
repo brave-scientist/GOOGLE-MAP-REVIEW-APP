@@ -43,11 +43,11 @@ const HELP_CATEGORIES = [
     articles: [
       {
         q: 'How to use the unified inbox',
-        a: 'The Inbox page shows all reviews across Google, Facebook, Yelp, and Trustpilot in one feed. Use the filter bar at the top to filter by status (All, Pending, Escalated, Replied). Use the search box to find reviews by author name, text content, or title. Click any review to open the detail drawer where you can generate an AI draft, edit it, and approve it for posting.',
+        a: 'The Inbox page shows all reviews across Google Business Profile and Facebook Pages in one feed. Use the filter bar at the top to filter by status (All, Pending, Escalated, Replied). Use the search box to find reviews by author name, text content, or title. Click any review to open the detail drawer where you can generate an AI draft, edit it, and approve it for posting.',
       },
       {
         q: 'Generating AI draft replies',
-        a: 'Open any review from the Inbox. If no draft exists, click "Generate draft." Our AI (GLM-4.6) analyzes the review and generates a contextually appropriate reply in 2–5 seconds. The draft references the customer\'s name, the business name, and specific details from their review. You can regenerate the draft (with "Regenerate" button) for a fresh variation.',
+        a: 'Open any review from the Inbox. If no draft exists, click "Generate draft." The ReviewReply AI Engine analyzes the review and generates a contextually appropriate reply in 2–5 seconds. The draft references the customer\'s name, the business name, and specific details from their review. You can regenerate the draft (with "Regenerate" button) for a fresh variation.',
       },
       {
         q: 'Editing and approving drafts',
@@ -58,8 +58,8 @@ const HELP_CATEGORIES = [
         a: 'Negative reviews (1–2 stars) are automatically flagged as "Escalated" in the inbox. The AI generates an empathetic, non-defensive draft that apologizes and offers to make it right. For reviews containing legal keywords (lawsuit, lawyer, BBB), the AI generates an escalation response asking the customer to contact management directly — no apology or fault admission.',
       },
       {
-        q: 'Bulk actions and keyboard shortcuts',
-        a: 'In the Inbox, you can select multiple reviews using the checkboxes (coming soon). For now, use keyboard shortcuts: J/K to navigate between reviews, E to escalate, R to reply, A to assign. Press Cmd+K (Mac) or Ctrl+K (Windows) anywhere in the app to open the command palette for quick navigation.',
+        q: 'Quick navigation and command palette',
+        a: 'Press Cmd+K (Mac) or Ctrl+K (Windows) anywhere in the app to open the Command Palette for quick search and navigation across locations, reviews, and settings.',
       },
     ],
   },

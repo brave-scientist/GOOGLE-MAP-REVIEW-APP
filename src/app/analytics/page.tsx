@@ -24,17 +24,27 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [reanalyzing, setReanalyzing] = useState(false)
 
-  const fetchData = () => {
-    setLoading(true)
+  useEffect(() => {
+    let ignore = false
     fetch('/api/analytics')
       .then(r => r.json())
-      .then(d => { setData(d); setLoading(false) })
-      .catch(e => { console.error(e); setLoading(false) })
-  }
-
-  useEffect(() => {
-    fetchData()
+      .then(d => {
+        if (!ignore) {
+          setData(d)
+          setLoading(false)
+        }
+      })
+      .catch(e => {
+        if (!ignore) {
+          console.error(e)
+          setLoading(false)
+        }
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
+
 
   const handleReanalyze = async () => {
     setReanalyzing(true)
@@ -88,8 +98,8 @@ export default function AnalyticsPage() {
                       <h3 className="font-medium text-sm">AI-Powered Sentiment Analysis</h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {data.sentimentSource === 'ai-computed'
-                          ? `Sentiment computed by GLM-4.6 · ${data.aiSentimentCount || 0} reviews analyzed by AI`
-                          : `Click "Re-analyze" to compute real sentiment scores using GLM-4.6 AI`}
+                          ? `Sentiment computed by ReviewReply AI Engine · ${data.aiSentimentCount || 0} reviews analyzed by AI`
+                          : `Click "Re-analyze" to compute real sentiment scores using ReviewReply AI Engine`}
                       </p>
                     </div>
                   </div>

@@ -30,7 +30,7 @@ export default function PrivacyPage() {
         <h3 className="text-base font-semibold text-foreground mb-2 mt-4">2.2 Information We Collect Automatically</h3>
         <ul className="list-disc pl-6 space-y-1">
           <li><strong>Usage data:</strong> IP address, browser type, device information, pages visited, time spent, and click patterns.</li>
-          <li><strong>Review data:</strong> Reviews fetched from connected platforms (Google Business Profile, Facebook Pages, Yelp, Trustpilot) on your behalf.</li>
+          <li><strong>Review data:</strong> Reviews fetched from connected platforms (Google Business Profile, Facebook Pages) on your behalf.</li>
           <li><strong>Cookies and similar technologies:</strong> Session cookies for authentication, analytics cookies for product improvement.</li>
         </ul>
       </section>
@@ -63,7 +63,7 @@ export default function PrivacyPage() {
         <p>We do not sell your personal data. We share information with the following categories of recipients:</p>
         <ul className="list-disc pl-6 space-y-1 mt-2">
           <li><strong>Service providers:</strong> Sub-processors who help us deliver the service (hosting, email delivery, SMS, payments, analytics). A full list is available in our Sub-processor Register.</li>
-          <li><strong>Review platforms:</strong> Google, Facebook, Yelp, and Trustpilot when you connect your accounts via OAuth and we fetch or post reviews on your behalf.</li>
+          <li><strong>Review platforms:</strong> Google Business Profile and Facebook Pages when you connect your accounts via OAuth and we fetch or post reviews on your behalf.</li>
           <li><strong>Legal authorities:</strong> When required by law, court order, or to protect our rights, property, or safety.</li>
           <li><strong>Business transfers:</strong> In connection with a merger, acquisition, or asset sale, with notice to you.</li>
         </ul>

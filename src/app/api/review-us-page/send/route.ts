@@ -49,6 +49,12 @@ export async function POST(request: NextRequest) {
       disclosureText,
     } = parseResult.data
 
+    // Enforce tenant isolation: verify caller's org owns this businessId
+    const denied = assertBusinessOwnership(ctx, businessId)
+    if (denied) {
+      return denied
+    }
+
     // Verify the business has a slug set (needed for the Review Us URL)
     const business = await db.business.findUnique({
       where: { id: businessId },
@@ -196,6 +202,24 @@ export async function POST(request: NextRequest) {
     // Note: Employee confirmation checkbox does NOT manufacture affirmative customer consent.
     // Outbound SMS dispatches strictly require pre-existing affirmative customer consent enforced in SmsService.sendSms().
 
+    // Record pre-filtered opted-out recipients for complete audit log
+    const sendableContacts = new Set(sendable.map(s => s.contact))
+    for (const recipient of recipients) {
+      const contactStr = String(recipient.contact)
+      if (!sendableContacts.has(contactStr)) {
+        await db.reviewUsSendRecipient.create({
+          data: {
+            reviewUsSendId: send.id,
+            customerName: recipient.name || 'Customer',
+            customerContact: contactStr,
+            channel,
+            status: 'opted_out',
+            error: 'Recipient has opted out of communications.',
+          },
+        }).catch(() => {})
+      }
+    }
+
     // Send to each recipient
     let sentCount = 0
     let failedCount = 0
@@ -228,15 +252,16 @@ export async function POST(request: NextRequest) {
               data: {
                 status: 'sent',
                 sentAt: new Date(),
-                deliveredAt: new Date(),
+                deliveredAt: null, // Delivery is confirmed by webhook status callbacks, not on initial dispatch
               },
             })
           } else {
             failedCount++
+            const isOptOut = result.errorCode === 'RECIPIENT_OPTED_OUT'
             await db.reviewUsSendRecipient.update({
               where: { id: recipientRecord.id },
               data: {
-                status: 'failed',
+                status: isOptOut ? 'opted_out' : 'failed',
                 error: result.errorMessage || result.errorCode || 'Send failed',
               },
             })
@@ -260,7 +285,7 @@ export async function POST(request: NextRequest) {
               data: {
                 status: 'sent',
                 sentAt: new Date(),
-                deliveredAt: new Date(),
+                deliveredAt: null,
               },
             })
           } else {

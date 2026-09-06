@@ -1,7 +1,7 @@
 // src/lib/sms/service.ts — Central SMS Orchestrator
 // SMS-001.1 Hardened: Atomic idempotency, monotonic status, E.164 opt-out, no fake fallbacks
 import { db } from '@/lib/db'
-import { Prisma } from '@prisma/client'
+import { Prisma, RequestStatus } from '@prisma/client'
 import { isOptedOut, optOutContact, optInContact } from '@/lib/opt-out'
 import { isStopKeyword, isStartKeyword } from '@/lib/integrations/twilio'
 import { validateAndNormalizePhone } from './phone'
@@ -370,7 +370,10 @@ export class SmsService {
           if (existingDelivery.reviewRequestId) {
             await db.reviewRequest.update({
               where: { id: existingDelivery.reviewRequestId },
-              data: { deliveredAt: new Date() },
+              data: {
+                status: RequestStatus.DELIVERED,
+                deliveredAt: new Date(),
+              },
             }).catch(() => {})
           }
 

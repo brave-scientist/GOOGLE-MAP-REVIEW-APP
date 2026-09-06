@@ -42,36 +42,43 @@ function AcceptInviteContent() {
   const router = useRouter()
   const token = searchParams.get('token')
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(Boolean(token))
   const [submitting, setSubmitting] = useState(false)
-  const [verification, setVerification] = useState<VerificationData | null>(null)
+  const [verification, setVerification] = useState<VerificationData | null>(() => token ? null : { status: 'INVALID' })
 
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false)
-      setVerification({ status: 'INVALID' })
-      return
-    }
+    if (!token) return
 
+    let ignore = false
     fetch(`/api/team/invite/verify?token=${encodeURIComponent(token)}`)
       .then(res => res.json())
       .then((data: VerificationData) => {
-        setVerification(data)
-        if (data.invitation?.email) {
-          setName(data.invitation.email.split('@')[0])
+        if (!ignore) {
+          setVerification(data)
+          if (data.invitation?.email) {
+            setName(data.invitation.email.split('@')[0])
+          }
         }
       })
       .catch(() => {
-        setVerification({ status: 'INVALID' })
+        if (!ignore) {
+          setVerification({ status: 'INVALID' })
+        }
       })
       .finally(() => {
-        setLoading(false)
+        if (!ignore) {
+          setLoading(false)
+        }
       })
+    return () => {
+      ignore = true
+    }
   }, [token])
+
 
   const handleAccept = async (e: React.FormEvent) => {
     e.preventDefault()

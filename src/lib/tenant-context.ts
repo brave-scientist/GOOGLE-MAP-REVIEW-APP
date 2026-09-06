@@ -17,10 +17,14 @@ import { db } from '@/lib/db'
 import { Plan } from '@prisma/client'
 import { getCurrentUser, SessionUser } from '@/lib/auth'
 
+import { resolveEffectiveScope } from '@/lib/operator-governance'
+
 export interface TenantContext {
   user: SessionUser
   orgId: string
-  businessIds: string[] // every Business.id in this org — use to scope queries
+  businessIds: string[] // permitted business IDs for this user (respects operator location assignments)
+  allOrgBusinessIds: string[] // all business IDs in the org
+  isOrgAdmin: boolean // true for OWNER, ADMIN, AGENCY_ADMIN (CLIENT_ADMIN is scoped to assigned locations)
 }
 
 const PLAN_LEVELS: Record<string, number> = {
@@ -124,16 +128,15 @@ export async function getTenantContext(
     )
   }
 
-  // 6. Fetch business IDs in this org — used to scope every subsequent query
-  const businesses = await db.business.findMany({
-    where: { orgId: user.orgId },
-    select: { id: true },
-  })
+  // 6. Resolve authoritative permitted business IDs for this user
+  const scope = await resolveEffectiveScope(user.id, user.orgId, user.role)
 
   return {
     user,
     orgId: user.orgId,
-    businessIds: businesses.map(b => b.id),
+    businessIds: scope.permittedBusinessIds,
+    allOrgBusinessIds: scope.allOrgBusinessIds,
+    isOrgAdmin: scope.isOrgAdmin,
   }
 }
 
@@ -189,9 +192,18 @@ export async function assertReviewOwnership(
     return NextResponse.json({ error: 'Review not found' }, { status: 404 })
   }
 
-  if (!ctx.businessIds.includes(review.businessId)) {
-    // Return 404 (not 403) to avoid leaking that the review exists
+  // 1. Cross-tenant isolation: if the review does not belong to the user's organization, 404
+  const allOrgBusinessIds = ctx.allOrgBusinessIds ?? ctx.businessIds
+  if (!allOrgBusinessIds.includes(review.businessId)) {
     return NextResponse.json({ error: 'Review not found' }, { status: 404 })
+  }
+
+  // 2. Location-level operator authorization: if user is not permitted for this location, 403
+  if (!ctx.businessIds.includes(review.businessId)) {
+    return NextResponse.json(
+      { error: 'Operator is not authorized for this location', code: 'LOCATION_FORBIDDEN' },
+      { status: 403 }
+    )
   }
 
   return review

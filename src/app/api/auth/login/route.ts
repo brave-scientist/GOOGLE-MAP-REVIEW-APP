@@ -31,34 +31,6 @@ export async function POST(request: NextRequest) {
     })
 
     if (!user) {
-      // For demo: auto-create a demo account if email matches demo pattern and seeded
-      if (normalizedEmail === 'owner@bamboogarden.com') {
-        const seededUser = await db.user.findFirst({
-          where: { email: 'owner@bamboogarden.com' },
-          include: {
-            memberships: {
-              include: {
-                org: { select: { id: true, name: true, plan: true } },
-              },
-            },
-          },
-        })
-        if (seededUser) {
-          const sessionUser: SessionUser = {
-            id: seededUser.id,
-            email: seededUser.email,
-            name: seededUser.name,
-            role: seededUser.memberships[0]?.role || Role.OWNER,
-            orgId: seededUser.memberships[0]?.org.id || null,
-            orgName: seededUser.memberships[0]?.org.name || null,
-            orgPlan: seededUser.memberships[0]?.org.plan || null,
-            sessionVersion: seededUser.sessionVersion ?? 1,
-          }
-          const response = NextResponse.json({ user: sessionUser, redirectTo: '/dashboard' })
-          await createSession(response, sessionUser)
-          return response
-        }
-      }
       return NextResponse.json(
         { error: 'No account found with this email. Please sign up.' },
         { status: 404 }

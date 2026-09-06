@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { resolvePlatformInfo } from '@/lib/review-platforms'
 import { notFound } from 'next/navigation'
 import { Star, ExternalLink } from 'lucide-react'
+import { PrivateFeedbackModal } from '@/components/app/private-feedback-modal'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,8 +12,9 @@ export const dynamic = 'force-dynamic'
 // This page shows the business's enabled review-platform links as tappable cards.
 // Each card links out (new tab) to that platform's review-submission URL.
 //
-// Honest about what this is: a link page, NOT a sync/fetch integration.
-// No "connected" or "syncing" language anywhere.
+// FTC-Compliant Review Acceleration:
+// - All public review links remain universally accessible without gating or filtering.
+// - An optional direct private feedback channel connects directly to management.
 export default async function ReviewUsPage({
   params,
 }: {
@@ -26,6 +28,9 @@ export default async function ReviewUsPage({
       id: true,
       name: true,
       industry: true,
+      reviewPageTitle: true,
+      reviewPageSubtitle: true,
+      reviewPagePrivateFeedbackEnabled: true,
     },
   }).catch(() => null)
 
@@ -55,6 +60,14 @@ export default async function ReviewUsPage({
     }
   })
 
+  const pageTitle = business.reviewPageTitle?.trim() || 'How was your experience?'
+  const pageSubtitle = business.reviewPageSubtitle?.trim() || (
+    <>
+      We&apos;d love to hear from you. Pick a platform below to leave a review for{' '}
+      <span className="font-medium text-foreground">{business.name}</span>.
+    </>
+  )
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-accent/10">
       {/* Subtle decorative top bar */}
@@ -66,16 +79,20 @@ export default async function ReviewUsPage({
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] shadow-lg shadow-[var(--brass)]/20 mb-5">
             <Star className="w-8 h-8 text-white fill-white" />
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-2">
-            How was your experience?
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-2 text-foreground" id="review-us-title">
+            {pageTitle}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            We'd love to hear from you. Pick a platform below to leave a review for{' '}
-            <span className="font-medium text-foreground">{business!.name}</span>.
+          <p id="review-us-subtitle" className="text-sm sm:text-base text-muted-foreground leading-relaxed">
+            {business.reviewPageSubtitle || (
+              <>
+                Thank you for visiting <span id="review-us-business-name" className="font-semibold text-foreground">{business.name}</span>.
+                Choose a platform below to share your honest review.
+              </>
+            )}
           </p>
-          {business!.industry && (
+          {business.industry && (
             <p className="text-[11px] text-muted-foreground/70 mt-1 capitalize">
-              {business!.industry}
+              {business.industry}
             </p>
           )}
         </div>
@@ -121,10 +138,17 @@ export default async function ReviewUsPage({
           </div>
         )}
 
+        {/* Private Direct Feedback Option (when enabled) */}
+        {business.reviewPagePrivateFeedbackEnabled && (
+          <div className="mt-6 pt-5 border-t border-border/40">
+            <PrivateFeedbackModal slug={slug} businessName={business.name} />
+          </div>
+        )}
+
         {/* Footer */}
         <div className="mt-10 pt-6 border-t border-border/30 text-center">
           <p className="text-[11px] text-muted-foreground">
-            You'll be sent directly to the platform you choose.
+            You&apos;ll be sent directly to the platform you choose.
           </p>
           <p className="text-[10px] text-muted-foreground/60 mt-1">
             Powered by ReviewReply

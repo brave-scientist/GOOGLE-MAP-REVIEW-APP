@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
-import { Send, Plus, Trash2, Loader2, Check, Phone, Mail, QrCode, Upload, FileText } from 'lucide-react'
+import { Send, Plus, Trash2, Loader2, Check, Phone, Mail, QrCode, Upload, FileText, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useActiveBusiness } from '@/lib/business-context'
+import { InviteConsentModal } from '@/components/app/invite-consent-modal'
 
 interface CampaignBuilderProps {
   open: boolean
@@ -32,6 +33,7 @@ const CHANNELS = [
 export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuilderProps) {
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
+  const { businesses, activeBusiness, activeBusinessId } = useActiveBusiness()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [selectedChannels, setSelectedChannels] = useState<string[]>(['sms'])
@@ -41,24 +43,25 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
   const [qrLoading, setQrLoading] = useState(false)
   const [consentConfirmed, setConsentConfirmed] = useState(false)
+  const [showConsentModal, setShowConsentModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch first business on mount
-  useEffect(() => {
-    if (open && !businessId) {
-      fetch('/api/dashboard')
-        .then(r => r.json())
-        .then(d => {
-          if (d.businesses?.[0]) {
-            setBusinessId(d.businesses[0].id)
-            if (!messageTemplate) {
-              setMessageTemplate(`Hi! Thanks for visiting ${d.businesses[0].name}. Would you mind leaving us a quick review?`)
-            }
-          }
-        })
-        .catch(() => {})
+  // Initialize active business on open
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
+    if (open) {
+      const targetId = activeBusinessId || businesses[0]?.id || ''
+      if (targetId && !businessId) {
+        setBusinessId(targetId)
+        const biz = businesses.find(b => b.id === targetId) || activeBusiness
+        if (!messageTemplate && biz?.name) {
+          setMessageTemplate(`Hi! Thanks for visiting ${biz.name}. Would you mind leaving us a quick review?`)
+        }
+      }
     }
-  }, [open, businessId, messageTemplate])
+  }
+
 
   const reset = () => {
     setStep(1)
@@ -277,6 +280,7 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scrollbar-premium glass-card">
         <DialogHeader>
@@ -303,6 +307,30 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
 
         {step === 1 && (
           <div className="space-y-4">
+            {businesses.length > 1 && (
+              <div>
+                <Label htmlFor="camp-biz">Target Location</Label>
+                <select
+                  id="camp-biz"
+                  value={businessId}
+                  onChange={e => {
+                    const newId = e.target.value
+                    setBusinessId(newId)
+                    const b = businesses.find(x => x.id === newId)
+                    if (b) {
+                      setMessageTemplate(`Hi! Thanks for visiting ${b.name}. Would you mind leaving us a quick review?`)
+                    }
+                  }}
+                  className="mt-1.5 w-full bg-card border border-border/60 rounded-md px-3 py-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-[var(--brass)]"
+                >
+                  {businesses.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <Label htmlFor="camp-name">Campaign name</Label>
               <Input
@@ -515,9 +543,21 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
                     I acknowledge that outbound commercial SMS requires customer-originated affirmative express written consent. Recipients lacking verified customer consent will be blocked by the SMS compliance gate.
                   </label>
                 </div>
-                <p className="text-[11px] text-muted-foreground/80 pl-6.5">
-                  Need to collect consent? Generate a secure consent link via the SMS Consent Manager or share your Review Us Page.
-                </p>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pl-6.5 pt-1">
+                  <p className="text-[11px] text-muted-foreground/80">
+                    Need to collect consent? Generate a single-use customer consent link with 7-day expiry.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowConsentModal(true)}
+                    className="h-7 text-xs border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 flex-shrink-0"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />
+                    Send Consent Invite
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -563,5 +603,13 @@ export function CampaignBuilder({ open, onOpenChange, onSuccess }: CampaignBuild
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <InviteConsentModal
+      open={showConsentModal}
+      onOpenChange={setShowConsentModal}
+      businessId={businessId}
+      businessName={businesses.find(b => b.id === businessId)?.name || activeBusiness?.name || ''}
+    />
+    </>
   )
 }

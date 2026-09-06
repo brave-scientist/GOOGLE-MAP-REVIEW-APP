@@ -43,9 +43,8 @@ export function MarketingFooter() {
       links: [
         { name: 'Features', href: '/#features' },
         { name: 'Pricing', href: '/#pricing' },
-        { name: 'Integrations', href: '/help' },
-        { name: 'API Docs', href: '/help' },
         { name: 'Changelog', href: '/changelog' },
+        { name: 'Help Center', href: '/help' },
       ],
     },
     {
@@ -53,7 +52,6 @@ export function MarketingFooter() {
       links: [
         { name: 'About', href: '/about' },
         { name: 'Blog', href: '/blog' },
-        { name: 'Help Center', href: '/help' },
         { name: 'Contact', href: '/contact' },
         { name: 'Status', href: '/status' },
       ],
@@ -63,9 +61,6 @@ export function MarketingFooter() {
       links: [
         { name: 'Privacy Policy', href: '/privacy' },
         { name: 'Terms of Service', href: '/terms' },
-        { name: 'Data Processing', href: '/privacy' },
-        { name: 'Security', href: '/help' },
-        { name: 'GDPR', href: '/privacy' },
       ],
     },
   ]
@@ -100,7 +95,7 @@ export function MarketingFooter() {
           ))}
         </div>
         <div className="mt-8 pt-6 border-t border-border/30 text-center">
-          <p className="text-xs text-muted-foreground">© 2026 ReviewReply Enterprise. All rights reserved.</p>
+          <p className="text-xs text-muted-foreground">© {new Date().getFullYear()} ReviewReply Enterprise. All rights reserved.</p>
         </div>
       </div>
     </footer>

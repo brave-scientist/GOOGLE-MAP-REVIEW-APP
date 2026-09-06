@@ -47,12 +47,19 @@ export default function AdminDashboardPage() {
   const router = useRouter()
   const [data, setData] = useState<AdminData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/admin')
-      .then(r => r.json())
+      .then(async r => {
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}))
+          throw new Error(err.error || `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
       .then(d => { setData(d); setLoading(false) })
-      .catch(e => { console.error(e); setLoading(false) })
+      .catch(e => { setError(e.message || 'Access denied'); setLoading(false) })
   }, [])
 
   return (
@@ -90,6 +97,17 @@ export default function AdminDashboardPage() {
                 </Card>
               ))}
             </div>
+          ) : error ? (
+            <Card className="p-12 glass-card text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <Shield className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="font-display font-bold mb-1">Access Denied</h3>
+              <p className="text-sm text-muted-foreground mb-4">{error}</p>
+              <Button variant="outline" onClick={() => router.push('/dashboard')}>
+                Return to Dashboard
+              </Button>
+            </Card>
           ) : data ? (
             <AdminContent data={data} />
           ) : null}

@@ -185,5 +185,9 @@ export const RATE_LIMITS = {
   contact: { limit: 5, windowMs: 60 * 60 * 1000 }, // 5 per hour per IP
   reviewRequest: { limit: 100, windowMs: 60 * 1000 }, // 100 per min per IP
   widget: { limit: 100, windowMs: 60 * 1000 }, // 100 per min per IP
+  // Google API operations — expensive, tenant-scoped
+  googleOAuthInit: { limit: 10, windowMs: 60 * 60 * 1000 },  // 10/hour per tenant
+  googleDiscovery: { limit: 10, windowMs: 60 * 1000 },        // 10/min per tenant
+  googleSync: { limit: 3, windowMs: 60 * 60 * 1000 },         // 3/hour per business
 }
 

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getGoogleAuthUrl, isGoogleConfigured } from '@/lib/integrations/google-business-profile'
+import {
+  getGoogleAuthUrl,
+  isGoogleConfigured,
+  generatePKCE,
+  generateCryptographicEntropy,
+  setGBPStateCookie,
+} from '@/lib/integrations/google-business-profile'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
+import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +27,19 @@ export async function GET(request: NextRequest) {
   // 1. SEC-01: require auth
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
+
+  // 1b. Rate limiting: 10 OAuth initiations per org per hour
+  const rl = await rateLimit(
+    `google:oauth:init:${ctx.orgId}`,
+    RATE_LIMITS.googleOAuthInit.limit,
+    RATE_LIMITS.googleOAuthInit.windowMs
+  )
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many Google OAuth requests. Please wait before trying again.', code: 'RATE_LIMITED' },
+      { status: 429 }
+    )
+  }
 
   // 2. SEC-01: businessId must be present AND owned by the caller's org
   const { searchParams } = new URL(request.url)
@@ -51,8 +71,34 @@ export async function GET(request: NextRequest) {
     }, { status: 503 })
   }
 
-  const redirectUri = `${new URL('/api/oauth/google/callback', request.url).origin}/api/oauth/google/callback`
+  const origin = new URL(request.url).origin
+  const redirectUri = `${origin}/api/oauth/google/callback`
 
-  const authUrl = getGoogleAuthUrl(redirectUri, businessId)
-  return NextResponse.redirect(authUrl)
+  // 4. Generate PKCE verifier and S256 challenge (RFC 7636)
+  const { codeVerifier, codeChallenge } = generatePKCE()
+
+  // 5. Generate high-entropy cryptographically random state (>= 32 bytes entropy)
+  const state = generateCryptographicEntropy(32)
+
+  // 6. Bind state, PKCE verifier, businessId, and userId into a protected JWE cookie
+  const authUrl = getGoogleAuthUrl({
+    redirectUri,
+    state,
+    codeChallenge,
+  })
+
+  const rawReturnTo = searchParams.get('returnTo') || ''
+  const returnTo = rawReturnTo === '/onboarding' ? '/onboarding' : '/settings'
+
+  const response = NextResponse.redirect(authUrl)
+  await setGBPStateCookie(response, {
+    state,
+    codeVerifier,
+    businessId,
+    userId: ctx.user.id,
+    createdAt: Date.now(),
+    returnTo,
+  })
+
+  return response
 }

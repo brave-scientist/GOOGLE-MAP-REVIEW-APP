@@ -107,13 +107,19 @@ function Nav({ scrolled, onMobileMenuToggle, mobileMenuOpen }: {
           </Link>
 
           <div className="hidden lg:flex items-center gap-1">
-            {['Features', 'Pricing', 'Solutions', 'Comparisons', 'Resources'].map((item) => (
+            {[
+              { label: 'Features', href: '#features' },
+              { label: 'Pricing', href: '#pricing' },
+              { label: 'How It Works', href: '#how-it-works' },
+              { label: 'Comparisons', href: '#comparisons' },
+              { label: 'FAQ', href: '#faq' },
+            ].map((item) => (
               <Link
-                key={item}
-                href={`#${item.toLowerCase()}`}
+                key={item.label}
+                href={item.href}
                 className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
               >
-                {item}
+                {item.label}
               </Link>
             ))}
           </div>
@@ -145,14 +151,20 @@ function Nav({ scrolled, onMobileMenuToggle, mobileMenuOpen }: {
       {/* Mobile menu */}
       {mobileMenuOpen && (
         <div className="lg:hidden mx-4 mt-2 glass-card rounded-2xl p-4 shadow-xl">
-          {['Features', 'Pricing', 'Solutions', 'Comparisons', 'Resources'].map((item) => (
+          {[
+            { label: 'Features', href: '#features' },
+            { label: 'Pricing', href: '#pricing' },
+            { label: 'How It Works', href: '#how-it-works' },
+            { label: 'Comparisons', href: '#comparisons' },
+            { label: 'FAQ', href: '#faq' },
+          ].map((item) => (
             <Link
-              key={item}
-              href={`#${item.toLowerCase()}`}
+              key={item.label}
+              href={item.href}
               onClick={onMobileMenuToggle}
               className="block px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
             >
-              {item}
+              {item.label}
             </Link>
           ))}
           <div className="mt-3 pt-3 border-t border-border flex flex-col gap-2">
@@ -184,7 +196,7 @@ function Hero() {
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-card mb-8 reveal in-view">
             <Sparkles className="w-3.5 h-3.5 text-[var(--brass)]" />
             <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Now with AI (GLM-4.6) brand voice training
+              Now with ReviewReply AI brand voice generation
             </span>
           </div>
 
@@ -196,7 +208,7 @@ function Hero() {
           </h1>
 
           <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mb-10 leading-relaxed">
-            ReviewReply Enterprise brings all your customer reviews into one unified inbox. AI trained on your brand voice drafts replies in seconds.
+            ReviewReply Enterprise brings all your customer reviews into one unified inbox. ReviewReply AI drafts on-brand replies in seconds.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-3 mb-8">
@@ -344,7 +356,7 @@ function StatBar() {
     { value: '4.7', suffix: '★', label: 'Average rating lift in 90 days' },
     { value: '3.2', suffix: '×', label: 'More reviews than manual outreach' },
     { value: '<30', suffix: 's', label: 'Average AI draft reply time' },
-    { value: '', suffix: '', label: 'Languages supported' },
+    { value: '100', suffix: '%', label: 'Human-in-the-loop review approval' },
   ]
   return (
     <section className="py-20">
@@ -432,7 +444,7 @@ function BentoFeatures() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-              Every review from every source, in one filterable, searchable, actionable stream. Bulk-assign, bulk-approve, snooze, escalate — all with keyboard shortcuts.
+              Every review from your connected platforms in one filterable, searchable, actionable stream. Fast AI draft generation, review filtering, and escalation alerts.
             </p>
             {/* Mini inbox preview */}
             <div className="space-y-2">
@@ -475,7 +487,7 @@ function BentoFeatures() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-              AI-powered learns your voice from past replies. Every draft sounds like you wrote it — not like ChatGPT.
+              ReviewReply AI adapts to your voice from approved replies. Every draft sounds like your team wrote it — not like a generic chatbot.
             </p>
             <div className="rounded-lg bg-background/40 border border-border/30 p-3">
               <div className="text-xs font-mono text-[var(--brass)] mb-1">Draft reply · 2.3s</div>
@@ -498,7 +510,7 @@ function BentoFeatures() {
               Send review requests by SMS, email, or QR poster. TCPA-compliant with automatic opt-out handling.
             </p>
             <div className="flex gap-2">
-              {[Phone, Mail, QrCode, Globe].map((Icon, i) => (
+              {[Phone, Mail, QrCode].map((Icon, i) => (
                 <div key={i} className="flex-1 p-2 rounded-lg bg-background/40 border border-border/30 flex items-center justify-center">
                   <Icon className="w-4 h-4 text-[var(--brass)]" />
                 </div>
@@ -545,7 +557,7 @@ function BentoFeatures() {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">Benchmark against local competitors (demo data; real sync on roadmap).</p>
+            <p className="text-xs text-muted-foreground">Benchmark against local competitors with manual tracking and weekly performance snapshots.</p>
           </Card>
 
           {/* Small — Agency Mode */}
@@ -630,7 +642,7 @@ function LiveDemo({ activeTab, onTabChange }: {
           </div>
 
           <div className="mt-6 text-center">
-            <Link href="/dashboard">
+            <Link href="/signup">
               <Button variant="outline" className="glass-card">
                 Try it yourself — start free trial
                 <ArrowRight className="ml-2 w-4 h-4" />
@@ -647,7 +659,7 @@ function InboxDemo() {
   const reviews = [
     { author: 'Sarah Chen', rating: 5, text: 'Absolutely phenomenal experience. The staff went above and beyond...', source: 'google', time: '2 minutes ago', status: 'pending' },
     { author: 'Marcus Webb', rating: 2, text: 'Disappointing visit. The wait time was over 45 minutes with no apology...', source: 'facebook', time: '14 minutes ago', status: 'pending' },
-    { author: 'Priya Patel', rating: 5, text: 'Best service in town. I have been coming here for years and the quality...', source: 'yelp', time: '1 hour ago', status: 'replied' },
+    { author: 'Priya Patel', rating: 5, text: 'Best service in town. I have been coming here for years and the quality...', source: 'google', time: '1 hour ago', status: 'replied' },
     { author: 'James Rodriguez', rating: 4, text: 'Great experience overall. The staff was friendly and the service was...', source: 'google', time: '3 hours ago', status: 'replied' },
   ]
   return (
@@ -711,7 +723,7 @@ function AIDemo() {
           <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center">
             <Bot className="w-3 h-3 text-white" />
           </div>
-          <span className="text-xs font-mono text-[var(--brass)]">Draft reply · AI (GLM-4.6) · 2.3s</span>
+          <span className="text-xs font-mono text-[var(--brass)]">Draft reply · ReviewReply AI · 2.3s</span>
         </div>
         <p className="text-sm text-foreground/90 italic mb-3">
           "Marcus, we are truly sorry to hear that your experience at Bamboo Garden fell short of expectations. This is not the standard we hold ourselves to, and we would like to make it right. Please reach out to us directly at hello@bamboogarden.com or call us during business hours — we would love the opportunity to turn this around for you."
@@ -827,7 +839,7 @@ function HowItWorks() {
     },
   ]
   return (
-    <section id="solutions" className="py-24 sm:py-32">
+    <section id="how-it-works" className="py-24 sm:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="text-center max-w-2xl mx-auto mb-16">
           <p className="text-xs uppercase tracking-widest text-[var(--brass)] font-mono mb-3">How It Works</p>
@@ -1118,7 +1130,7 @@ function Pricing({ billingCycle, onCycleChange }: {
                   <p className="text-xs text-[var(--brass)] mt-1">Billed annually</p>
                 )}
               </div>
-              <Link href="/signup" className="w-full mb-6">
+              <Link href={tier.name === 'Enterprise' ? '/contact?plan=enterprise' : '/signup'} className="w-full mb-6">
                 <Button
                   className={cn(
                     'w-full',
@@ -1152,8 +1164,8 @@ function Pricing({ billingCycle, onCycleChange }: {
 // ─────────────────────────────────────────────────────────
 function FAQ() {
   const faqs = [
-    { q: 'How does the AI brand voice training work?', a: 'Upload your past 50–200 approved replies. AI (GLM-4.6) analyzes your tone, length, signature, escalation rules, and do-not-say list to create a private brand voice profile. The profile is encrypted at rest and used as the system prompt for every draft. We re-train weekly based on your accept/reject/edit rate.' },
-    { q: 'Which review sources are supported?', a: 'The unified inbox supports reviews from Google Business Profile and Facebook Pages. Additional sources (Yelp, Trustpilot) are on our roadmap. You can also manually import reviews from any platform via CSV upload.' },
+    { q: 'How does the AI brand voice training work?', a: 'Upload your past approved replies. ReviewReply AI analyzes your tone, length, signature, escalation rules, and do-not-say list to create a private brand voice profile. The profile is encrypted at rest and used as the system prompt for every draft.' },
+    { q: 'Which review sources are supported?', a: 'The unified inbox supports reviews from Google Business Profile and Facebook Pages. Additional sources (such as Yelp and Trustpilot) are on our roadmap. You can also manually import reviews from any platform via CSV upload.' },
     { q: 'Is ReviewReply TCPA-compliant for SMS?', a: 'Yes. We capture explicit opt-in with timestamp and IP, enforce 9pm–8am recipient-local quiet hours, handle STOP/UNSTOP keywords within 24 hours, and register your 10DLC campaign with Twilio. All SMS sends are logged for audit.' },
     { q: 'Can I use ReviewReply if I am an agency?', a: 'Yes — the Enterprise tier ($299/mo) includes full agency mode: white-label on your domain, client portal, per-seat pricing, role-based access control, and bulk actions across all client businesses.' },
     { q: 'How long is the free trial?', a: '14 days, no credit card required. Full Pro features. Data is retained for 30 days after trial ends, so you can upgrade without losing anything.' },
@@ -1162,7 +1174,7 @@ function FAQ() {
     { q: 'Can I cancel anytime?', a: 'Yes, no contracts. Cancel from the self-serve billing portal. Annual plans get a pro-rated refund for unused months.' },
   ]
   return (
-    <section id="resources" className="py-24 sm:py-32">
+    <section id="faq" className="py-24 sm:py-32">
       <div className="mx-auto max-w-3xl px-4 sm:px-6">
         <div className="text-center mb-12">
           <p className="text-xs uppercase tracking-widest text-[var(--brass)] font-mono mb-3">FAQ</p>
@@ -1210,9 +1222,11 @@ function FinalCTA() {
               <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </Button>
           </Link>
-          <Button size="lg" variant="outline" className="glass-card h-12 text-base px-8">
-            Book a demo
-          </Button>
+          <Link href="/contact?type=demo">
+            <Button size="lg" variant="outline" className="glass-card h-12 text-base px-8">
+              Book a demo
+            </Button>
+          </Link>
         </div>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
           {['No credit card', '14-day trial', 'Cancel anytime', 'SOC2 in progress'].map(b => (
@@ -1237,17 +1251,9 @@ function Footer() {
       links: [
         { name: 'Features', href: '/#features' },
         { name: 'Pricing', href: '/#pricing' },
+        { name: 'How It Works', href: '/#how-it-works' },
         { name: 'Changelog', href: '/changelog' },
         { name: 'Status', href: '/status' },
-      ],
-    },
-    {
-      title: 'Solutions',
-      links: [
-        { name: 'Restaurants', href: '/signup' },
-        { name: 'Dental', href: '/signup' },
-        { name: 'Hospitality', href: '/signup' },
-        { name: 'Agencies', href: '/signup' },
       ],
     },
     {
@@ -1255,25 +1261,25 @@ function Footer() {
       links: [
         { name: 'Blog', href: '/blog' },
         { name: 'Help Center', href: '/help' },
-        { name: 'Contact', href: '/contact' },
+        { name: 'Contact Us', href: '/contact' },
+        { name: 'Book a Demo', href: '/contact?type=demo' },
         { name: 'About', href: '/about' },
       ],
     },
     {
       title: 'Legal',
       links: [
-        { name: 'Privacy', href: '/privacy' },
-        { name: 'Terms', href: '/terms' },
-        { name: 'Security', href: '/help' },
-        { name: 'GDPR', href: '/privacy' },
+        { name: 'Privacy Policy', href: '/privacy' },
+        { name: 'Terms of Service', href: '/terms' },
+        { name: 'Security Overview', href: '/help' },
       ],
     },
   ]
   return (
     <footer className="border-t border-border/30 bg-card/20">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-16">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-8">
-          {/* Logo + newsletter */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
+          {/* Logo + description */}
           <div className="col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--brass)] to-[var(--brass-dark)] flex items-center justify-center">
@@ -1286,8 +1292,8 @@ function Footer() {
             </p>
             <div className="flex gap-2">
               {[Globe, Mail, Bell].map((Icon, i) => (
-                <div key={i} className="w-8 h-8 rounded-lg glass-card flex items-center justify-center hover:bg-accent/50 transition-colors cursor-pointer">
-                  <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                <div key={i} className="w-8 h-8 rounded-lg glass-card flex items-center justify-center text-muted-foreground">
+                  <Icon className="w-3.5 h-3.5" />
                 </div>
               ))}
             </div>
@@ -1311,7 +1317,7 @@ function Footer() {
 
         <div className="mt-12 pt-8 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground">
-            © 20 ReviewReply Enterprise. All rights reserved.
+            © {new Date().getFullYear()} ReviewReply Enterprise. All rights reserved.
           </p>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
@@ -1324,7 +1330,7 @@ function Footer() {
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5 text-[var(--brass)]" />
-              Powered by AI-powered
+              Powered by ReviewReply AI
             </span>
           </div>
         </div>

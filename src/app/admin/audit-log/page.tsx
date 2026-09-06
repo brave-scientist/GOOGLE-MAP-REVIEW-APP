@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -80,30 +80,40 @@ export default function AuditLogPage() {
   const [appliedSearch, setAppliedSearch] = useState('')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
-  const fetchAuditLog = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams({ page: String(page), limit: '50' })
-      if (actionFilter) params.set('action', actionFilter)
-      if (appliedSearch) params.set('action', appliedSearch)
-      const res = await fetch(`/api/admin/audit-log?${params}`)
-      if (!res.ok) {
-        const d = await res.json()
-        throw new Error(d.error || `HTTP ${res.status}`)
+  useEffect(() => {
+    let ignore = false
+    async function loadAuditLog() {
+      try {
+        const params = new URLSearchParams({ page: String(page), limit: '50' })
+        if (actionFilter) params.set('action', actionFilter)
+        if (appliedSearch) params.set('action', appliedSearch)
+        const res = await fetch(`/api/admin/audit-log?${params}`)
+        if (!res.ok) {
+          const d = await res.json()
+          throw new Error(d.error || `HTTP ${res.status}`)
+        }
+        const d: AuditLogResponse = await res.json()
+        if (!ignore) {
+          setData(d)
+          setError(null)
+        }
+      } catch (e) {
+        if (!ignore) {
+          setError(e instanceof Error ? e.message : 'Failed to fetch audit log')
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false)
+        }
       }
-      const d: AuditLogResponse = await res.json()
-      setData(d)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to fetch audit log')
-    } finally {
-      setLoading(false)
+    }
+
+    loadAuditLog()
+    return () => {
+      ignore = true
     }
   }, [page, actionFilter, appliedSearch])
 
-  useEffect(() => {
-    fetchAuditLog()
-  }, [fetchAuditLog])
 
   const handleSearch = () => {
     setAppliedSearch(searchInput)

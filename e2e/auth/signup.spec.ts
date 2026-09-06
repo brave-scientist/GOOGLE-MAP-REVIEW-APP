@@ -56,8 +56,13 @@ test.describe('JRN-002: Signup Registration & Workspace Provisioning', () => {
 
     await page.getByRole('button', { name: /Create account/i }).click()
 
-    // 2. Verify navigation to /dashboard
-    await page.waitForURL('**/dashboard', { timeout: 15000 })
+    // 2. Verify navigation to /onboarding (or /dashboard)
+    await page.waitForURL(/\/(onboarding|dashboard)/, { timeout: 15000 })
+    if (page.url().includes('/onboarding')) {
+      // User can click "Skip for now" to reach dashboard directly
+      await page.getByRole('button', { name: /Skip for now/i }).click()
+      await page.waitForURL('**/dashboard', { timeout: 15000 })
+    }
     await expect(page).toHaveURL(/\/dashboard/)
     await expect(page.locator('aside')).toBeVisible()
 

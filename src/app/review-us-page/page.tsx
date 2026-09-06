@@ -9,11 +9,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  Link2, Phone, Mail, Upload, Plus, Trash2, Loader2, Check, Send, Clock, Users, X,
+  Send, Phone, Mail, Upload, Plus, Trash2, CheckCircle2,
+  Clock, AlertCircle, Loader2, RefreshCw, FileText, ArrowRight, ShieldCheck, Users, Link2, Building2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ReviewUsTab } from '@/components/app/review-us-tab'
+import { InviteConsentModal } from '@/components/app/invite-consent-modal'
+import { useActiveBusiness } from '@/lib/business-context'
 
 interface Recipient {
   name: string
@@ -37,6 +40,7 @@ export default function ReviewUsPagePage() {
   const [businessName, setBusinessName] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const { activeBusiness, activeBusinessId, businesses, setActiveBusinessId } = useActiveBusiness()
   // Bulk-send state
   const [channel, setChannel] = useState<'sms' | 'email'>('sms')
   const [messageTemplate, setMessageTemplate] = useState('')
@@ -45,37 +49,41 @@ export default function ReviewUsPagePage() {
   const [sending, setSending] = useState(false)
   const [pastSends, setPastSends] = useState<PastSend[]>([])
   const [loadingSends, setLoadingSends] = useState(false)
+  const [showConsentModal, setShowConsentModal] = useState(false)
 
   const disclosureText = `By providing your phone number, you agree to receive text messages from ${businessName || 'this business'} regarding review requests and customer feedback. Message and data rates may apply. Message frequency varies. Reply STOP to opt out, HELP for help.`
 
-  // Fetch business ID + name on mount
-  useEffect(() => {
-    fetch('/api/dashboard')
-      .then(r => r.json())
-      .then(d => {
-        if (d.businesses?.[0]) {
-          setBusinessId(d.businesses[0].id)
-          setBusinessName(d.businesses[0].name)
-          if (!messageTemplate) {
-            setMessageTemplate(`Hi! Thanks for visiting ${d.businesses[0].name}. We would love your feedback — pick your favorite platform and leave us a review:`)
-          }
-        }
-      })
-      .catch(() => {})
-  }, [])
+  // Bind to active business
+  const [prevTargetId, setPrevTargetId] = useState<string | null>(null)
+  const targetId = activeBusinessId || businesses[0]?.id
+  const targetBiz = businesses.find(b => b.id === targetId) || activeBusiness
+  if (targetId && targetId !== prevTargetId && targetBiz) {
+    setPrevTargetId(targetId)
+    setBusinessId(targetId)
+    setBusinessName(targetBiz.name)
+    if (!messageTemplate) {
+      setMessageTemplate(`Hi! Thanks for visiting ${targetBiz.name}. We would love your feedback — pick your favorite platform and leave us a review:`)
+    }
+  }
 
   // Fetch past sends when businessId is available
   useEffect(() => {
     if (!businessId) return
-    setLoadingSends(true)
+    let ignore = false
     fetch(`/api/review-us-page/sends?businessId=${businessId}`)
       .then(r => r.json())
       .then(d => {
-        if (d.sends) setPastSends(d.sends)
+        if (!ignore && d.sends) setPastSends(d.sends)
       })
       .catch(() => {})
-      .finally(() => setLoadingSends(false))
+      .finally(() => {
+        if (!ignore) setLoadingSends(false)
+      })
+    return () => {
+      ignore = true
+    }
   }, [businessId])
+
 
   const validRecipients = recipients.filter(r => r.name.trim() && r.contact.trim())
 
@@ -206,9 +214,39 @@ export default function ReviewUsPagePage() {
           description="Configure your public review page and send it to customers"
         />
         <div className="p-4 sm:p-6 space-y-8">
+          {/* Multi-Location Switcher (for multi-unit brands and agencies) */}
+          {businesses.length > 1 && (
+            <div className="max-w-4xl flex items-center justify-between p-3.5 rounded-xl bg-card border border-border/60 shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[var(--brass)]/10 text-[var(--brass)] flex items-center justify-center flex-shrink-0">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Location Profile</div>
+                  <div className="text-[11px] text-muted-foreground">Select which location&apos;s Review Us page and QR assets to configure.</div>
+                </div>
+              </div>
+              <select
+                value={businessId}
+                onChange={e => {
+                  const newId = e.target.value
+                  setActiveBusinessId(newId)
+                  setBusinessId(newId)
+                  const matched = businesses.find(b => b.id === newId)
+                  if (matched) setBusinessName(matched.name)
+                }}
+                className="text-xs bg-background border border-border/60 rounded-lg px-3 py-1.5 text-foreground font-medium focus:outline-none focus:ring-1 focus:ring-[var(--brass)] cursor-pointer"
+              >
+                {businesses.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Existing platform-catalog + QR + link configuration */}
           {businessId ? (
-            <ReviewUsTab businessId={businessId} />
+            <ReviewUsTab key={businessId} businessId={businessId} />
           ) : (
             <Card className="p-8 glass-card text-center">
               <Loader2 className="w-5 h-5 animate-spin inline mr-2 text-muted-foreground" />
@@ -218,16 +256,28 @@ export default function ReviewUsPagePage() {
 
           {/* ── Bulk Send Section ── */}
           <div className="max-w-4xl space-y-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-[var(--brass)]/10 flex items-center justify-center flex-shrink-0">
-                <Send className="w-5 h-5 text-[var(--brass)]" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[var(--brass)]/10 flex items-center justify-center flex-shrink-0">
+                  <Send className="w-5 h-5 text-[var(--brass)]" />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold">Send to customers</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Bulk-distribute your Review Us Page link via SMS or email. Customers pick their preferred platform from the page.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-display font-bold">Send to customers</h3>
-                <p className="text-xs text-muted-foreground">
-                  Bulk-distribute your Review Us Page link via SMS or email. Customers pick their preferred platform from the page.
-                </p>
-              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowConsentModal(true)}
+                className="border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 flex-shrink-0"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 mr-1.5 text-amber-600 dark:text-amber-400" />
+                Send Consent Invite
+              </Button>
             </div>
 
             {/* Channel selection */}
@@ -375,9 +425,21 @@ export default function ReviewUsPagePage() {
                       I acknowledge that outbound commercial SMS requires customer-originated affirmative express written consent. Recipients lacking verified customer consent will be blocked by the SMS compliance gate.
                     </label>
                   </div>
-                  <p className="text-[11px] text-muted-foreground/80 pl-6.5">
-                    Need to collect consent? Customers can opt in via your Review Us Page or through a dedicated consent link.
-                  </p>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pl-6.5 pt-1">
+                    <p className="text-[11px] text-muted-foreground/80">
+                      Need to collect consent? Customers can opt in via your Review Us Page or through a dedicated consent link.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowConsentModal(true)}
+                      className="h-7 text-xs border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 flex-shrink-0"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />
+                      Send Consent Invite
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -459,6 +521,13 @@ export default function ReviewUsPagePage() {
         </div>
       </main>
       <MobileNav />
+
+      <InviteConsentModal
+        open={showConsentModal}
+        onOpenChange={setShowConsentModal}
+        businessId={businessId}
+        businessName={businessName}
+      />
     </div>
   )
 }

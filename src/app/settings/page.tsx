@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,10 +8,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2, Mail, Clock, UserMinus } from 'lucide-react'
+import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2, Mail, Clock, UserMinus, RefreshCw, MapPin, FileText, Sliders } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { InviteMemberModal } from '@/components/app/admin-modals'
+import { useActiveBusiness } from '@/lib/business-context'
+import { ReplyTemplatesTab } from '@/components/app/reply-templates-tab'
+import { AiPresetsTab } from '@/components/app/ai-presets-tab'
+import { AutomationsTab } from '@/components/app/automations-tab'
+import { Zap } from 'lucide-react'
 
 interface TeamMemberItem {
   id: string
@@ -55,6 +60,10 @@ interface Integration {
   icon: string
   category: 'review-source' | 'communication' | 'billing' | 'alerts'
   userFacing: boolean // false = managed by platform (admin-only)
+  locationId?: string | null
+  hasLocation?: boolean
+  pageId?: string | null
+  hasPage?: boolean
 }
 
 // AUD-01: Initial state is the SAFE default — everything starts 'available'/'not_configured'.
@@ -63,28 +72,89 @@ interface Integration {
 const INITIAL_INTEGRATIONS: Integration[] = [
   { provider: 'google', name: 'Google Business Profile', status: 'available', desc: 'Loading…', icon: '🔍', category: 'review-source', userFacing: true },
   { provider: 'facebook', name: 'Facebook Pages', status: 'available', desc: 'Loading…', icon: '📘', category: 'review-source', userFacing: true },
-  { provider: 'yelp', name: 'Yelp', status: 'available', desc: 'Yelp partnership API', icon: '⭐', category: 'review-source', userFacing: true },
-  { provider: 'trustpilot', name: 'Trustpilot', status: 'available', desc: 'Trustpilot API', icon: '✓', category: 'review-source', userFacing: true },
-  { provider: 'slack', name: 'Slack', status: 'available', desc: 'Real-time alerts in your Slack channels', icon: '💬', category: 'alerts', userFacing: true },
-  { provider: 'teams', name: 'Microsoft Teams', status: 'available', desc: 'Alerts via Power Automate', icon: '👥', category: 'alerts', userFacing: true },
+  { provider: 'yelp', name: 'Yelp', status: 'not_configured', desc: 'Roadmap item — not yet supported', icon: '⭐', category: 'review-source', userFacing: true },
+  { provider: 'trustpilot', name: 'Trustpilot', status: 'not_configured', desc: 'Roadmap item — not yet supported', icon: '✓', category: 'review-source', userFacing: true },
+  { provider: 'slack', name: 'Slack', status: 'not_configured', desc: 'Roadmap item — not yet supported', icon: '💬', category: 'alerts', userFacing: true },
+  { provider: 'teams', name: 'Microsoft Teams', status: 'not_configured', desc: 'Roadmap item — not yet supported', icon: '👥', category: 'alerts', userFacing: true },
   // Platform-managed integrations (not user-configurable)
-  { provider: 'twilio', name: 'Twilio (SMS)', status: 'not_configured', desc: 'Loading…', icon: '📱', category: 'communication', userFacing: false },
+  { provider: 'telnyx', name: 'Telnyx (SMS)', status: 'not_configured', desc: 'Loading…', icon: '📱', category: 'communication', userFacing: false },
+  { provider: 'twilio', name: 'Twilio (SMS Fallback)', status: 'not_configured', desc: 'Loading…', icon: '📱', category: 'communication', userFacing: false },
   { provider: 'resend', name: 'Resend (Email)', status: 'not_configured', desc: 'Loading…', icon: '✉', category: 'communication', userFacing: false },
   { provider: 'stripe', name: 'Stripe', status: 'not_configured', desc: 'Loading…', icon: '💳', category: 'billing', userFacing: false },
 ]
 
 export default function SettingsPage() {
+  const { businesses, activeBusiness, activeBusinessId, setActiveBusinessId, refreshBusinesses } = useActiveBusiness()
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS)
   const [processingProvider, setProcessingProvider] = useState<string | null>(null)
   const [savingBusiness, setSavingBusiness] = useState(false)
+  const [businessForm, setBusinessForm] = useState({
+    name: '',
+    industry: '',
+    timezone: 'America/New_York',
+    address: '',
+    phone: '',
+  })
+
+  // Synchronize form when activeBusiness changes
+  useEffect(() => {
+    ;(async () => {
+      if (activeBusiness) {
+        setBusinessForm({
+          name: activeBusiness.name || '',
+          industry: activeBusiness.industry || '',
+          timezone: activeBusiness.timezone || 'America/New_York',
+          address: activeBusiness.address || '',
+          phone: activeBusiness.phone || '',
+        })
+      }
+    })()
+  }, [activeBusinessId, activeBusiness])
   const [inviteOpen, setInviteOpen] = useState(false)
   const [teamData, setTeamData] = useState<TeamData | null>(null)
   const [teamLoading, setTeamLoading] = useState(true)
   const [teamActionLoading, setTeamActionLoading] = useState<string | null>(null)
-  const [fbPagePicker, setFbPagePicker] = useState<{ businessId: string; pages: Array<{ id: string; name: string; category: string }> } | null>(null)
+  const [fbPagePicker, setFbPagePicker] = useState<{ businessId: string; pages: Array<{ id: string; name: string; category: string }> } | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('facebook_pick_page') === '1') {
+        const businessId = params.get('businessId')
+        const pagesParam = params.get('pages')
+        if (businessId && pagesParam) {
+          const pages = JSON.parse(decodeURIComponent(pagesParam))
+          return { businessId, pages }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  })
   const [fbSelecting, setFbSelecting] = useState(false)
+  const [googlePicker, setGooglePicker] = useState<{
+    businessId: string
+    locations: Array<{ id: string; title: string; address?: string; placeId?: string; accountName?: string }>
+    loading: boolean
+  } | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('google_picker') === 'true') {
+        const businessId = params.get('businessId')
+        if (businessId) {
+          return { businessId, locations: [], loading: true }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  })
+  const [googleSelecting, setGoogleSelecting] = useState(false)
+  const [syncingProvider, setSyncingProvider] = useState<string | null>(null)
 
-  const fetchTeamMembers = async () => {
+  const fetchTeamMembers = useCallback(async () => {
     try {
       const res = await fetch('/api/team/members')
       const data = await res.json()
@@ -96,10 +166,24 @@ export default function SettingsPage() {
     } finally {
       setTeamLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    fetchTeamMembers()
+    let ignore = false
+    fetch('/api/team/members')
+      .then(res => res.json())
+      .then(data => {
+        if (!ignore && data) setTeamData(data)
+      })
+      .catch(e => {
+        if (!ignore) console.error('Failed to fetch team members:', e)
+      })
+      .finally(() => {
+        if (!ignore) setTeamLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const handleRevokeInvite = async (invite: PendingInviteItem) => {
@@ -140,25 +224,84 @@ export default function SettingsPage() {
     }
   }
 
-  // Facebook page-picker: check URL for ?facebook_pick_page=1 on mount
+  // URL query param cleanup for OAuth redirects on mount
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
-    if (params.get('facebook_pick_page') === '1') {
-      const businessId = params.get('businessId')
-      const pagesParam = params.get('pages')
-      if (businessId && pagesParam) {
-        try {
-          const pages = JSON.parse(decodeURIComponent(pagesParam))
-          setFbPagePicker({ businessId, pages })
-          // Clean the URL so this doesn't re-trigger on refresh
-          window.history.replaceState({}, '', '/settings')
-        } catch {
-          // Malformed pages param — ignore
-        }
-      }
+
+    if (params.get('facebook_pick_page') === '1' || params.get('google_picker') === 'true') {
+      window.history.replaceState({}, '', '/settings')
+    }
+
+    if (params.get('google') === 'connected') {
+      const location = params.get('location')
+      toast.success('Google Business Profile connected!', {
+        description: location ? `Connected to ${location}` : 'Account authorized.',
+      })
+      window.history.replaceState({}, '', '/settings')
     }
   }, [])
+
+  useEffect(() => {
+    if (!googlePicker?.loading) return
+    let ignore = false
+    fetch(`/api/oauth/google/locations?businessId=${googlePicker.businessId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (!ignore) {
+          if (data?.locations) {
+            setGooglePicker({ businessId: googlePicker.businessId, locations: data.locations || [], loading: false })
+          } else {
+            toast.error('Failed to load Google locations', { description: data?.error })
+            setGooglePicker(null)
+          }
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          toast.error('Network error loading locations')
+          setGooglePicker(null)
+        }
+      })
+    return () => {
+      ignore = true
+    }
+  }, [googlePicker?.loading, googlePicker?.businessId])
+
+  const openGooglePicker = useCallback((businessId: string) => {
+    setGooglePicker({ businessId, locations: [], loading: true })
+  }, [])
+
+
+  const handleSelectGoogleLocation = async (locationId: string, locationTitle: string, placeId?: string) => {
+    if (!googlePicker) return
+    setGoogleSelecting(true)
+    try {
+      const res = await fetch('/api/oauth/google/select-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId: googlePicker.businessId,
+          locationId,
+          locationTitle,
+          placeId: placeId || null,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success(`Google Location "${locationTitle}" connected!`)
+        setGooglePicker(null)
+        // Refresh integration statuses
+        refreshIntegrations()
+      } else {
+        toast.error('Failed to connect location', { description: data.error })
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setGoogleSelecting(false)
+    }
+  }
 
   const handleSelectFbPage = async (pageId: string, pageName: string) => {
     if (!fbPagePicker) return
@@ -174,19 +317,7 @@ export default function SettingsPage() {
         toast.success(`Facebook Page "${pageName}" connected!`)
         setFbPagePicker(null)
         // Refresh integration statuses
-        const intRes = await fetch('/api/integrations')
-        if (intRes.ok) {
-          const intData = await intRes.json()
-          if (Array.isArray(intData.integrations)) {
-            setIntegrations(prev =>
-              prev.map(int => {
-                const fresh = intData.integrations.find((i: { provider: string; status?: string; desc?: string }) => i.provider === int.provider)
-                if (!fresh) return int
-                return { ...int, status: (fresh.status as Integration['status']) || int.status, desc: fresh.desc || int.desc }
-              }),
-            )
-          }
-        }
+        refreshIntegrations()
       } else {
         toast.error('Failed to connect Facebook Page', { description: data.error })
       }
@@ -197,86 +328,141 @@ export default function SettingsPage() {
     }
   }
 
-  // AUD-01: Fetch real integration statuses from the API on mount.
-  // Replaces the hardcoded 'connected' values in INITIAL_INTEGRATIONS.
-  useEffect(() => {
-    let cancelled = false
-    async function fetchIntegrations() {
-      try {
-        const res = await fetch('/api/integrations')
-        if (!res.ok) return
-        const data = await res.json()
-        if (cancelled) return
-        if (Array.isArray(data.integrations)) {
+  const refreshIntegrations = async () => {
+    try {
+      const intRes = await fetch('/api/integrations')
+      if (intRes.ok) {
+        const intData = await intRes.json()
+        if (Array.isArray(intData.integrations)) {
           setIntegrations(prev =>
             prev.map(int => {
-              const fresh = data.integrations.find(
-                (i: { provider: string; status?: string; desc?: string }) => i.provider === int.provider,
-              )
+              const fresh = intData.integrations.find((i: { provider: string; status?: string; desc?: string; locationId?: string; hasLocation?: boolean }) => i.provider === int.provider)
               if (!fresh) return int
               return {
                 ...int,
                 status: (fresh.status as Integration['status']) || int.status,
                 desc: fresh.desc || int.desc,
+                locationId: fresh.locationId,
+                hasLocation: fresh.hasLocation,
               }
             }),
           )
         }
-      } catch {
-        // Network error — leave the safe-default initial state in place
       }
+    } catch {}
+  }
+
+  const handleSyncReviews = async (provider: 'google' | 'facebook') => {
+    try {
+      const businessId = activeBusinessId
+      if (!businessId) {
+        toast.error('No active business selected', { description: 'Please select a location to sync reviews.' })
+        return
+      }
+
+      setSyncingProvider(provider)
+      toast.info(`Syncing reviews from ${provider === 'google' ? 'Google' : 'Facebook'}...`)
+
+      const endpoint = provider === 'google'
+        ? `/api/businesses/${businessId}/sync-reviews`
+        : `/api/businesses/${businessId}/sync-facebook-reviews`
+
+      const res = await fetch(endpoint, { method: 'POST' })
+      const data = await res.json()
+
+      if (res.ok) {
+        toast.success(data.message || `Successfully synced ${provider} reviews!`)
+        refreshIntegrations()
+      } else {
+        if (data.code === 'NO_LOCATION_SELECTED' || data.code === 'MULTIPLE_LOCATIONS_FOUND') {
+          openGooglePicker(businessId)
+        } else {
+          toast.error(`Sync failed`, { description: data.message || data.error })
+        }
+      }
+    } catch {
+      toast.error('Network error syncing reviews')
+    } finally {
+      setSyncingProvider(null)
     }
-    fetchIntegrations()
-    return () => { cancelled = true }
+  }
+
+  // AUD-01: Fetch real integration statuses from the API on mount.
+  // Replaces the hardcoded 'connected' values in INITIAL_INTEGRATIONS.
+  useEffect(() => {
+    let ignore = false
+    fetch('/api/integrations')
+      .then(r => r.ok ? r.json() : null)
+      .then(intData => {
+        if (!ignore && Array.isArray(intData?.integrations)) {
+          setIntegrations(prev =>
+            prev.map(int => {
+              const fresh = intData.integrations.find((i: { provider: string; status?: string; desc?: string; locationId?: string; hasLocation?: boolean }) => i.provider === int.provider)
+              if (!fresh) return int
+              return {
+                ...int,
+                status: (fresh.status as Integration['status']) || int.status,
+                desc: fresh.desc || int.desc,
+                locationId: fresh.locationId,
+                hasLocation: fresh.hasLocation,
+              }
+            }),
+          )
+        }
+      })
+      .catch(() => {})
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const handleToggleIntegration = async (int: Integration) => {
     // Google OAuth — redirect to the real OAuth flow
     if (int.provider === 'google' && int.status !== 'connected') {
-      // Fetch the first business ID for the OAuth state param
-      try {
-        const dashRes = await fetch('/api/dashboard')
-        const dashData = await dashRes.json()
-        const businessId = dashData.businesses?.[0]?.id
-        if (businessId) {
-          window.location.href = `/api/oauth/google?businessId=${businessId}`
-          return
-        }
-      } catch {
-        toast.error('Failed to start Google OAuth')
+      const businessId = activeBusinessId
+      if (businessId) {
+        window.location.assign(new URL(`/api/oauth/google?businessId=${businessId}`, window.location.origin).href)
+        return
+      } else {
+        toast.error('No active business selected', { description: 'Please select a business location first.' })
         return
       }
     }
 
     // Facebook OAuth — redirect to the real OAuth flow
     if (int.provider === 'facebook' && int.status !== 'connected') {
-      try {
-        const dashRes = await fetch('/api/dashboard')
-        const dashData = await dashRes.json()
-        const businessId = dashData.businesses?.[0]?.id
-        if (businessId) {
-          window.location.href = `/api/oauth/facebook?businessId=${businessId}`
-          return
-        }
-      } catch {
-        toast.error('Failed to start Facebook OAuth')
+      const businessId = activeBusinessId
+      if (businessId) {
+        window.location.assign(new URL(`/api/oauth/facebook?businessId=${businessId}`, window.location.origin).href)
+        return
+      } else {
+        toast.error('No active business selected', { description: 'Please select a business location first.' })
         return
       }
+    }
+
+
+    // Roadmap providers are not yet supported
+    if (['yelp', 'trustpilot', 'slack', 'teams'].includes(int.provider)) {
+      toast.info(`${int.name} is a roadmap item and not yet supported. Only Google Business Profile and Facebook Pages are currently supported.`)
+      return
     }
 
     setProcessingProvider(int.provider)
     const action = int.status === 'connected' ? 'disconnect' : 'connect'
     try {
+      const businessId: string | undefined = activeBusinessId || undefined
+
       const res = await fetch('/api/integrations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: int.provider, action }),
+        body: JSON.stringify({ provider: int.provider, action, businessId }),
       })
       const data = await res.json()
       if (res.ok) {
         setIntegrations(prev => prev.map(i =>
           i.provider === int.provider
-            ? { ...i, status: action === 'connect' ? 'connected' : 'available' }
+            ? { ...i, status: (data.status as Integration['status']) || (action === 'disconnect' ? 'available' : i.status) }
             : i
         ))
         toast.success(data.message || `${int.name} ${action}ed`)
@@ -291,10 +477,45 @@ export default function SettingsPage() {
   }
 
   const handleSaveBusiness = async () => {
+    if (!activeBusinessId) {
+      toast.error('No active business selected', { description: 'Please select a business location first.' })
+      return
+    }
+    if (!businessForm.name.trim()) {
+      toast.error('Validation error', { description: 'Business name cannot be empty.' })
+      return
+    }
+
     setSavingBusiness(true)
-    await new Promise(r => setTimeout(r, 1000))
-    setSavingBusiness(false)
-    toast.success('Settings saved', { description: 'Business profile updated' })
+    try {
+      const res = await fetch(`/api/businesses/${activeBusinessId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: businessForm.name.trim(),
+          industry: businessForm.industry.trim() || null,
+          timezone: businessForm.timezone.trim() || 'America/New_York',
+          address: businessForm.address.trim() || null,
+          phone: businessForm.phone.trim() || null,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        toast.success('Business profile updated', { description: 'Your changes have been saved.' })
+        await refreshBusinesses()
+      } else {
+        toast.error('Failed to update business profile', {
+          description: data.error || 'An unexpected error occurred while saving.',
+        })
+      }
+    } catch (e) {
+      console.error('Error saving business profile:', e)
+      toast.error('Network error', { description: 'Failed to connect to the server.' })
+    } finally {
+      setSavingBusiness(false)
+    }
   }
 
   const userIntegrations = integrations.filter(i => i.userFacing)
@@ -307,12 +528,50 @@ export default function SettingsPage() {
           title="Settings"
           description="Manage your business profile, integrations, billing, and team"
         />
-        <div className="p-4 sm:p-6">
+        <div className="p-4 sm:p-6 space-y-6">
+          {businesses.length > 1 && (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-accent/20 border border-border/40 text-xs flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-[var(--brass)] flex-shrink-0" />
+                <span className="font-medium text-foreground">Configuring Location:</span>
+                <Badge variant="outline" className="bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30 font-mono text-[10px]">
+                  {activeBusiness?.name}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-[11px]">Switch location:</span>
+                <select
+                  value={activeBusinessId || ''}
+                  onChange={e => setActiveBusinessId(e.target.value)}
+                  className="bg-card border border-border/60 rounded px-2.5 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-[var(--brass)]"
+                >
+                  {businesses.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
           <Tabs defaultValue="business" className="space-y-6">
             <TabsList className="glass-card flex-wrap">
               <TabsTrigger value="business" className="text-xs">
                 <Building2 className="w-3.5 h-3.5 mr-1.5" />
                 Business
+              </TabsTrigger>
+              <TabsTrigger value="automations" className="text-xs">
+                <Zap className="w-3.5 h-3.5 mr-1.5" />
+                Automations
+              </TabsTrigger>
+              <TabsTrigger value="ai-presets" className="text-xs">
+                <Sliders className="w-3.5 h-3.5 mr-1.5" />
+                AI Presets
+              </TabsTrigger>
+              <TabsTrigger value="templates" className="text-xs">
+                <FileText className="w-3.5 h-3.5 mr-1.5" />
+                Reply Templates
               </TabsTrigger>
               <TabsTrigger value="brand-voice" className="text-xs">
                 <Sparkles className="w-3.5 h-3.5 mr-1.5" />
@@ -343,30 +602,66 @@ export default function SettingsPage() {
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="name">Business Name</Label>
-                    <Input id="name" defaultValue="Bamboo Garden Restaurant" className="mt-1.5 glass-card" />
+                    <Input
+                      id="name"
+                      value={businessForm.name}
+                      onChange={e => setBusinessForm(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="e.g. Bamboo Garden"
+                      className="mt-1.5 glass-card"
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="industry">Industry</Label>
-                      <Input id="industry" defaultValue="restaurant" className="mt-1.5 glass-card capitalize" />
+                      <Input
+                        id="industry"
+                        value={businessForm.industry}
+                        onChange={e => setBusinessForm(prev => ({ ...prev, industry: e.target.value }))}
+                        placeholder="e.g. restaurant, dental, retail"
+                        className="mt-1.5 glass-card capitalize"
+                      />
                     </div>
                     <div>
                       <Label htmlFor="timezone">Timezone</Label>
-                      <Input id="timezone" defaultValue="America/Los_Angeles" className="mt-1.5 glass-card" />
+                      <Input
+                        id="timezone"
+                        value={businessForm.timezone}
+                        onChange={e => setBusinessForm(prev => ({ ...prev, timezone: e.target.value }))}
+                        placeholder="e.g. America/New_York"
+                        className="mt-1.5 glass-card"
+                      />
                     </div>
                   </div>
                   <div>
                     <Label htmlFor="address">Address</Label>
-                    <Input id="address" defaultValue="100 Main Street, Suite 1, San Francisco, CA 94102" className="mt-1.5 glass-card" />
+                    <Input
+                      id="address"
+                      value={businessForm.address}
+                      onChange={e => setBusinessForm(prev => ({ ...prev, address: e.target.value }))}
+                      placeholder="100 Main Street, Suite 1, San Francisco, CA 94102"
+                      className="mt-1.5 glass-card"
+                    />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="phone">Phone</Label>
-                      <Input id="phone" defaultValue="+1 (415) 555-1000" className="mt-1.5 glass-card" />
+                      <Input
+                        id="phone"
+                        value={businessForm.phone}
+                        onChange={e => setBusinessForm(prev => ({ ...prev, phone: e.target.value }))}
+                        placeholder="+1 (415) 555-1000"
+                        className="mt-1.5 glass-card"
+                      />
                     </div>
                     <div>
                       <Label htmlFor="email">Reply-from Email</Label>
-                      <Input id="email" defaultValue="hello@bamboogarden.com" className="mt-1.5 glass-card" />
+                      <Input
+                        id="email"
+                        defaultValue="hello@reviewreply.com"
+                        disabled
+                        title="Reply email is managed by your account email configuration"
+                        className="mt-1.5 glass-card opacity-70 cursor-not-allowed"
+                      />
                     </div>
                   </div>
                   <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]" onClick={handleSaveBusiness} disabled={savingBusiness}>
@@ -375,6 +670,18 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="automations">
+              <AutomationsTab />
+            </TabsContent>
+
+            <TabsContent value="ai-presets">
+              <AiPresetsTab />
+            </TabsContent>
+
+            <TabsContent value="templates">
+              <ReplyTemplatesTab />
             </TabsContent>
 
             <TabsContent value="brand-voice">
@@ -406,25 +713,71 @@ export default function SettingsPage() {
                                     : 'text-muted-foreground'
                                 )}
                               >
-                                {int.status}
+                                {['yelp', 'trustpilot', 'slack', 'teams'].includes(int.provider) ? 'roadmap' : int.status}
                               </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground mb-2">{int.desc}</p>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 text-[10px]"
-                              onClick={() => handleToggleIntegration(int)}
-                              disabled={processingProvider === int.provider}
-                            >
-                              {processingProvider === int.provider ? (
-                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                              ) : int.status === 'connected' ? (
-                                'Disconnect'
+                            <div className="flex gap-1.5 flex-wrap items-center">
+                              {['yelp', 'trustpilot', 'slack', 'teams'].includes(int.provider) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[10px] opacity-60 cursor-not-allowed"
+                                  disabled
+                                >
+                                  Roadmap
+                                </Button>
                               ) : (
-                                'Connect'
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[10px]"
+                                  onClick={() => handleToggleIntegration(int)}
+                                  disabled={processingProvider === int.provider || syncingProvider === int.provider}
+                                >
+                                  {processingProvider === int.provider ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : int.status === 'connected' ? (
+                                    'Disconnect'
+                                  ) : (
+                                    'Connect'
+                                  )}
+                                </Button>
                               )}
-                            </Button>
+
+                              {int.status === 'connected' && (int.provider === 'google' || int.provider === 'facebook') && (
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  className="h-6 text-[10px] bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]"
+                                  onClick={() => handleSyncReviews(int.provider as 'google' | 'facebook')}
+                                  disabled={syncingProvider === int.provider}
+                                >
+                                  {syncingProvider === int.provider ? (
+                                    <Loader2 className="w-2.5 h-2.5 mr-1 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="w-2.5 h-2.5 mr-1" />
+                                  )}
+                                  {syncingProvider === int.provider ? 'Syncing...' : 'Sync Reviews'}
+                                </Button>
+                              )}
+
+                              {int.status === 'connected' && int.provider === 'google' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[10px] text-muted-foreground hover:text-foreground"
+                                  onClick={() => {
+                                    const bId = activeBusinessId
+                                    if (bId) openGooglePicker(bId)
+                                    else toast.error('No active business selected')
+                                  }}
+                                >
+                                  <MapPin className="w-2.5 h-2.5 mr-1" />
+                                  {int.hasLocation ? 'Change Location' : 'Select Location'}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </Card>
@@ -475,47 +828,24 @@ export default function SettingsPage() {
                 <Card className="p-6 glass-card">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="font-display font-bold">Current Plan</h3>
-                      <p className="text-xs text-muted-foreground">Pro plan · $99/month</p>
+                      <h3 className="font-display font-bold">Subscription Status</h3>
+                      <p className="text-xs text-muted-foreground">Managed Organization Plan</p>
                     </div>
-                    <Badge variant="outline" className="bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
-                      Trial · 12 days left
+                    <Badge variant="outline" className="bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30 font-mono text-[10px]">
+                      ACTIVE
                     </Badge>
                   </div>
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    {[
-                      { label: 'Businesses', value: '3 of 3' },
-                      { label: 'SMS sent', value: '142 of 500' },
-                      { label: 'AI drafts', value: '47 of ∞' },
-                    ].map(s => (
-                      <div key={s.label} className="p-3 rounded-lg bg-accent/20">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mb-1">{s.label}</div>
-                        <div className="text-sm font-bold">{s.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button className="bg-[var(--brass)] text-white hover:bg-[var(--brass-dark)]">Upgrade to Enterprise</Button>
-                    <Button variant="outline">Manage billing</Button>
-                  </div>
-                </Card>
-
-                <Card className="p-6 glass-card">
-                  <h3 className="font-display font-bold mb-3">Recent Invoices</h3>
-                  <div className="space-y-2">
-                    {[
-                      { date: 'Aug 1, 2026', amount: '$0.00', status: 'Trial' },
-                      { date: 'Jul 1, 2026', amount: '$0.00', status: 'Trial' },
-                    ].map(inv => (
-                      <div key={inv.date} className="flex items-center justify-between p-3 rounded-lg bg-accent/20">
-                        <div>
-                          <div className="text-sm font-medium">{inv.date}</div>
-                          <div className="text-[10px] text-muted-foreground">{inv.status}</div>
-                        </div>
-                        <div className="text-sm font-mono">{inv.amount}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed mb-4">
+                    Online self-serve billing is currently deferred. Your plan tiers and active location quotas
+                    are managed directly with your organization agreement.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="text-xs text-muted-foreground cursor-not-allowed opacity-80"
+                    disabled
+                  >
+                    Billing Managed by Administrator
+                  </Button>
                 </Card>
               </div>
             </TabsContent>
@@ -657,26 +987,7 @@ export default function SettingsPage() {
                   </div>
                 </Card>
 
-                <Card className="p-6 glass-card">
-                  <h3 className="font-display font-bold mb-4 flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-[var(--brass)]" />
-                    Audit Log
-                  </h3>
-                  <div className="space-y-2">
-                    {[
-                      { action: 'SETTINGS_UPDATE', target: 'Brand voice profile', time: '2 hours ago' },
-                      { action: 'INTEGRATION_CONNECT', target: 'Google Business Profile', time: '3 days ago' },
-                      { action: 'USER_INVITE', target: 'staff@bamboogarden.com', time: '5 days ago' },
-                      { action: 'LOGIN', target: 'Chrome on macOS · San Francisco, US', time: '1 week ago' },
-                    ].map((log, i) => (
-                      <div key={i} className="flex items-center justify-between p-2.5 rounded-lg bg-accent/10 text-xs">
-                        <div className="font-mono text-[10px] text-[var(--brass)] w-32 truncate">{log.action}</div>
-                        <div className="flex-1 truncate text-muted-foreground">{log.target}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono">{log.time}</div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
+                <SecurityAuditLogSection />
               </div>
             </TabsContent>
           </Tabs>
@@ -721,6 +1032,63 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Google Location Picker — shown when user has multiple GBP Locations or clicks Change Location */}
+      {googlePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <MapPin className="w-5 h-5 text-[var(--brass)]" />
+              <h3 className="font-display font-bold text-lg">Select Google Location</h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              Choose which Google Business Profile location to connect for review ingestion.
+            </p>
+
+            {googlePicker.loading ? (
+              <div className="py-8 text-center">
+                <Loader2 className="w-6 h-6 text-[var(--brass)] mx-auto mb-2 animate-spin" />
+                <p className="text-xs text-muted-foreground">Discovering locations from Google...</p>
+              </div>
+            ) : googlePicker.locations.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-xs text-muted-foreground mb-3">No locations found under your Google Business account.</p>
+                <Button variant="outline" size="sm" onClick={() => setGooglePicker(null)}>Close</Button>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {googlePicker.locations.map(loc => (
+                  <button
+                    key={loc.id}
+                    onClick={() => handleSelectGoogleLocation(loc.id, loc.title, loc.placeId)}
+                    disabled={googleSelecting}
+                    className="w-full flex items-start gap-3 p-3 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all text-left disabled:opacity-50"
+                  >
+                    <div className="w-9 h-9 rounded-md bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 mt-0.5">
+                      <MapPin className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{loc.title}</div>
+                      {loc.address && (
+                        <div className="text-[10px] text-muted-foreground truncate">{loc.address}</div>
+                      )}
+                      <div className="text-[9px] text-muted-foreground font-mono mt-0.5">{loc.id.split('/').pop()}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={() => setGooglePicker(null)}
+              disabled={googleSelecting}
+              className="w-full mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -728,19 +1096,21 @@ export default function SettingsPage() {
 // ─────────────────────────────────────────────────────────
 // Brand Voice Training Tab
 // ─────────────────────────────────────────────────────────
+interface BrandVoiceProfile {
+  id?: string
+  businessId?: string
+  examples: Array<{ reviewText: string; replyText: string }>
+  toneGuidelines: string
+  signature: string
+  forbiddenPhrases: string
+  updatedAt?: string | Date
+}
+
 function BrandVoiceTab() {
-  const [profile, setProfile] = useState<{
-    id?: string
-    businessId?: string
-    examples: Array<{ reviewText: string; replyText: string }>
-    toneGuidelines: string
-    signature: string
-    forbiddenPhrases: string
-    updatedAt?: string | Date
-  } | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { activeBusinessId, activeBusiness } = useActiveBusiness()
+  const [profile, setProfile] = useState<BrandVoiceProfile | null>(null)
+  const [loading, setLoading] = useState(Boolean(activeBusinessId))
   const [saving, setSaving] = useState(false)
-  const [businessId, setBusinessId] = useState<string>('')
 
   // Form state
   const [toneGuidelines, setToneGuidelines] = useState('')
@@ -751,37 +1121,51 @@ function BrandVoiceTab() {
   ])
 
   useEffect(() => {
-    // Fetch business ID first
-    fetch('/api/dashboard')
-      .then(r => r.json())
+    if (!activeBusinessId) return
+    let ignore = false
+    fetch(`/api/brand-voice?businessId=${activeBusinessId}`)
+      .then(r => r.ok ? r.json() : null)
       .then(d => {
-        if (d.businesses?.[0]) {
-          setBusinessId(d.businesses[0].id)
-          return fetch(`/api/brand-voice?businessId=${d.businesses[0].id}`)
+        if (!ignore) {
+          if (d?.profile) {
+            setProfile(d.profile)
+            setToneGuidelines(d.profile.toneGuidelines || '')
+            setSignature(d.profile.signature || '')
+            setForbiddenPhrases(d.profile.forbiddenPhrases || '')
+            setExamples(d.profile.examples?.length > 0 ? d.profile.examples : [{ reviewText: '', replyText: '' }])
+          } else {
+            setProfile(null)
+            setToneGuidelines('')
+            setSignature('')
+            setForbiddenPhrases('')
+            setExamples([{ reviewText: '', replyText: '' }])
+          }
         }
       })
-      .then(r => r?.json())
-      .then(d => {
-        if (d?.profile) {
-          setProfile(d.profile)
-          setToneGuidelines(d.profile.toneGuidelines || '')
-          setSignature(d.profile.signature || '')
-          setForbiddenPhrases(d.profile.forbiddenPhrases || '')
-          setExamples(d.profile.examples?.length > 0 ? d.profile.examples : [{ reviewText: '', replyText: '' }])
-        }
-        setLoading(false)
+      .catch(() => {
+        if (!ignore) setProfile(null)
       })
-      .catch(() => setLoading(false))
-  }, [])
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [activeBusinessId])
+
 
   const handleSave = async () => {
+    if (!activeBusinessId) {
+      toast.error('No active business selected')
+      return
+    }
     setSaving(true)
     try {
       const res = await fetch('/api/brand-voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          businessId,
+          businessId: activeBusinessId,
           examples: examples.filter(e => e.reviewText && e.replyText),
           toneGuidelines,
           signature,
@@ -957,5 +1341,117 @@ function BrandVoiceTab() {
         </Button>
       </div>
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────
+// Security Audit Log Section (Tenant-Scoped)
+// ─────────────────────────────────────────────────────────
+interface SecurityAuditEntry {
+  id: string
+  actorId: string | null
+  actorEmail: string | null
+  actorName: string | null
+  action: string
+  targetType: string | null
+  targetId: string | null
+  metadata: string | null
+  ip: string | null
+  createdAt: string
+}
+
+function formatAuditTime(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime()
+    const mins = Math.floor(diff / 60000)
+    const hrs = Math.floor(diff / 3600000)
+    const days = Math.floor(diff / 86400000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    if (hrs < 24) return `${hrs}h ago`
+    if (days < 7) return `${days}d ago`
+    return new Date(iso).toLocaleDateString()
+  } catch {
+    return iso
+  }
+}
+
+function SecurityAuditLogSection() {
+  const [entries, setEntries] = useState<SecurityAuditEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let ignore = false
+    async function loadAuditLog() {
+      try {
+        const res = await fetch('/api/audit-log?limit=10')
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || `HTTP ${res.status}`)
+        }
+        const data = await res.json()
+        if (!ignore) {
+          setEntries(Array.isArray(data.entries) ? data.entries : [])
+          setError(null)
+        }
+      } catch (err) {
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : 'Failed to load audit events')
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadAuditLog()
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  return (
+    <Card className="p-6 glass-card">
+      <h3 className="font-display font-bold mb-4 flex items-center gap-2">
+        <Bell className="w-4 h-4 text-[var(--brass)]" />
+        Audit Log
+      </h3>
+      {loading ? (
+        <div className="py-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-[var(--brass)]" />
+          Loading audit events...
+        </div>
+      ) : error ? (
+        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-500">
+          {error}
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="p-6 text-center text-xs text-muted-foreground">
+          No audit log events recorded for this organization yet.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {entries.map(log => (
+            <div key={log.id} className="flex items-center justify-between p-2.5 rounded-lg bg-accent/10 text-xs gap-3">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <Badge variant="outline" className="font-mono text-[10px] text-[var(--brass)] border-[var(--brass)]/30 shrink-0">
+                  {log.action}
+                </Badge>
+                <span className="truncate text-muted-foreground">
+                  {log.actorName || log.actorEmail || 'System'}
+                  {log.targetType ? ` · ${log.targetType}` : ''}
+                  {log.targetId ? ` (${log.targetId.slice(0, 12)})` : ''}
+                </span>
+              </div>
+              <div className="text-[10px] text-muted-foreground font-mono shrink-0" title={new Date(log.createdAt).toLocaleString()}>
+                {formatAuditTime(log.createdAt)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   )
 }

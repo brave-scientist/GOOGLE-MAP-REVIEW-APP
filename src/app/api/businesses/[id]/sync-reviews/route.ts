@@ -1,31 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { fetchGoogleReviews, googleStarRatingToInt, refreshAccessToken, isGoogleConfigured } from '@/lib/integrations/google-business-profile'
-import { getTokens, updateAccessToken } from '@/lib/oauth-store'
+import {
+  fetchGoogleReviews,
+  googleStarRatingToInt,
+  getValidGoogleAccessToken,
+  isGoogleConfigured,
+  listGoogleAccounts,
+  listGoogleLocations,
+} from '@/lib/integrations/google-business-profile'
 import { ReviewSource, DraftStatus } from '@prisma/client'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
+import { processReviewAutomations } from '@/lib/automation/rule-engine'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// POST /api/businesses/[id]/sync-reviews — Fetch reviews from Google Business Profile
+// POST /api/businesses/[id]/sync-reviews — Fetch & normalize reviews from Google Business Profile
+//
+// SEC-01: Requires auth + verifies business belongs to caller's org.
+//
+// Idempotency:
+//   - Uses composite unique key [source, externalId]
+//   - Identical reviews are counted as 'unchanged' without redundant DB writes
+//   - Updates reviews if text, rating, or reply changed
+//   - Aggregates new average rating and review count onto Business model
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // SEC-01: require auth + verify business belongs to caller's org
+  // 1. Verify authentication
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
   const { id } = await params
 
-  // SEC-01: verify the caller's org owns this business
+  // 2. SEC-01: Verify caller's org owns this business
   const denied = assertBusinessOwnership(ctx, id)
   if (denied) return denied
 
   if (!isGoogleConfigured()) {
     return NextResponse.json({
       error: 'Google Business Profile API not configured',
+      code: 'GOOGLE_NOT_CONFIGURED',
       message: 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env',
     }, { status: 503 })
   }
@@ -36,116 +52,216 @@ export async function POST(
       return NextResponse.json({ error: 'Business not found' }, { status: 404 })
     }
 
-    // Fetch encrypted tokens from the OAuthToken table
-    const tokens = await getTokens(id, 'google')
-    if (!tokens) {
+    // 3. Resolve decrypted Google access token (auto-refreshes if expired)
+    const tokenRes = await getValidGoogleAccessToken(id)
+    if (!tokenRes.success) {
+      const statusCode = tokenRes.code === 'GOOGLE_REAUTH_REQUIRED' ? 401 : 400
       return NextResponse.json({
-        error: 'Google Business Profile not connected',
-        message: 'Connect your Google account in Settings → Integrations first.',
+        error: tokenRes.error,
+        code: tokenRes.code,
+      }, { status: statusCode })
+    }
+
+    const accessToken = tokenRes.accessToken
+
+    // 4. Resolve Google Location resource path
+    let locationResource = business.googleLocationId
+
+    // If location is missing or legacy placeholder, attempt automatic discovery
+    if (!locationResource || locationResource === 'google_connected') {
+      try {
+        const accounts = await listGoogleAccounts(accessToken)
+        const allLocations: any[] = []
+        for (const acc of accounts) {
+          const locs = await listGoogleLocations(accessToken, acc.id || acc.name)
+          allLocations.push(...locs)
+        }
+
+        if (allLocations.length === 1) {
+          locationResource = allLocations[0].id
+          await db.business.update({
+            where: { id },
+            data: { googleLocationId: locationResource },
+          })
+        } else if (allLocations.length > 1) {
+          return NextResponse.json({
+            error: 'Multiple Google locations found. Please select your location in Settings → Integrations.',
+            code: 'MULTIPLE_LOCATIONS_FOUND',
+            multipleLocations: allLocations,
+          }, { status: 400 })
+        } else {
+          return NextResponse.json({
+            error: 'No Google Business Profile location selected.',
+            code: 'NO_LOCATION_SELECTED',
+            message: 'Please connect your Google account and select a location in Settings → Integrations.',
+          }, { status: 400 })
+        }
+      } catch (discErr) {
+        return NextResponse.json({
+          error: 'Could not resolve Google location for business',
+          code: 'LOCATION_RESOLUTION_FAILED',
+          message: 'Please select your Google Business Profile location in Settings → Integrations.',
+        }, { status: 400 })
+      }
+    }
+
+    if (!locationResource || locationResource === 'google_connected') {
+      return NextResponse.json({
+        error: 'No Google Business Profile location selected.',
+        code: 'NO_LOCATION_SELECTED',
+        message: 'Please connect your Google account and select a location in Settings → Integrations.',
       }, { status: 400 })
     }
 
-    // Check if token is expired, refresh if needed
-    let accessToken = tokens.accessToken
-    if (tokens.expiresAt && tokens.expiresAt < new Date()) {
-      const refreshed = await refreshAccessToken(tokens.refreshToken)
-      if (!refreshed) {
-        return NextResponse.json({
-          error: 'Google token expired and refresh failed',
-          message: 'Please reconnect your Google account in Settings → Integrations.',
-        }, { status: 401 })
-      }
-      accessToken = refreshed.access_token
-
-      // Update the stored access token (encrypted)
-      await updateAccessToken(id, 'google', refreshed.access_token, new Date(refreshed.expires_at))
+    // 5. Fetch reviews from Google GBP API
+    let googleReviews: any[] = []
+    try {
+      googleReviews = await fetchGoogleReviews(accessToken, locationResource)
+    } catch (apiError: any) {
+      console.error('[GBP Sync] Google API call failed:', apiError)
+      return NextResponse.json({
+        error: 'Google API call failed',
+        code: 'GOOGLE_API_ERROR',
+        message: apiError.message || 'Failed to fetch reviews from Google Business Profile API',
+      }, { status: 502 })
     }
 
-    // Fetch reviews from Google
-    // Note: accountName and locationName need to be discovered via the GBP API
-    // For now, we use placeholder values — in production, discover via accounts.list and locations.list
-    const accountName = 'accounts/placeholder'
-    const locationName = 'locations/placeholder'
+    // 6. Normalize and upsert reviews idempotently
+    const stats = {
+      fetched: googleReviews.length,
+      created: 0,
+      updated: 0,
+      unchanged: 0,
+      failed: 0,
+    }
 
-    try {
-      const googleReviews = await fetchGoogleReviews(accessToken, accountName, locationName)
-
-      let newCount = 0
-      let updatedCount = 0
-
-      for (const gr of googleReviews) {
+    for (const gr of googleReviews) {
+      try {
         const rating = googleStarRatingToInt(gr.starRating)
+        const externalId = gr.reviewId || (gr.name ? gr.name.split('/').pop() : '')
+        if (!externalId) {
+          stats.failed++
+          continue
+        }
+
+        const commentText = gr.comment || ''
+        const replyComment = gr.reviewReply?.comment || null
+        const repliedAtDate = gr.reviewReply?.updateTime ? new Date(gr.reviewReply.updateTime) : null
+        const authorName = gr.reviewer?.displayName || 'Anonymous'
+        const authorAvatar = gr.reviewer?.profilePhotoUrl || null
+        const createdAtDate = gr.createTime ? new Date(gr.createTime) : new Date()
+
         const existing = await db.review.findUnique({
           where: {
             source_externalId: {
               source: ReviewSource.GOOGLE,
-              externalId: gr.reviewId,
+              externalId,
             },
           },
         })
 
         if (existing) {
-          await db.review.update({
-            where: { id: existing.id },
-            data: {
-              rating,
-              text: gr.comment || '',
-              replyText: gr.reviewReply?.comment || null,
-              repliedAt: gr.reviewReply?.updateTime ? new Date(gr.reviewReply.updateTime) : null,
-              draftStatus: gr.reviewReply ? DraftStatus.POSTED : DraftStatus.NONE,
-            },
-          })
-          updatedCount++
-        } else {
-          await db.review.create({
+          // Check if any normalized content changed
+          const isChanged =
+            existing.rating !== rating ||
+            existing.text !== commentText ||
+            existing.replyText !== replyComment ||
+            existing.author !== authorName
+
+          if (isChanged) {
+            await db.review.update({
+              where: { id: existing.id },
+              data: {
+                rating,
+                text: commentText,
+                author: authorName,
+                authorAvatar,
+                replyText: replyComment,
+                repliedAt: repliedAtDate,
+                draftStatus: replyComment ? DraftStatus.POSTED : existing.draftStatus,
+                fetchedAt: new Date(),
+              },
+            })
+            stats.updated++
+          } else {
+            stats.unchanged++
+          }
+          // Insert new review
+          const newReview = await db.review.create({
             data: {
               businessId: id,
               source: ReviewSource.GOOGLE,
-              externalId: gr.reviewId,
-              author: gr.reviewer?.displayName || 'Anonymous',
-              authorAvatar: gr.reviewer?.profilePhotoUrl || null,
+              externalId,
+              author: authorName,
+              authorAvatar,
               rating,
-              text: gr.comment || '',
-              draftStatus: DraftStatus.NONE,
-              createdAt: gr.createTime ? new Date(gr.createTime) : new Date(),
+              text: commentText,
+              replyText: replyComment,
+              repliedAt: repliedAtDate,
+              draftStatus: replyComment ? DraftStatus.POSTED : DraftStatus.NONE,
+              createdAt: createdAtDate,
               fetchedAt: new Date(),
             },
           })
-          newCount++
-        }
-      }
+          stats.created++
 
-      await db.auditLog.create({
-        data: {
-          actorId: ctx.user.id,
-          action: 'google.sync_reviews',
-          targetType: 'business',
-          targetId: id,
-          metadata: JSON.stringify({
+          // AUTO-01: Trigger automated sentiment classification & escalation routing asynchronously
+          processReviewAutomations({
+            reviewId: newReview.id,
             businessId: id,
-            newReviews: newCount,
-            updatedReviews: updatedCount,
-            totalFetched: googleReviews.length,
-          }),
-        },
-      })
-
-      return NextResponse.json({
-        success: true,
-        newReviews: newCount,
-        updatedReviews: updatedCount,
-        totalFetched: googleReviews.length,
-        message: `Synced ${googleReviews.length} reviews from Google (${newCount} new, ${updatedCount} updated)`,
-      })
-    } catch (apiError) {
-      console.error('Google API call failed:', apiError)
-      return NextResponse.json({
-        error: 'Google API call failed',
-        message: 'Your Google Business Profile API access may still be pending approval (4-6 weeks), or account/location discovery is needed.',
-      }, { status: 502 })
+            actorId: ctx.user.id,
+            eventSource: 'google_sync',
+          }).catch((autoErr) => {
+            console.error('[GBP Sync] Automation trigger non-fatal error:', autoErr)
+          })
+        }
+      } catch (rowErr) {
+        console.error('[GBP Sync] Failed to upsert review row:', rowErr)
+        stats.failed++
+      }
     }
-  } catch (error) {
-    console.error('Google sync error:', error)
-    return NextResponse.json({ error: 'Failed to sync reviews' }, { status: 500 })
+
+    // 7. Recalculate and update business review statistics
+    const agg = await db.review.aggregate({
+      where: { businessId: id },
+      _avg: { rating: true },
+      _count: true,
+    })
+
+    await db.business.update({
+      where: { id },
+      data: {
+        avgRating: Math.round((agg._avg.rating || 0) * 10) / 10,
+        reviewCount: agg._count,
+      },
+    })
+
+    // 8. Record audit log entry
+    await db.auditLog.create({
+      data: {
+        actorId: ctx.user.id,
+        action: 'google.sync_reviews',
+        targetType: 'business',
+        targetId: id,
+        metadata: JSON.stringify({
+          businessId: id,
+          locationResource,
+          stats,
+        }),
+      },
+    })
+
+    return NextResponse.json({
+      success: true,
+      provider: 'google',
+      stats,
+      message: `Synced ${stats.fetched} reviews from Google (${stats.created} new, ${stats.updated} updated, ${stats.unchanged} unchanged)`,
+    })
+  } catch (error: any) {
+    console.error('[GBP Sync] Unexpected sync error:', error)
+    return NextResponse.json(
+      { error: 'Failed to sync reviews from Google', details: error.message },
+      { status: 500 }
+    )
   }
 }

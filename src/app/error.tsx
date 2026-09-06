@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button'
 import { AlertCircle, RefreshCw } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 export default function Error({
   error,
@@ -10,6 +11,8 @@ export default function Error({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  const router = useRouter()
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="text-center max-w-md">
@@ -30,7 +33,7 @@ export default function Error({
             <RefreshCw className="w-4 h-4 mr-2" />
             Try again
           </Button>
-          <Button variant="outline" className="glass-card" onClick={() => window.location.href = '/'}>
+          <Button variant="outline" className="glass-card" onClick={() => router.push('/')}>
             Go home
           </Button>
         </div>

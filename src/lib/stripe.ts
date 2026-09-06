@@ -11,5 +11,6 @@ export const stripe = new Stripe(stripeSecretKey, {
 })
 
 export function isStripeConfigured(): boolean {
-  return !!process.env.STRIPE_SECRET_KEY
+  const key = process.env.STRIPE_SECRET_KEY
+  return !!key && key.trim().length > 0 && !key.includes('placeholder')
 }

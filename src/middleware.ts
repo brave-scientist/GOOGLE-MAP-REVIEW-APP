@@ -42,6 +42,7 @@ const PUBLIC_API_ROUTES = [
   '/api/webhooks/stripe',
   '/api/cron/downgrade-trials',
   '/api/cron/reports',
+  '/api/cron/sync-reviews',
   '/api/health',          // Public — for UptimeRobot / load balancer health checks
   '/api/review-us',       // Public — Review Us page fetches links by slug
   '/api/sms/consent/public', // Public — Customer token verification
@@ -55,6 +56,7 @@ function isPublicRoute(pathname: string): boolean {
   if (pathname.startsWith('/r/')) return true
   if (pathname.startsWith('/review-us/')) return true  // public Review Us page
   if (pathname.startsWith('/consent/')) return true    // public Customer Consent page
+  if (pathname.startsWith('/portal/')) return true     // public Client Portal page
   if (pathname.startsWith('/unsubscribe')) return true
   if (pathname === '/widget.js') return true
   if (pathname.startsWith('/google') && pathname.endsWith('.html')) return true
@@ -64,6 +66,7 @@ function isPublicRoute(pathname: string): boolean {
 }
 
 function isPublicApiRoute(pathname: string): boolean {
+  if (pathname.startsWith('/api/portal/') && pathname.endsWith('/summary')) return true
   return PUBLIC_API_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'))
 }
 

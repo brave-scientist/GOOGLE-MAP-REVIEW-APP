@@ -14,7 +14,7 @@ const RELEASES = [
     date: 'Aug 7, 2026',
     tag: 'major',
     highlights: [
-      { type: 'feature', text: 'Real LLM integration via z-ai-web-dev-sdk — AI drafts now use GLM-4.6 with brand voice prompts' },
+      { type: 'feature', text: 'LLM integration — AI drafts now use ReviewReply AI Engine with customized brand voice prompts' },
       { type: 'feature', text: 'Developer Dashboard (owner-only) — total users, trials, MRR, signups chart, recent activity' },
       { type: 'feature', text: 'Google OAuth login — sign in with Google account' },
       { type: 'feature', text: 'Email OTP login — passwordless authentication via 6-digit code' },
