@@ -17,46 +17,46 @@ export const dynamic = 'force-dynamic'
 // Resolves decrypted access token from DB, queries Google GBP API for
 // accounts and locations, and returns them for user selection.
 export async function GET(request: NextRequest) {
-  const ctx = await getTenantContext(request)
-  if (ctx instanceof NextResponse) return ctx
-
-  const { searchParams } = new URL(request.url)
-  const businessId = searchParams.get('businessId')
-
-  if (!businessId) {
-    return NextResponse.json(
-      { error: 'businessId query parameter is required' },
-      { status: 400 }
-    )
-  }
-
-  const denied = assertBusinessOwnership(ctx, businessId)
-  if (denied) return denied
-
-  // Rate limiting: 10 discovery calls per business per minute
-  const rl = await rateLimit(
-    `google:discovery:${businessId}`,
-    RATE_LIMITS.googleDiscovery.limit,
-    RATE_LIMITS.googleDiscovery.windowMs
-  )
-  if (!rl.allowed) {
-    return NextResponse.json(
-      { error: 'Too many discovery requests. Please wait before retrying.', code: 'RATE_LIMITED' },
-      { status: 429 }
-    )
-  }
-
-  // 1. Get valid Google access token (auto-refreshed if needed)
-  const tokenRes = await getValidGoogleAccessToken(businessId)
-  if (!tokenRes.success) {
-    const status = tokenRes.code === 'GOOGLE_REAUTH_REQUIRED' ? 401 : 400
-    return NextResponse.json(
-      { error: tokenRes.error, code: tokenRes.code },
-      { status }
-    )
-  }
-
   try {
+    const ctx = await getTenantContext(request)
+    if (ctx instanceof NextResponse) return ctx
+
+    const { searchParams } = new URL(request.url)
+    const businessId = searchParams.get('businessId')
+
+    if (!businessId) {
+      return NextResponse.json(
+        { error: 'businessId query parameter is required' },
+        { status: 400 }
+      )
+    }
+
+    const denied = assertBusinessOwnership(ctx, businessId)
+    if (denied) return denied
+
+    // Rate limiting: 10 discovery calls per business per minute
+    const rl = await rateLimit(
+      `google:discovery:${businessId}`,
+      RATE_LIMITS.googleDiscovery.limit,
+      RATE_LIMITS.googleDiscovery.windowMs
+    )
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'Too many discovery requests. Please wait before retrying.', code: 'RATE_LIMITED' },
+        { status: 429 }
+      )
+    }
+
+    // 1. Get valid Google access token (auto-refreshed if needed)
+    const tokenRes = await getValidGoogleAccessToken(businessId)
+    if (!tokenRes.success) {
+      const status = tokenRes.code === 'GOOGLE_REAUTH_REQUIRED' ? 401 : 400
+      return NextResponse.json(
+        { error: tokenRes.error, code: tokenRes.code },
+        { status }
+      )
+    }
+
     // 2. Discover accounts
     const accounts = await listGoogleAccounts(tokenRes.accessToken)
 
@@ -90,8 +90,26 @@ export async function GET(request: NextRequest) {
     })
   } catch (error: any) {
     console.error('[GBP] Failed to discover Google locations:', error?.message || 'Unknown error')
+    const errorMsg = error?.message || ''
+    const isPoolOrDbError =
+      errorMsg.includes('EMAXCONNSESSION') ||
+      errorMsg.includes('max clients reached') ||
+      errorMsg.includes('PrismaClientInitializationError') ||
+      errorMsg.includes('connector')
+
+    if (isPoolOrDbError) {
+      return NextResponse.json(
+        {
+          error: 'Database connection limit reached. Please retry in a few moments.',
+          code: 'DATABASE_POOL_SATURATED',
+          message: 'The database connection pool is currently saturated. Please wait a few seconds and retry.',
+        },
+        { status: 503 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Failed to discover Google locations', code: 'DISCOVERY_FAILED' },
+      { error: 'Failed to discover Google locations', code: 'DISCOVERY_FAILED', message: errorMsg },
       { status: 502 }
     )
   }

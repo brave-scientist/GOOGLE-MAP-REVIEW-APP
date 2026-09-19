@@ -28,25 +28,25 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // 1. Verify authentication
-  const ctx = await getTenantContext(request)
-  if (ctx instanceof NextResponse) return ctx
-
-  const { id } = await params
-
-  // 2. SEC-01: Verify caller's org owns this business
-  const denied = assertBusinessOwnership(ctx, id)
-  if (denied) return denied
-
-  if (!isGoogleConfigured()) {
-    return NextResponse.json({
-      error: 'Google Business Profile API not configured',
-      code: 'GOOGLE_NOT_CONFIGURED',
-      message: 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env',
-    }, { status: 503 })
-  }
-
   try {
+    // 1. Verify authentication
+    const ctx = await getTenantContext(request)
+    if (ctx instanceof NextResponse) return ctx
+
+    const { id } = await params
+
+    // 2. SEC-01: Verify caller's org owns this business
+    const denied = assertBusinessOwnership(ctx, id)
+    if (denied) return denied
+
+    if (!isGoogleConfigured()) {
+      return NextResponse.json({
+        error: 'Google Business Profile API not configured',
+        code: 'GOOGLE_NOT_CONFIGURED',
+        message: 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env',
+      }, { status: 503 })
+    }
+
     const business = await db.business.findUnique({ where: { id } })
     if (!business) {
       return NextResponse.json({ error: 'Business not found' }, { status: 404 })
@@ -161,6 +161,12 @@ export async function POST(
         })
 
         if (existing) {
+          // SEC-COLLISION: Do not mutate review belonging to another business/tenant
+          if (existing.businessId !== id) {
+            stats.unchanged++
+            continue
+          }
+
           // Check if any normalized content changed
           const isChanged =
             existing.rating !== rating ||
@@ -186,34 +192,43 @@ export async function POST(
           } else {
             stats.unchanged++
           }
+        } else {
           // Insert new review
-          const newReview = await db.review.create({
-            data: {
-              businessId: id,
-              source: ReviewSource.GOOGLE,
-              externalId,
-              author: authorName,
-              authorAvatar,
-              rating,
-              text: commentText,
-              replyText: replyComment,
-              repliedAt: repliedAtDate,
-              draftStatus: replyComment ? DraftStatus.POSTED : DraftStatus.NONE,
-              createdAt: createdAtDate,
-              fetchedAt: new Date(),
-            },
-          })
-          stats.created++
+          try {
+            const newReview = await db.review.create({
+              data: {
+                businessId: id,
+                source: ReviewSource.GOOGLE,
+                externalId,
+                author: authorName,
+                authorAvatar,
+                rating,
+                text: commentText,
+                replyText: replyComment,
+                repliedAt: repliedAtDate,
+                draftStatus: replyComment ? DraftStatus.POSTED : DraftStatus.NONE,
+                createdAt: createdAtDate,
+                fetchedAt: new Date(),
+              },
+            })
+            stats.created++
 
-          // AUTO-01: Trigger automated sentiment classification & escalation routing asynchronously
-          processReviewAutomations({
-            reviewId: newReview.id,
-            businessId: id,
-            actorId: ctx.user.id,
-            eventSource: 'google_sync',
-          }).catch((autoErr) => {
-            console.error('[GBP Sync] Automation trigger non-fatal error:', autoErr)
-          })
+            // AUTO-01: Trigger automated sentiment classification & escalation routing asynchronously
+            processReviewAutomations({
+              reviewId: newReview.id,
+              businessId: id,
+              actorId: ctx.user.id,
+              eventSource: 'google_sync',
+            }).catch((autoErr) => {
+              console.error('[GBP Sync] Automation trigger non-fatal error:', autoErr)
+            })
+          } catch (createErr: any) {
+            if (createErr?.code === 'P2002') {
+              stats.unchanged++
+            } else {
+              throw createErr
+            }
+          }
         }
       } catch (rowErr) {
         console.error('[GBP Sync] Failed to upsert review row:', rowErr)
@@ -233,6 +248,9 @@ export async function POST(
       data: {
         avgRating: Math.round((agg._avg.rating || 0) * 10) / 10,
         reviewCount: agg._count,
+        googleSyncStatus: 'completed',
+        googleSyncError: null,
+        googleSyncedAt: new Date(),
       },
     })
 
@@ -259,8 +277,31 @@ export async function POST(
     })
   } catch (error: any) {
     console.error('[GBP Sync] Unexpected sync error:', error)
+    const errorMsg = error?.message || ''
+    const isPoolOrDbError =
+      errorMsg.includes('EMAXCONNSESSION') ||
+      errorMsg.includes('max clients reached') ||
+      errorMsg.includes('PrismaClientInitializationError') ||
+      errorMsg.includes('connector')
+
+    if (isPoolOrDbError) {
+      return NextResponse.json(
+        {
+          error: 'Database connection limit reached. Please retry in a few moments.',
+          code: 'DATABASE_POOL_SATURATED',
+          message: 'The database connection pool is currently saturated. Please wait a few seconds and retry.',
+        },
+        { status: 503 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Failed to sync reviews from Google', details: error.message },
+      {
+        error: 'Failed to sync reviews from Google',
+        code: 'SYNC_FAILED',
+        message: errorMsg || 'An unexpected server error occurred while syncing reviews.',
+        details: process.env.NODE_ENV === 'development' ? errorMsg : undefined,
+      },
       { status: 500 }
     )
   }

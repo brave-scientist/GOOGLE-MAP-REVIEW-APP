@@ -98,7 +98,7 @@ export default function SettingsPage() {
 
   // Synchronize form when activeBusiness changes
   useEffect(() => {
-    ;(async () => {
+    ; (async () => {
       if (activeBusiness) {
         setBusinessForm({
           name: activeBusiness.name || '',
@@ -274,20 +274,30 @@ export default function SettingsPage() {
     if (!googlePicker?.loading) return
     let ignore = false
     fetch(`/api/oauth/google/locations?businessId=${googlePicker.businessId}`)
-      .then(res => res.json())
-      .then(data => {
+      .then(async res => {
+        let data: any = null
+        try {
+          data = await res.json()
+        } catch { }
+        return { ok: res.ok, status: res.status, data }
+      })
+      .then(({ ok, status, data }) => {
         if (!ignore) {
-          if (data?.locations) {
-            setGooglePicker({ businessId: googlePicker.businessId, locations: data.locations || [], loading: false })
+          if (ok && Array.isArray(data?.locations)) {
+            setGooglePicker({ businessId: googlePicker.businessId, locations: data.locations, loading: false })
           } else {
-            toast.error('Failed to load Google locations', { description: data?.error })
+            const desc =
+              data?.message ||
+              data?.error ||
+              (status === 503 ? 'Database busy. Please retry.' : `Server returned status ${status}`)
+            toast.error('Failed to load Google locations', { description: desc })
             setGooglePicker(null)
           }
         }
       })
-      .catch(() => {
+      .catch(err => {
         if (!ignore) {
-          toast.error('Network error loading locations')
+          toast.error('Failed to load Google locations', { description: err?.message || 'Network error' })
           setGooglePicker(null)
         }
       })
@@ -377,7 +387,7 @@ export default function SettingsPage() {
           )
         }
       }
-    } catch {}
+    } catch { }
   }
 
   const handleSyncReviews = async (provider: 'google' | 'facebook') => {
@@ -395,21 +405,49 @@ export default function SettingsPage() {
         ? `/api/businesses/${businessId}/sync-reviews`
         : `/api/businesses/${businessId}/sync-facebook-reviews`
 
-      const res = await fetch(endpoint, { method: 'POST' })
-      const data = await res.json()
+      let res: Response
+      try {
+        res = await fetch(endpoint, { method: 'POST' })
+      } catch (fetchErr: any) {
+        // True network-level failure (DNS, offline, connection dropped before reaching server)
+        toast.error('Network error syncing reviews', {
+          description: fetchErr?.message || 'Failed to connect to the server. Please check your internet connection.',
+        })
+        return
+      }
 
-      if (res.ok) {
+      let data: any = null
+      try {
+        data = await res.json()
+      } catch {
+        // Response body was not valid JSON (e.g. 504 Gateway Timeout HTML or 500 plain text)
+      }
+
+      if (res.ok && data) {
         toast.success(data.message || `Successfully synced ${provider} reviews!`)
         refreshIntegrations()
       } else {
-        if (data.code === 'NO_LOCATION_SELECTED' || data.code === 'MULTIPLE_LOCATIONS_FOUND') {
+        const fallbackError =
+          res.status === 504
+            ? 'Sync timed out. The provider or database took too long to respond.'
+            : res.status === 503
+              ? (data?.message || data?.error || 'Database or service temporarily unavailable. Please retry in a few moments.')
+              : res.status === 401
+                ? 'Authentication required or session expired. Please refresh the page.'
+                : res.status === 403
+                  ? 'You do not have permission to sync reviews for this location.'
+                  : (data?.message || data?.error || `Server error (${res.status}). Please retry.`)
+
+        if (data?.code === 'NO_LOCATION_SELECTED' || data?.code === 'MULTIPLE_LOCATIONS_FOUND') {
           openGooglePicker(businessId)
         } else {
-          toast.error(`Sync failed`, { description: data.message || data.error })
+          toast.error('Sync failed', { description: fallbackError })
         }
       }
-    } catch {
-      toast.error('Network error syncing reviews')
+    } catch (err: any) {
+      toast.error('Sync failed', {
+        description: err?.message || 'An unexpected error occurred.',
+      })
     } finally {
       setSyncingProvider(null)
     }
@@ -984,7 +1022,7 @@ export default function SettingsPage() {
                               const d = new Date(inv.expiresAt)
                               if (!isNaN(d.getTime())) expiresDisplay = d.toLocaleDateString()
                             }
-                          } catch {}
+                          } catch { }
 
                           return (
                             <div key={inv.id} className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
