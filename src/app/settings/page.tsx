@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2, Mail, Clock, UserMinus, RefreshCw, MapPin, FileText, Sliders } from 'lucide-react'
+import { Building2, User, CreditCard, Plug, Shield, Bell, Loader2, Check, Sparkles, Plus, Trash2, Mail, Clock, UserMinus, RefreshCw, MapPin, FileText, Sliders, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { InviteMemberModal } from '@/components/app/admin-modals'
@@ -112,6 +112,7 @@ export default function SettingsPage() {
   }, [activeBusinessId, activeBusiness])
   const [inviteOpen, setInviteOpen] = useState(false)
   const [teamData, setTeamData] = useState<TeamData | null>(null)
+  const [teamError, setTeamError] = useState<string | null>(null)
   const [teamLoading, setTeamLoading] = useState(true)
   const [teamActionLoading, setTeamActionLoading] = useState<string | null>(null)
   const [fbPagePicker, setFbPagePicker] = useState<{ businessId: string; pages: Array<{ id: string; name: string; category: string }> } | null>(() => {
@@ -156,13 +157,23 @@ export default function SettingsPage() {
 
   const fetchTeamMembers = useCallback(async () => {
     try {
+      setTeamLoading(true)
       const res = await fetch('/api/team/members')
-      const data = await res.json()
       if (res.ok) {
-        setTeamData(data)
+        const data = await res.json()
+        if (data && Array.isArray(data.members)) {
+          setTeamData(data)
+          setTeamError(null)
+        } else {
+          setTeamError('Received invalid team data format from server')
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}))
+        setTeamError(errData.error || `Failed to load team members (${res.status})`)
       }
     } catch (e) {
       console.error('Failed to fetch team members:', e)
+      setTeamError('Network error loading team members')
     } finally {
       setTeamLoading(false)
     }
@@ -171,12 +182,29 @@ export default function SettingsPage() {
   useEffect(() => {
     let ignore = false
     fetch('/api/team/members')
-      .then(res => res.json())
+      .then(async res => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          if (!ignore) setTeamError(errData.error || `Failed to load team members (${res.status})`)
+          if (!res.ok) return null
+        }
+        return res.json()
+      })
       .then(data => {
-        if (!ignore && data) setTeamData(data)
+        if (!ignore) {
+          if (data && Array.isArray(data.members)) {
+            setTeamData(data)
+            setTeamError(null)
+          } else {
+            setTeamError('Received invalid team data format from server')
+          }
+        }
       })
       .catch(e => {
-        if (!ignore) console.error('Failed to fetch team members:', e)
+        if (!ignore) {
+          console.error('Failed to fetch team members:', e)
+          setTeamError(e.message || 'Failed to load team members')
+        }
       })
       .finally(() => {
         if (!ignore) setTeamLoading(false)
@@ -392,7 +420,10 @@ export default function SettingsPage() {
   useEffect(() => {
     let ignore = false
     fetch('/api/integrations')
-      .then(r => r.ok ? r.json() : null)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then(intData => {
         if (!ignore && Array.isArray(intData?.integrations)) {
           setIntegrations(prev =>
@@ -410,7 +441,13 @@ export default function SettingsPage() {
           )
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!ignore) {
+          setIntegrations(prev =>
+            prev.map(int => (int.desc === 'Loading…' ? { ...int, desc: 'Status unavailable' } : int))
+          )
+        }
+      })
     return () => {
       ignore = true
     }
@@ -876,21 +913,37 @@ export default function SettingsPage() {
                     <Loader2 className="w-6 h-6 text-[var(--brass)] mx-auto mb-2 animate-spin" />
                     <p className="text-xs text-muted-foreground">Loading members...</p>
                   </div>
+                ) : teamError ? (
+                  <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{teamError}</span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs border-destructive/30 hover:bg-destructive/10 shrink-0"
+                      onClick={fetchTeamMembers}
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" />
+                      Retry
+                    </Button>
+                  </div>
                 ) : (
                   <div className="space-y-4">
                     {/* Active Members */}
                     <div className="space-y-2">
                       <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Active Members ({teamData?.members.length || 0})
+                        Active Members ({teamData?.members?.length ?? 0})
                       </h4>
-                      {teamData?.members.map(m => (
+                      {Array.isArray(teamData?.members) && teamData.members.map(m => (
                         <div key={m.id} className="flex items-center gap-3 p-3 rounded-lg bg-accent/20 hover:bg-accent/30 transition-colors group">
                           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                            {m.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'}
+                            {(m.name || m.email || 'U').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-medium flex items-center gap-1.5">
-                              <span>{m.name}</span>
+                              <span>{m.name || m.email || 'Team Member'}</span>
                               {m.isCurrentUser && (
                                 <Badge variant="outline" className="text-[9px] bg-[var(--brass)]/10 text-[var(--brass)] border-[var(--brass)]/30">
                                   You
@@ -919,40 +972,50 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Pending Invitations */}
-                    {teamData?.pendingInvitations && teamData.pendingInvitations.length > 0 && (
+                    {Array.isArray(teamData?.pendingInvitations) && teamData.pendingInvitations.length > 0 && (
                       <div className="space-y-2 pt-2 border-t border-border/40">
                         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          Pending Invitations ({teamData.pendingInvitations.length})
+                          Pending Invitations ({teamData.pendingInvitations.length ?? 0})
                         </h4>
-                        {teamData.pendingInvitations.map(inv => (
-                          <div key={inv.id} className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
-                            <div className="w-9 h-9 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-600 flex-shrink-0">
-                              <Mail className="w-4 h-4" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium flex items-center gap-2">
-                                <span className="truncate">{inv.email}</span>
-                                <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/30">
-                                  Pending
-                                </Badge>
+                        {teamData.pendingInvitations.map(inv => {
+                          let expiresDisplay = 'N/A'
+                          try {
+                            if (inv.expiresAt) {
+                              const d = new Date(inv.expiresAt)
+                              if (!isNaN(d.getTime())) expiresDisplay = d.toLocaleDateString()
+                            }
+                          } catch {}
+
+                          return (
+                            <div key={inv.id} className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                              <div className="w-9 h-9 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-600 flex-shrink-0">
+                                <Mail className="w-4 h-4" />
                               </div>
-                              <div className="text-[10px] text-muted-foreground flex items-center gap-2">
-                                <span>Role: {inv.role}</span>
-                                <span>·</span>
-                                <span>Expires: {new Date(inv.expiresAt).toLocaleDateString()}</span>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium flex items-center gap-2">
+                                  <span className="truncate">{inv.email}</span>
+                                  <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/30">
+                                    Pending
+                                  </Badge>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-2">
+                                  <span>Role: {inv.role}</span>
+                                  <span>·</span>
+                                  <span>Expires: {expiresDisplay}</span>
+                                </div>
                               </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                                disabled={teamActionLoading === inv.id}
+                                onClick={() => handleRevokeInvite(inv)}
+                              >
+                                Revoke
+                              </Button>
                             </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs text-destructive hover:bg-destructive/10"
-                              disabled={teamActionLoading === inv.id}
-                              onClick={() => handleRevokeInvite(inv)}
-                            >
-                              Revoke
-                            </Button>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -1013,7 +1076,7 @@ export default function SettingsPage() {
                   className="w-full flex items-center gap-3 p-3 rounded-lg border border-border/40 hover:border-[var(--brass)]/40 hover:bg-accent/30 transition-all text-left disabled:opacity-50"
                 >
                   <div className="w-9 h-9 rounded-md bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-                    {page.name.charAt(0).toUpperCase()}
+                    {(page.name || 'P').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{page.name}</div>
@@ -1072,7 +1135,9 @@ export default function SettingsPage() {
                       {loc.address && (
                         <div className="text-[10px] text-muted-foreground truncate">{loc.address}</div>
                       )}
-                      <div className="text-[9px] text-muted-foreground font-mono mt-0.5">{loc.id.split('/').pop()}</div>
+                      <div className="text-[9px] text-muted-foreground font-mono mt-0.5">
+                        {typeof loc.id === 'string' ? loc.id.split('/').pop() : String(loc.id || '')}
+                      </div>
                     </div>
                   </button>
                 ))}

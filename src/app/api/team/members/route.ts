@@ -47,39 +47,56 @@ export async function GET(request: NextRequest) {
       isCurrentUser: m.userId === ctx.user.id,
     }))
 
-    // 2. Fetch pending (unconsumed and non-expired) invitations
-    const pendingInvites = await db.teamInvitation.findMany({
-      where: {
-        orgId: ctx.orgId,
-        consumedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      include: {
-        invitedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+    // 2. Fetch pending (unconsumed and non-expired) invitations defensively
+    let pendingInvitations: Array<{
+      id: string
+      email: string
+      role: string
+      expiresAt: string
+      createdAt: string
+      invitedBy?: {
+        id: string
+        name: string | null
+        email: string
+      }
+    }> = []
+
+    try {
+      const pendingInvites = await db.teamInvitation.findMany({
+        where: {
+          orgId: ctx.orgId,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        include: {
+          invitedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
+        orderBy: { createdAt: 'desc' },
+      })
 
-    const pendingInvitations = pendingInvites.map(inv => ({
-      id: inv.id,
-      email: inv.email,
-      role: inv.role,
-      expiresAt: inv.expiresAt.toISOString(),
-      createdAt: inv.createdAt.toISOString(),
-      invitedBy: inv.invitedBy
-        ? {
-            id: inv.invitedBy.id,
-            name: inv.invitedBy.name,
-            email: inv.invitedBy.email,
-          }
-        : undefined,
-    }))
+      pendingInvitations = pendingInvites.map(inv => ({
+        id: inv.id,
+        email: inv.email,
+        role: inv.role,
+        expiresAt: inv.expiresAt.toISOString(),
+        createdAt: inv.createdAt.toISOString(),
+        invitedBy: inv.invitedBy
+          ? {
+              id: inv.invitedBy.id,
+              name: inv.invitedBy.name,
+              email: inv.invitedBy.email,
+            }
+          : undefined,
+      }))
+    } catch (invitationErr) {
+      console.warn('[TEAM-MEMBERS] Failed to query team invitations, falling back to empty list:', invitationErr)
+    }
 
     const plan = (ctx.user.orgPlan as Plan) || Plan.PRO
     const seatLimit = PLAN_SEAT_LIMITS[plan] || 5
