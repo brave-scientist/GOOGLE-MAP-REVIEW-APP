@@ -137,6 +137,9 @@ export default function SettingsPage() {
     businessId: string
     locations: Array<{ id: string; title: string; address?: string; placeId?: string; accountName?: string }>
     loading: boolean
+    error?: string | null
+    emptyReason?: 'NO_ACCOUNTS' | 'NO_LOCATIONS' | null
+    message?: string | null
   } | null>(() => {
     if (typeof window === 'undefined') return null
     try {
@@ -144,7 +147,7 @@ export default function SettingsPage() {
       if (params.get('google_picker') === 'true') {
         const businessId = params.get('businessId')
         if (businessId) {
-          return { businessId, locations: [], loading: true }
+          return { businessId, locations: [], loading: true, error: null }
         }
       }
     } catch {
@@ -284,21 +287,43 @@ export default function SettingsPage() {
       .then(({ ok, status, data }) => {
         if (!ignore) {
           if (ok && Array.isArray(data?.locations)) {
-            setGooglePicker({ businessId: googlePicker.businessId, locations: data.locations, loading: false })
+            setGooglePicker({
+              businessId: googlePicker.businessId,
+              locations: data.locations,
+              loading: false,
+              error: null,
+              emptyReason: data.emptyReason || null,
+              message: data.message || null,
+            })
           } else {
             const desc =
               data?.message ||
               data?.error ||
               (status === 503 ? 'Database busy. Please retry.' : `Server returned status ${status}`)
             toast.error('Failed to load Google locations', { description: desc })
-            setGooglePicker(null)
+            setGooglePicker({
+              businessId: googlePicker.businessId,
+              locations: [],
+              loading: false,
+              error: desc,
+              emptyReason: null,
+              message: data?.message || null,
+            })
           }
         }
       })
       .catch(err => {
         if (!ignore) {
-          toast.error('Failed to load Google locations', { description: err?.message || 'Network error' })
-          setGooglePicker(null)
+          const desc = err?.message || 'Network error'
+          toast.error('Failed to load Google locations', { description: desc })
+          setGooglePicker({
+            businessId: googlePicker.businessId,
+            locations: [],
+            loading: false,
+            error: desc,
+            emptyReason: null,
+            message: null,
+          })
         }
       })
     return () => {
@@ -307,7 +332,7 @@ export default function SettingsPage() {
   }, [googlePicker?.loading, googlePicker?.businessId])
 
   const openGooglePicker = useCallback((businessId: string) => {
-    setGooglePicker({ businessId, locations: [], loading: true })
+    setGooglePicker({ businessId, locations: [], loading: true, error: null, emptyReason: null, message: null })
   }, [])
 
 
@@ -1151,10 +1176,45 @@ export default function SettingsPage() {
                 <Loader2 className="w-6 h-6 text-[var(--brass)] mx-auto mb-2 animate-spin" />
                 <p className="text-xs text-muted-foreground">Discovering locations from Google...</p>
               </div>
+            ) : googlePicker.error ? (
+              <div className="py-6 text-center space-y-3">
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-left">
+                  <p className="text-xs font-semibold text-destructive mb-1">Discovery Failed</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{googlePicker.error}</p>
+                </div>
+                <div className="flex gap-2 justify-center">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => openGooglePicker(googlePicker.businessId)}
+                  >
+                    Retry Discovery
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setGooglePicker(null)}>
+                    Close
+                  </Button>
+                </div>
+              </div>
             ) : googlePicker.locations.length === 0 ? (
-              <div className="py-6 text-center">
-                <p className="text-xs text-muted-foreground mb-3">No locations found under your Google Business account.</p>
-                <Button variant="outline" size="sm" onClick={() => setGooglePicker(null)}>Close</Button>
+              <div className="py-6 text-center space-y-3">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {googlePicker.message ||
+                    (googlePicker.emptyReason === 'NO_ACCOUNTS'
+                      ? 'No Google Business Profile accounts found for this Google user. Please ensure you connected the Google account that manages your business listing.'
+                      : 'No verified business locations found under your Google Business account.')}
+                </p>
+                <div className="flex gap-2 justify-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openGooglePicker(googlePicker.businessId)}
+                  >
+                    Refresh
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setGooglePicker(null)}>
+                    Close
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="space-y-2 max-h-60 overflow-y-auto">

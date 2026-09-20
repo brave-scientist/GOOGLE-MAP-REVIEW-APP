@@ -302,15 +302,15 @@ async function runTests() {
     const settingsPageCode = fs.readFileSync(
       path.resolve(__dirname, '../src/app/settings/page.tsx'),
       'utf8'
-    )
+    ).replace(/\r\n/g, '\n')
     const syncRouteCode = fs.readFileSync(
       path.resolve(__dirname, '../src/app/api/businesses/[id]/sync-reviews/route.ts'),
       'utf8'
-    )
+    ).replace(/\r\n/g, '\n')
     const locationsRouteCode = fs.readFileSync(
       path.resolve(__dirname, '../src/app/api/oauth/google/locations/route.ts'),
       'utf8'
-    )
+    ).replace(/\r\n/g, '\n')
 
     assert(
       settingsPageCode.includes('let data: any = null') && settingsPageCode.includes('try {\n        data = await res.json()'),

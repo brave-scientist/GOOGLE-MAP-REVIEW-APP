@@ -513,38 +513,116 @@ export interface GoogleLocation {
   accountName?: string
 }
 
+export class GoogleApiError extends Error {
+  public statusCode: number
+  public code: string
+  public originalMessage: string
+
+  constructor(message: string, statusCode: number, code: string, originalMessage?: string) {
+    super(message)
+    this.name = 'GoogleApiError'
+    this.statusCode = statusCode
+    this.code = code
+    this.originalMessage = originalMessage || message
+  }
+}
+
 /**
  * Lists accounts associated with the authenticated Google user.
- * Queries Google My Business Account Management API v1, with v4 fallback.
+ * Queries Google My Business Account Management API v1, with v4 fallback on 404.
+ * Never silently swallows auth, permission, or quota errors.
  */
 export async function listGoogleAccounts(accessToken: string): Promise<GoogleAccount[]> {
-  const urls = [
-    'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
-    `${GBP_API_BASE}/accounts`,
-  ]
+  const allAccounts: GoogleAccount[] = []
+  let pageToken: string | undefined
+  let pages = 0
+  const maxPages = 5
 
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${accessToken}` },
-      })
+  while (pages < maxPages) {
+    const url = pageToken
+      ? `https://mybusinessaccountmanagement.googleapis.com/v1/accounts?pageToken=${encodeURIComponent(pageToken)}`
+      : 'https://mybusinessaccountmanagement.googleapis.com/v1/accounts'
 
-      if (response.ok) {
-        const data = await response.json()
-        const rawAccounts = data.accounts || []
-        return rawAccounts.map((acc: any) => ({
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      const rawAccounts = Array.isArray(data?.accounts) ? data.accounts : []
+      for (const acc of rawAccounts) {
+        allAccounts.push({
           id: acc.name || `accounts/${acc.accountNumber || acc.name}`,
           name: acc.name || '',
           accountName: acc.accountName || acc.name || 'Personal Account',
           type: acc.type || 'PERSONAL',
-        }))
+        })
       }
-    } catch (err) {
-      console.warn(`[GBP] Account fetch from ${url} failed, trying fallback:`, err)
+
+      const nextToken = typeof data?.nextPageToken === 'string' ? data.nextPageToken.trim() : ''
+      if (!nextToken || nextToken === pageToken || rawAccounts.length === 0) break
+      pageToken = nextToken
+      pages++
+    } else {
+      let errorData: any = null
+      try {
+        errorData = await response.json()
+      } catch {}
+      const googleMsg = errorData?.error?.message || response.statusText || 'Google API error'
+
+      if (response.status === 401) {
+        throw new GoogleApiError(
+          'Google session expired or invalid. Please re-authenticate your Google account.',
+          401,
+          'GOOGLE_REAUTH_REQUIRED',
+          googleMsg
+        )
+      }
+      if (response.status === 403) {
+        throw new GoogleApiError(
+          'Google Business Profile permission denied. Please verify your Google account has permissions to manage this business and the required Google Cloud APIs are enabled.',
+          403,
+          'GOOGLE_PERMISSION_DENIED',
+          googleMsg
+        )
+      }
+      if (response.status === 429) {
+        throw new GoogleApiError(
+          'Google API quota or rate limit exceeded. Please try again later.',
+          429,
+          'GOOGLE_QUOTA_EXCEEDED',
+          googleMsg
+        )
+      }
+      if (response.status === 404 && pages === 0) {
+        // Fallback to legacy v4 endpoint only on 404
+        try {
+          const fallbackRes = await fetch(`${GBP_API_BASE}/accounts`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          })
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json()
+            const rawAccounts = Array.isArray(data?.accounts) ? data.accounts : []
+            return rawAccounts.map((acc: any) => ({
+              id: acc.name || `accounts/${acc.accountNumber || acc.name}`,
+              name: acc.name || '',
+              accountName: acc.accountName || acc.name || 'Personal Account',
+              type: acc.type || 'PERSONAL',
+            }))
+          }
+        } catch {}
+      }
+
+      throw new GoogleApiError(
+        `Google API returned error status ${response.status}: ${googleMsg}`,
+        response.status >= 500 ? 502 : response.status,
+        'GOOGLE_API_ERROR',
+        googleMsg
+      )
     }
   }
 
-  return []
+  return allAccounts
 }
 
 /**
@@ -563,51 +641,118 @@ function formatStorefrontAddress(addr: any): string {
 
 /**
  * Lists locations for a specified Google Business Profile account.
- * Queries Google My Business Information API v1, with v4 fallback.
+ * Queries Google My Business Information API v1, with pagination support and v4 fallback on 404.
+ * Never silently swallows auth, permission, or quota errors.
  */
 export async function listGoogleLocations(
   accessToken: string,
   accountName: string
 ): Promise<GoogleLocation[]> {
   const cleanAccount = accountName.startsWith('accounts/') ? accountName : `accounts/${accountName}`
-  const urls = [
-    `https://mybusinessbusinessinformation.googleapis.com/v1/${cleanAccount}/locations?readMask=name,title,storefrontAddress,metadata`,
-    `${GBP_API_BASE}/${cleanAccount}/locations`,
-  ]
+  const allLocations: GoogleLocation[] = []
+  let pageToken: string | undefined
+  let pages = 0
+  const maxPages = 10
 
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${accessToken}` },
-      })
+  while (pages < maxPages) {
+    const baseUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${cleanAccount}/locations?readMask=name,title,storefrontAddress,metadata`
+    const url = pageToken ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}` : baseUrl
 
-      if (response.ok) {
-        const data = await response.json()
-        const rawLocations = data.locations || []
-        return rawLocations.map((loc: any) => {
-          // Normalize location resource path:
-          // Format is usually 'accounts/{accId}/locations/{locId}' or 'locations/{locId}'
-          const locName = loc.name || ''
-          const canonicalId = locName.startsWith('accounts/')
-            ? locName
-            : `${cleanAccount}/${locName.replace(/^\/+/, '')}`
+    const response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    })
 
-          return {
-            id: canonicalId,
-            name: locName,
-            title: loc.title || loc.locationName || 'Unnamed Location',
-            address: formatStorefrontAddress(loc.storefrontAddress || loc.address),
-            placeId: loc.metadata?.placeId || loc.placeId || '',
-            accountName: cleanAccount,
-          }
+    if (response.ok) {
+      const data = await response.json()
+      const rawLocations = Array.isArray(data?.locations) ? data.locations : []
+      for (const loc of rawLocations) {
+        const locName = loc.name || ''
+        const canonicalId = locName.startsWith('accounts/')
+          ? locName
+          : `${cleanAccount}/${locName.replace(/^\/+/, '')}`
+
+        allLocations.push({
+          id: canonicalId,
+          name: locName,
+          title: loc.title || loc.locationName || 'Unnamed Location',
+          address: formatStorefrontAddress(loc.storefrontAddress || loc.address),
+          placeId: loc.metadata?.placeId || loc.placeId || '',
+          accountName: cleanAccount,
         })
       }
-    } catch (err) {
-      console.warn(`[GBP] Location fetch from ${url} failed, trying fallback:`, err)
+
+      const nextToken = typeof data?.nextPageToken === 'string' ? data.nextPageToken.trim() : ''
+      if (!nextToken || nextToken === pageToken || rawLocations.length === 0) break
+      pageToken = nextToken
+      pages++
+    } else {
+      let errorData: any = null
+      try {
+        errorData = await response.json()
+      } catch {}
+      const googleMsg = errorData?.error?.message || response.statusText || 'Google API error'
+
+      if (response.status === 401) {
+        throw new GoogleApiError(
+          'Google session expired or invalid. Please re-authenticate your Google account.',
+          401,
+          'GOOGLE_REAUTH_REQUIRED',
+          googleMsg
+        )
+      }
+      if (response.status === 403) {
+        throw new GoogleApiError(
+          `Access to locations for account ${cleanAccount} was denied. Please verify your permissions in Google Business Profile.`,
+          403,
+          'GOOGLE_PERMISSION_DENIED',
+          googleMsg
+        )
+      }
+      if (response.status === 429) {
+        throw new GoogleApiError(
+          'Google API rate limit reached. Please try again later.',
+          429,
+          'GOOGLE_QUOTA_EXCEEDED',
+          googleMsg
+        )
+      }
+      if (response.status === 404 && pages === 0) {
+        // Fallback to legacy v4 endpoint only on 404
+        try {
+          const fallbackRes = await fetch(`${GBP_API_BASE}/${cleanAccount}/locations`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          })
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json()
+            const rawLocations = Array.isArray(data?.locations) ? data.locations : []
+            return rawLocations.map((loc: any) => {
+              const locName = loc.name || ''
+              const canonicalId = locName.startsWith('accounts/')
+                ? locName
+                : `${cleanAccount}/${locName.replace(/^\/+/, '')}`
+              return {
+                id: canonicalId,
+                name: locName,
+                title: loc.title || loc.locationName || 'Unnamed Location',
+                address: formatStorefrontAddress(loc.storefrontAddress || loc.address),
+                placeId: loc.metadata?.placeId || loc.placeId || '',
+                accountName: cleanAccount,
+              }
+            })
+          }
+        } catch {}
+      }
+
+      throw new GoogleApiError(
+        `Google API returned error status ${response.status}: ${googleMsg}`,
+        response.status >= 500 ? 502 : response.status,
+        'GOOGLE_API_ERROR',
+        googleMsg
+      )
     }
   }
 
-  return []
+  return allLocations
 }
 
 // Fetch reviews from Google Business Profile with pagination support

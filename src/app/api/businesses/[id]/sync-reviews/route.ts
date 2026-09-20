@@ -7,6 +7,7 @@ import {
   isGoogleConfigured,
   listGoogleAccounts,
   listGoogleLocations,
+  GoogleApiError,
 } from '@/lib/integrations/google-business-profile'
 import { ReviewSource, DraftStatus } from '@prisma/client'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
@@ -96,7 +97,14 @@ export async function POST(
             message: 'Please connect your Google account and select a location in Settings → Integrations.',
           }, { status: 400 })
         }
-      } catch (discErr) {
+      } catch (discErr: any) {
+        if (discErr instanceof GoogleApiError || discErr?.name === 'GoogleApiError') {
+          return NextResponse.json({
+            error: discErr.message,
+            code: discErr.code || 'LOCATION_RESOLUTION_FAILED',
+            message: discErr.message,
+          }, { status: discErr.statusCode || 400 })
+        }
         return NextResponse.json({
           error: 'Could not resolve Google location for business',
           code: 'LOCATION_RESOLUTION_FAILED',

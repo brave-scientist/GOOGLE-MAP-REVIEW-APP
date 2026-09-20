@@ -6,6 +6,7 @@ import {
   listGoogleLocations,
   GoogleLocation,
   GoogleAccount,
+  GoogleApiError,
 } from '@/lib/integrations/google-business-profile'
 import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     if (!businessId) {
       return NextResponse.json(
-        { error: 'businessId query parameter is required' },
+        { error: 'businessId query parameter is required', code: 'MISSING_BUSINESS_ID' },
         { status: 400 }
       )
     }
@@ -64,12 +65,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         accounts: [],
         locations: [],
-        message: 'No Google Business Profile accounts found for this Google user.',
+        emptyReason: 'NO_ACCOUNTS',
+        message: 'No Google Business Profile accounts found for this Google user. Please ensure you connected the Google account that owns or manages your business listing.',
       })
     }
 
     // 3. Discover locations across all accounts
     const allLocations: GoogleLocation[] = []
+    let failedAccountCount = 0
+    let lastAccountErrorMsg = ''
+
     for (const account of accounts) {
       try {
         const locations = await listGoogleLocations(tokenRes.accessToken, account.id || account.name)
@@ -79,9 +84,33 @@ export async function GET(request: NextRequest) {
             accountName: account.accountName || account.name,
           })
         }
-      } catch (locErr) {
-        console.warn(`[GBP] Failed to fetch locations for account ${account.name}:`, locErr)
+      } catch (locErr: any) {
+        failedAccountCount++
+        lastAccountErrorMsg = locErr?.message || ''
+        console.warn(`[GBP] Failed to fetch locations for account ${account.name}:`, locErr?.message || locErr)
       }
+    }
+
+    // If accounts were found, but every account query threw an error:
+    if (accounts.length > 0 && allLocations.length === 0 && failedAccountCount === accounts.length) {
+      return NextResponse.json(
+        {
+          error: 'Failed to retrieve locations from Google Business Profile.',
+          code: 'GOOGLE_LOCATION_FETCH_FAILED',
+          message: lastAccountErrorMsg || 'Could not fetch locations from your Google Business Profile accounts. Please verify your permissions and try again.',
+        },
+        { status: 502 }
+      )
+    }
+
+    // Legitimate empty locations under the accounts
+    if (allLocations.length === 0) {
+      return NextResponse.json({
+        accounts,
+        locations: [],
+        emptyReason: 'NO_LOCATIONS',
+        message: 'No business locations found under your Google Business Profile account. Please create or verify a location in Google Business Profile.',
+      })
     }
 
     return NextResponse.json({
@@ -90,6 +119,18 @@ export async function GET(request: NextRequest) {
     })
   } catch (error: any) {
     console.error('[GBP] Failed to discover Google locations:', error?.message || 'Unknown error')
+
+    if (error instanceof GoogleApiError || error?.name === 'GoogleApiError') {
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: error.code || 'GOOGLE_API_ERROR',
+          message: error.message,
+        },
+        { status: error.statusCode || 502 }
+      )
+    }
+
     const errorMsg = error?.message || ''
     const isPoolOrDbError =
       errorMsg.includes('EMAXCONNSESSION') ||
