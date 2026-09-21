@@ -517,13 +517,15 @@ export class GoogleApiError extends Error {
   public statusCode: number
   public code: string
   public originalMessage: string
+  public subcode?: string
 
-  constructor(message: string, statusCode: number, code: string, originalMessage?: string) {
+  constructor(message: string, statusCode: number, code: string, originalMessage?: string, subcode?: string) {
     super(message)
     this.name = 'GoogleApiError'
     this.statusCode = statusCode
     this.code = code
     this.originalMessage = originalMessage || message
+    this.subcode = subcode
   }
 }
 
@@ -570,6 +572,27 @@ export async function listGoogleAccounts(accessToken: string): Promise<GoogleAcc
       } catch {}
       const googleMsg = errorData?.error?.message || response.statusText || 'Google API error'
 
+      // Check fallback to legacy v4 endpoint on 404 or 403 (e.g. if v1 Account Management is unavailable or disabled)
+      if ((response.status === 404 || response.status === 403) && pages === 0) {
+        try {
+          const fallbackRes = await fetch(`${GBP_API_BASE}/accounts`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          })
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json()
+            const rawAccounts = Array.isArray(data?.accounts) ? data.accounts : []
+            if (rawAccounts.length > 0) {
+              return rawAccounts.map((acc: any) => ({
+                id: acc.name || `accounts/${acc.accountNumber || acc.name}`,
+                name: acc.name || '',
+                accountName: acc.accountName || acc.name || 'Personal Account',
+                type: acc.type || 'PERSONAL',
+              }))
+            }
+          }
+        } catch {}
+      }
+
       if (response.status === 401) {
         throw new GoogleApiError(
           'Google session expired or invalid. Please re-authenticate your Google account.',
@@ -579,11 +602,32 @@ export async function listGoogleAccounts(accessToken: string): Promise<GoogleAcc
         )
       }
       if (response.status === 403) {
+        const isServiceDisabled =
+          googleMsg.toLowerCase().includes('disabled') ||
+          googleMsg.toLowerCase().includes('has not been used in project') ||
+          errorData?.error?.details?.some((d: any) => d.reason === 'SERVICE_DISABLED')
+        const isScopeInsufficient =
+          googleMsg.toLowerCase().includes('insufficient') ||
+          errorData?.error?.details?.some((d: any) => d.reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT')
+
+        const subcode = isServiceDisabled
+          ? 'GOOGLE_API_DISABLED'
+          : isScopeInsufficient
+            ? 'GOOGLE_SCOPE_INSUFFICIENT'
+            : 'GOOGLE_PERMISSION_DENIED'
+
+        const message = isServiceDisabled
+          ? 'Google Business Profile API is disabled in your Google Cloud project. The required Google Cloud APIs are disabled. Please enable "My Business Account Management API" and "My Business Business Information API" in the Google Cloud Console.'
+          : isScopeInsufficient
+            ? 'Google authorization lacks required permissions (missing required permissions). Please reconnect your Google account and grant all requested scopes.'
+            : 'Google Business Profile permission denied. Please verify your Google account has permissions to manage this business and the required Google Cloud APIs are enabled.'
+
         throw new GoogleApiError(
-          'Google Business Profile permission denied. Please verify your Google account has permissions to manage this business and the required Google Cloud APIs are enabled.',
+          message,
           403,
           'GOOGLE_PERMISSION_DENIED',
-          googleMsg
+          googleMsg,
+          subcode
         )
       }
       if (response.status === 429) {
@@ -594,24 +638,6 @@ export async function listGoogleAccounts(accessToken: string): Promise<GoogleAcc
           googleMsg
         )
       }
-      if (response.status === 404 && pages === 0) {
-        // Fallback to legacy v4 endpoint only on 404
-        try {
-          const fallbackRes = await fetch(`${GBP_API_BASE}/accounts`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-          })
-          if (fallbackRes.ok) {
-            const data = await fallbackRes.json()
-            const rawAccounts = Array.isArray(data?.accounts) ? data.accounts : []
-            return rawAccounts.map((acc: any) => ({
-              id: acc.name || `accounts/${acc.accountNumber || acc.name}`,
-              name: acc.name || '',
-              accountName: acc.accountName || acc.name || 'Personal Account',
-              type: acc.type || 'PERSONAL',
-            }))
-          }
-        } catch {}
-      }
 
       throw new GoogleApiError(
         `Google API returned error status ${response.status}: ${googleMsg}`,
@@ -621,6 +647,7 @@ export async function listGoogleAccounts(accessToken: string): Promise<GoogleAcc
       )
     }
   }
+
 
   return allAccounts
 }
@@ -692,6 +719,35 @@ export async function listGoogleLocations(
       } catch {}
       const googleMsg = errorData?.error?.message || response.statusText || 'Google API error'
 
+      if ((response.status === 404 || response.status === 403) && pages === 0) {
+        // Fallback to legacy v4 endpoint on 404 or 403
+        try {
+          const fallbackRes = await fetch(`${GBP_API_BASE}/${cleanAccount}/locations`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+          })
+          if (fallbackRes.ok) {
+            const data = await fallbackRes.json()
+            const rawLocations = Array.isArray(data?.locations) ? data.locations : []
+            if (rawLocations.length > 0) {
+              return rawLocations.map((loc: any) => {
+                const locName = loc.name || ''
+                const canonicalId = locName.startsWith('accounts/')
+                  ? locName
+                  : `${cleanAccount}/${locName.replace(/^\/+/, '')}`
+                return {
+                  id: canonicalId,
+                  name: locName,
+                  title: loc.title || loc.locationName || 'Unnamed Location',
+                  address: formatStorefrontAddress(loc.storefrontAddress || loc.address),
+                  placeId: loc.metadata?.placeId || loc.placeId || '',
+                  accountName: cleanAccount,
+                }
+              })
+            }
+          }
+        } catch {}
+      }
+
       if (response.status === 401) {
         throw new GoogleApiError(
           'Google session expired or invalid. Please re-authenticate your Google account.',
@@ -701,11 +757,23 @@ export async function listGoogleLocations(
         )
       }
       if (response.status === 403) {
+        const isServiceDisabled =
+          googleMsg.toLowerCase().includes('disabled') ||
+          googleMsg.toLowerCase().includes('has not been used in project') ||
+          errorData?.error?.details?.some((d: any) => d.reason === 'SERVICE_DISABLED')
+
+        const subcode = isServiceDisabled ? 'GOOGLE_API_DISABLED' : 'GOOGLE_PERMISSION_DENIED'
+
+        const message = isServiceDisabled
+          ? 'Google Business Information API is disabled in your Google Cloud project. The required Google Cloud APIs are disabled. Please verify that "My Business Business Information API" is enabled in the Google Cloud Console.'
+          : `Access to locations for account ${cleanAccount} was denied. Please verify your permissions in Google Business Profile.`
+
         throw new GoogleApiError(
-          `Access to locations for account ${cleanAccount} was denied. Please verify your permissions in Google Business Profile.`,
+          message,
           403,
           'GOOGLE_PERMISSION_DENIED',
-          googleMsg
+          googleMsg,
+          subcode
         )
       }
       if (response.status === 429) {
@@ -716,32 +784,6 @@ export async function listGoogleLocations(
           googleMsg
         )
       }
-      if (response.status === 404 && pages === 0) {
-        // Fallback to legacy v4 endpoint only on 404
-        try {
-          const fallbackRes = await fetch(`${GBP_API_BASE}/${cleanAccount}/locations`, {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-          })
-          if (fallbackRes.ok) {
-            const data = await fallbackRes.json()
-            const rawLocations = Array.isArray(data?.locations) ? data.locations : []
-            return rawLocations.map((loc: any) => {
-              const locName = loc.name || ''
-              const canonicalId = locName.startsWith('accounts/')
-                ? locName
-                : `${cleanAccount}/${locName.replace(/^\/+/, '')}`
-              return {
-                id: canonicalId,
-                name: locName,
-                title: loc.title || loc.locationName || 'Unnamed Location',
-                address: formatStorefrontAddress(loc.storefrontAddress || loc.address),
-                placeId: loc.metadata?.placeId || loc.placeId || '',
-                accountName: cleanAccount,
-              }
-            })
-          }
-        } catch {}
-      }
 
       throw new GoogleApiError(
         `Google API returned error status ${response.status}: ${googleMsg}`,
@@ -751,6 +793,7 @@ export async function listGoogleLocations(
       )
     }
   }
+
 
   return allLocations
 }
@@ -839,11 +882,35 @@ export async function verifyGoogleLocation(
       }
     }
   } catch {
-    return null
+    // Continue to direct location lookup
   }
+
+
+  // Direct location lookup fallback:
+  // If account enumeration was denied or empty, verify whether this specific location
+  // resource is directly accessible with the caller's Google credentials.
+  const cleanLocation = locationId.startsWith('/') ? locationId.slice(1) : locationId
+  const resourceName = cleanLocation.startsWith('locations/') ? cleanLocation : `locations/${cleanLocation}`
+  try {
+    const directUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${resourceName}?readMask=name,title,storefrontAddress,metadata`
+    const directRes = await fetch(directUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    })
+    if (directRes.ok) {
+      const loc = await directRes.json()
+      return {
+        id: loc.name?.replace(/^locations\//, '') || cleanLocation.replace(/^locations\//, ''),
+        name: loc.name || resourceName,
+        title: loc.title || loc.locationName || 'Verified Location',
+        address: formatStorefrontAddress(loc.storefrontAddress || loc.address),
+        placeId: loc.metadata?.placeId || loc.placeId || '',
+      }
+    }
+  } catch {}
 
   return null
 }
+
 
 
 // Post a reply to a Google review

@@ -12,6 +12,8 @@ import {
 import { ReviewSource, DraftStatus } from '@prisma/client'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { processReviewAutomations } from '@/lib/automation/rule-engine'
+import { isDatabasePoolError } from '@/lib/db-errors'
+
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -79,12 +81,66 @@ export async function POST(
         }
 
         if (allLocations.length === 1) {
-          locationResource = allLocations[0].id
+          const singleLoc = allLocations[0]
+
+          // Cross-tenant collision check: location cannot be attached to another organization
+          const bareId = singleLoc.id.includes('/') ? singleLoc.id.split('/').pop()! : singleLoc.id
+          const idVariants = [
+            singleLoc.id,
+            singleLoc.name,
+            bareId,
+            `locations/${bareId}`,
+          ].filter(Boolean)
+
+          const conflictingBusiness = await db.business.findFirst({
+            where: {
+              OR: [
+                { googleLocationId: { in: idVariants } },
+                { googleLocationId: { endsWith: bareId } },
+              ],
+              id: { not: id },
+              orgId: { not: ctx.orgId },
+            },
+            select: { id: true, orgId: true },
+          })
+
+          if (conflictingBusiness) {
+            return NextResponse.json({
+              error: 'This Google location is already connected to another organization.',
+              code: 'LOCATION_ALREADY_ATTACHED',
+            }, { status: 409 })
+          }
+
+          locationResource = singleLoc.id
           await db.business.update({
             where: { id },
-            data: { googleLocationId: locationResource },
+            data: {
+              googleLocationId: locationResource,
+              googlePlaceId: singleLoc.placeId || null,
+              googleLocationVerified: true,
+              googleSyncStatus: 'pending',
+              googleSyncError: null,
+            },
+          })
+
+          await db.auditLog.create({
+            data: {
+              actorId: ctx.user.id,
+              action: 'google.location_verified',
+              targetType: 'business',
+              targetId: id,
+              metadata: JSON.stringify({
+                businessId: id,
+                locationId: singleLoc.id,
+                locationTitle: singleLoc.title,
+                placeId: singleLoc.placeId,
+                autoSelected: true,
+                source: 'sync_reviews_auto_discovery',
+              }),
+            },
           })
         } else if (allLocations.length > 1) {
+
           return NextResponse.json({
             error: 'Multiple Google locations found. Please select your location in Settings → Integrations.',
             code: 'MULTIPLE_LOCATIONS_FOUND',
@@ -287,10 +343,12 @@ export async function POST(
     console.error('[GBP Sync] Unexpected sync error:', error)
     const errorMsg = error?.message || ''
     const isPoolOrDbError =
+      isDatabasePoolError(error) ||
       errorMsg.includes('EMAXCONNSESSION') ||
       errorMsg.includes('max clients reached') ||
       errorMsg.includes('PrismaClientInitializationError') ||
       errorMsg.includes('connector')
+
 
     if (isPoolOrDbError) {
       return NextResponse.json(

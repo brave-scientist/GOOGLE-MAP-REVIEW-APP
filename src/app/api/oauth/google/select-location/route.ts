@@ -6,6 +6,7 @@ import {
   verifyGoogleLocation,
 } from '@/lib/integrations/google-business-profile'
 import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,11 +93,19 @@ export async function POST(request: NextRequest) {
     const canonicalTitle = verifiedLocation.title || locationTitle || canonicalLocationId
 
     // 6b. Conflict prevention: block attaching the same external location to conflicting tenants
+    const bareId = canonicalLocationId.includes('/') ? canonicalLocationId.split('/').pop()! : canonicalLocationId
+    const idVariants = [
+      canonicalLocationId,
+      locationId,
+      bareId,
+      `locations/${bareId}`,
+    ].filter(Boolean)
+
     const conflictingBusiness = await db.business.findFirst({
       where: {
         OR: [
-          { googleLocationId: canonicalLocationId },
-          { googleLocationId: locationId },
+          { googleLocationId: { in: idVariants } },
+          { googleLocationId: { endsWith: bareId } },
         ],
         id: { not: businessId },
         orgId: { not: ctx.orgId },
@@ -152,9 +161,13 @@ export async function POST(request: NextRequest) {
     })
   } catch (error: any) {
     console.error('[GBP] Error selecting/verifying location:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
     return NextResponse.json(
       { error: 'Failed to verify and select Google location', code: 'VERIFICATION_ERROR' },
       { status: 500 }
     )
   }
 }
+

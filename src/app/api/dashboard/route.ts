@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { getBusinessDashboardReadiness } from '@/lib/readiness'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -144,11 +145,15 @@ export async function GET(request: NextRequest) {
       sentimentTrend: weeks,
       dashboardReadiness,
     })
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Dashboard API error:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
     return NextResponse.json(
       { error: 'Failed to fetch dashboard data' },
       { status: 500 }
     )
   }
 }
+

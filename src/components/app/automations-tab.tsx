@@ -52,7 +52,8 @@ interface AutomationRuleItem {
 }
 
 export function AutomationsTab() {
-  const { activeBusinessId } = useActiveBusiness()
+  const { activeBusinessId, activeBusiness, businesses } = useActiveBusiness()
+  const effectiveBusinessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
   const [rules, setRules] = useState<AutomationRuleItem[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -78,10 +79,10 @@ export function AutomationsTab() {
   })
 
   const fetchRules = useCallback(async () => {
-    if (!activeBusinessId) return
+    if (!effectiveBusinessId) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/automations?businessId=${activeBusinessId}`)
+      const res = await fetch(`/api/automations?businessId=${effectiveBusinessId}`)
       if (res.ok) {
         const data = await res.json()
         setRules(data.rules || [])
@@ -93,15 +94,15 @@ export function AutomationsTab() {
     } finally {
       setLoading(false)
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
   useEffect(() => {
     let ignore = false
     async function load() {
-      if (!activeBusinessId) return
+      if (!effectiveBusinessId) return
       setLoading(true)
       try {
-        const res = await fetch(`/api/automations?businessId=${activeBusinessId}`)
+        const res = await fetch(`/api/automations?businessId=${effectiveBusinessId}`)
         if (res.ok && !ignore) {
           const data = await res.json()
           setRules(data.rules || [])
@@ -116,7 +117,7 @@ export function AutomationsTab() {
     return () => {
       ignore = true
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
   const openCreateModal = () => {
     setEditingRuleId(null)
@@ -207,9 +208,14 @@ export function AutomationsTab() {
       return
     }
 
+    if (!effectiveBusinessId) {
+      toast.error('No active business selected', { description: 'Please select a business location first.' })
+      return
+    }
+
     setSaving(true)
     const payload = {
-      businessId: activeBusinessId,
+      businessId: effectiveBusinessId,
       name: form.name.trim(),
       description: form.description.trim() || null,
       triggerType: form.triggerType,

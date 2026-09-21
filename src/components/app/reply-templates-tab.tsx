@@ -40,7 +40,8 @@ interface ReplyTemplateItem {
 }
 
 export function ReplyTemplatesTab() {
-  const { activeBusinessId, activeBusiness } = useActiveBusiness()
+  const { activeBusinessId, activeBusiness, businesses } = useActiveBusiness()
+  const effectiveBusinessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
   const [templates, setTemplates] = useState<ReplyTemplateItem[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -60,10 +61,10 @@ export function ReplyTemplatesTab() {
   const [showPreview, setShowPreview] = useState(true)
 
   const fetchTemplates = useCallback(async () => {
-    if (!activeBusinessId) return
+    if (!effectiveBusinessId) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/templates?businessId=${activeBusinessId}`)
+      const res = await fetch(`/api/templates?businessId=${effectiveBusinessId}`)
       if (res.ok) {
         const data = await res.json()
         setTemplates(data.templates || [])
@@ -73,15 +74,15 @@ export function ReplyTemplatesTab() {
     } finally {
       setLoading(false)
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
   useEffect(() => {
     let ignore = false
     async function load() {
-      if (!activeBusinessId) return
+      if (!effectiveBusinessId) return
       setLoading(true)
       try {
-        const res = await fetch(`/api/templates?businessId=${activeBusinessId}`)
+        const res = await fetch(`/api/templates?businessId=${effectiveBusinessId}`)
         if (res.ok && !ignore) {
           const data = await res.json()
           setTemplates(data.templates || [])
@@ -96,7 +97,7 @@ export function ReplyTemplatesTab() {
     return () => {
       ignore = true
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
   const openCreateModal = () => {
     setEditingTemplate(null)
@@ -119,8 +120,8 @@ export function ReplyTemplatesTab() {
   }
 
   const handleSave = async () => {
-    if (!activeBusinessId) {
-      toast.error('No active business selected')
+    if (!effectiveBusinessId) {
+      toast.error('No active business selected', { description: 'Please select a business location first.' })
       return
     }
     if (!formTitle.trim()) {
@@ -140,7 +141,7 @@ export function ReplyTemplatesTab() {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          businessId: activeBusinessId,
+          businessId: effectiveBusinessId,
           title: formTitle.trim(),
           body: formBody.trim(),
           category: formCategory,

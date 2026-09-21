@@ -35,7 +35,8 @@ interface PresetItem {
 }
 
 export function AiPresetsTab() {
-  const { activeBusinessId } = useActiveBusiness()
+  const { activeBusinessId, activeBusiness, businesses } = useActiveBusiness()
+  const effectiveBusinessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
   const [systemPresets, setSystemPresets] = useState<PresetItem[]>([])
   const [customPresets, setCustomPresets] = useState<PresetItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,10 +55,10 @@ export function AiPresetsTab() {
   const [formIsDefault, setFormIsDefault] = useState(false)
 
   const fetchPresets = useCallback(async () => {
-    if (!activeBusinessId) return
+    if (!effectiveBusinessId) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/ai-presets?businessId=${activeBusinessId}`)
+      const res = await fetch(`/api/ai-presets?businessId=${effectiveBusinessId}`)
       if (res.ok) {
         const data = await res.json()
         setSystemPresets((data.systemPresets || []).map((p: any) => ({ ...p, isCustom: false })))
@@ -76,15 +77,15 @@ export function AiPresetsTab() {
     } finally {
       setLoading(false)
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
   useEffect(() => {
     let ignore = false
     async function load() {
-      if (!activeBusinessId) return
+      if (!effectiveBusinessId) return
       setLoading(true)
       try {
-        const res = await fetch(`/api/ai-presets?businessId=${activeBusinessId}`)
+        const res = await fetch(`/api/ai-presets?businessId=${effectiveBusinessId}`)
         if (res.ok && !ignore) {
           const data = await res.json()
           setSystemPresets((data.systemPresets || []).map((p: any) => ({ ...p, isCustom: false })))
@@ -108,7 +109,7 @@ export function AiPresetsTab() {
     return () => {
       ignore = true
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
   const openCreateModal = () => {
     setEditingPreset(null)
@@ -135,8 +136,8 @@ export function AiPresetsTab() {
   }
 
   const handleSave = async () => {
-    if (!activeBusinessId) {
-      toast.error('No active business selected')
+    if (!effectiveBusinessId) {
+      toast.error('No active business selected', { description: 'Please select a business location first.' })
       return
     }
     if (!formName.trim()) {
@@ -156,7 +157,7 @@ export function AiPresetsTab() {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          businessId: activeBusinessId,
+          businessId: effectiveBusinessId,
           name: formName.trim(),
           description: formDescription.trim() || undefined,
           tone: formTone.trim(),
@@ -199,12 +200,12 @@ export function AiPresetsTab() {
   }
 
   const handleSetDefault = async (presetId: string) => {
-    if (!activeBusinessId) return
+    if (!effectiveBusinessId) return
     try {
       const res = await fetch(`/api/ai-presets/${presetId}/set-default`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ businessId: activeBusinessId }),
+        body: JSON.stringify({ businessId: effectiveBusinessId }),
       })
       if (res.ok) {
         const data = await res.json()

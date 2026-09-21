@@ -8,6 +8,7 @@ import {
 } from '@/lib/integrations/google-business-profile'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { isDatabasePoolError } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -84,6 +85,14 @@ export async function GET(request: NextRequest) {
 
     if (ctx instanceof NextResponse) {
       if (isBrowserNav) {
+        if (ctx.status === 503) {
+          return NextResponse.redirect(
+            new URL(
+              `${returnTo}?error=DATABASE_POOL_SATURATED&message=${encodeURIComponent('The database connection pool is currently saturated. Please wait a few moments and try connecting again.')}`,
+              origin
+            )
+          )
+        }
         return NextResponse.redirect(
           new URL(`/login?error=session_expired&returnTo=${encodeURIComponent(returnTo)}`, origin)
         )
@@ -189,6 +198,7 @@ export async function GET(request: NextRequest) {
 
     const errorMsg = error?.message || ''
     const isPoolOrDbError =
+      isDatabasePoolError(error) ||
       errorMsg.includes('EMAXCONNSESSION') ||
       errorMsg.includes('max clients reached') ||
       errorMsg.includes('PrismaClientInitializationError') ||

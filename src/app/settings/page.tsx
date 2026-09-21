@@ -217,6 +217,30 @@ export default function SettingsPage() {
     }
   }, [])
 
+  const refreshIntegrations = useCallback(async () => {
+    try {
+      const intRes = await fetch('/api/integrations')
+      if (intRes.ok) {
+        const intData = await intRes.json()
+        if (Array.isArray(intData.integrations)) {
+          setIntegrations(prev =>
+            prev.map(int => {
+              const fresh = intData.integrations.find((i: { provider: string; status?: string; desc?: string; locationId?: string; hasLocation?: boolean }) => i.provider === int.provider)
+              if (!fresh) return int
+              return {
+                ...int,
+                status: (fresh.status as Integration['status']) || int.status,
+                desc: fresh.desc || int.desc,
+                locationId: fresh.locationId,
+                hasLocation: fresh.hasLocation,
+              }
+            }),
+          )
+        }
+      }
+    } catch { }
+  }, [])
+
   const handleRevokeInvite = async (invite: PendingInviteItem) => {
     if (!confirm(`Revoke invitation for ${invite.email}?`)) return
     setTeamActionLoading(invite.id)
@@ -346,6 +370,16 @@ export default function SettingsPage() {
       .then(({ ok, status, data }) => {
         if (!ignore) {
           if (ok && Array.isArray(data?.locations)) {
+            if (data?.autoSelected) {
+              const locTitle = data.selectedLocation?.locationTitle || data.locations[0]?.title || 'Location'
+              toast.success(`Google Location "${locTitle}" connected!`, {
+                description: 'Your sole Google Business Profile location was automatically connected.',
+              })
+              setGooglePicker(null)
+              refreshIntegrations()
+              refreshBusinesses()
+              return
+            }
             setGooglePicker({
               businessId: googlePicker.businessId,
               locations: data.locations,
@@ -388,7 +422,7 @@ export default function SettingsPage() {
     return () => {
       ignore = true
     }
-  }, [googlePicker?.loading, googlePicker?.businessId])
+  }, [googlePicker?.loading, googlePicker?.businessId, refreshBusinesses, refreshIntegrations])
 
   const openGooglePicker = useCallback((businessId: string) => {
     setGooglePicker({ businessId, locations: [], loading: true, error: null, emptyReason: null, message: null })
@@ -413,8 +447,9 @@ export default function SettingsPage() {
       if (res.ok) {
         toast.success(`Google Location "${locationTitle}" connected!`)
         setGooglePicker(null)
-        // Refresh integration statuses
+        // Refresh integration statuses and businesses
         refreshIntegrations()
+        refreshBusinesses()
       } else {
         toast.error('Failed to connect location', { description: data.error })
       }
@@ -450,33 +485,9 @@ export default function SettingsPage() {
     }
   }
 
-  const refreshIntegrations = async () => {
-    try {
-      const intRes = await fetch('/api/integrations')
-      if (intRes.ok) {
-        const intData = await intRes.json()
-        if (Array.isArray(intData.integrations)) {
-          setIntegrations(prev =>
-            prev.map(int => {
-              const fresh = intData.integrations.find((i: { provider: string; status?: string; desc?: string; locationId?: string; hasLocation?: boolean }) => i.provider === int.provider)
-              if (!fresh) return int
-              return {
-                ...int,
-                status: (fresh.status as Integration['status']) || int.status,
-                desc: fresh.desc || int.desc,
-                locationId: fresh.locationId,
-                hasLocation: fresh.hasLocation,
-              }
-            }),
-          )
-        }
-      }
-    } catch { }
-  }
-
   const handleSyncReviews = async (provider: 'google' | 'facebook') => {
     try {
-      const businessId = activeBusinessId
+      const businessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
       if (!businessId) {
         toast.error('No active business selected', { description: 'Please select a location to sync reviews.' })
         return
@@ -578,7 +589,7 @@ export default function SettingsPage() {
   const handleToggleIntegration = async (int: Integration) => {
     // Google OAuth — redirect to the real OAuth flow
     if (int.provider === 'google' && int.status !== 'connected') {
-      const businessId = activeBusinessId
+      const businessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
       if (businessId) {
         setProcessingProvider('google')
         window.location.assign(new URL(`/api/oauth/google?businessId=${businessId}&returnTo=/settings`, window.location.origin).href)
@@ -591,7 +602,7 @@ export default function SettingsPage() {
 
     // Facebook OAuth — redirect to the real OAuth flow
     if (int.provider === 'facebook' && int.status !== 'connected') {
-      const businessId = activeBusinessId
+      const businessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
       if (businessId) {
         setProcessingProvider('facebook')
         window.location.assign(new URL(`/api/oauth/facebook?businessId=${businessId}&returnTo=/settings`, window.location.origin).href)
@@ -612,7 +623,7 @@ export default function SettingsPage() {
     setProcessingProvider(int.provider)
     const action = int.status === 'connected' ? 'disconnect' : 'connect'
     try {
-      const businessId: string | undefined = activeBusinessId || undefined
+      const businessId: string | undefined = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : undefined)
 
       const res = await fetch('/api/integrations', {
         method: 'POST',
@@ -638,7 +649,8 @@ export default function SettingsPage() {
   }
 
   const handleSaveBusiness = async () => {
-    if (!activeBusinessId) {
+    const targetBusinessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
+    if (!targetBusinessId) {
       toast.error('No active business selected', { description: 'Please select a business location first.' })
       return
     }
@@ -649,7 +661,7 @@ export default function SettingsPage() {
 
     setSavingBusiness(true)
     try {
-      const res = await fetch(`/api/businesses/${activeBusinessId}`, {
+      const res = await fetch(`/api/businesses/${targetBusinessId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -929,9 +941,9 @@ export default function SettingsPage() {
                                   size="sm"
                                   className="h-6 text-[10px] text-muted-foreground hover:text-foreground"
                                   onClick={() => {
-                                    const bId = activeBusinessId
+                                    const bId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
                                     if (bId) openGooglePicker(bId)
-                                    else toast.error('No active business selected')
+                                    else toast.error('No active business selected', { description: 'Please select a business location first.' })
                                   }}
                                 >
                                   <MapPin className="w-2.5 h-2.5 mr-1" />
@@ -1331,9 +1343,10 @@ interface BrandVoiceProfile {
 }
 
 function BrandVoiceTab() {
-  const { activeBusinessId, activeBusiness } = useActiveBusiness()
+  const { activeBusinessId, activeBusiness, businesses } = useActiveBusiness()
+  const effectiveBusinessId = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : null)
   const [profile, setProfile] = useState<BrandVoiceProfile | null>(null)
-  const [loading, setLoading] = useState(Boolean(activeBusinessId))
+  const [loading, setLoading] = useState(Boolean(effectiveBusinessId))
   const [saving, setSaving] = useState(false)
 
   // Form state
@@ -1345,9 +1358,9 @@ function BrandVoiceTab() {
   ])
 
   useEffect(() => {
-    if (!activeBusinessId) return
+    if (!effectiveBusinessId) return
     let ignore = false
-    fetch(`/api/brand-voice?businessId=${activeBusinessId}`)
+    fetch(`/api/brand-voice?businessId=${effectiveBusinessId}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!ignore) {
@@ -1375,12 +1388,12 @@ function BrandVoiceTab() {
     return () => {
       ignore = true
     }
-  }, [activeBusinessId])
+  }, [effectiveBusinessId])
 
 
   const handleSave = async () => {
-    if (!activeBusinessId) {
-      toast.error('No active business selected')
+    if (!effectiveBusinessId) {
+      toast.error('No active business selected', { description: 'Please select a business location first.' })
       return
     }
     setSaving(true)
@@ -1389,7 +1402,7 @@ function BrandVoiceTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          businessId: activeBusinessId,
+          businessId: effectiveBusinessId,
           examples: examples.filter(e => e.reviewText && e.replyText),
           toneGuidelines,
           signature,

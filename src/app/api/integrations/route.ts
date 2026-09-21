@@ -7,6 +7,8 @@ import { isResendConfigured } from '@/lib/integrations/resend'
 import { isGoogleConfigured, revokeGoogleToken, isGoogleConnectionUsable } from '@/lib/integrations/google-business-profile'
 import { isFacebookConfigured } from '@/lib/integrations/facebook-graph'
 import { decrypt } from '@/lib/crypto'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
+
 
 export const dynamic = 'force-dynamic'
 
@@ -152,10 +154,14 @@ export async function POST(request: NextRequest) {
       status: realStatus,
       message: `${providerNames[provider] || provider} ${action === 'connect' ? 'connect attempted' : 'disconnected'}. Status: ${realStatus}.`,
     })
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Integration error:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
     return NextResponse.json({ error: 'Failed to update integration' }, { status: 500 })
   }
+
 }
 
 // GET /api/integrations — list integration status
@@ -337,8 +343,12 @@ export async function GET(request: NextRequest) {
         },
       ],
     })
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Integrations list error:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
     return NextResponse.json({ error: 'Failed to fetch integrations' }, { status: 500 })
   }
 }
+

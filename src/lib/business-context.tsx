@@ -32,7 +32,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
   const [activeBusinessId, setActiveBusinessIdState] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refreshBusinesses = useCallback(async () => {
+  const refreshBusinesses = useCallback(async function doRefresh(isRetry = false): Promise<void> {
     try {
       const res = await fetch('/api/dashboard')
       if (res.ok) {
@@ -54,9 +54,13 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
         } else {
           setActiveBusinessIdState(null)
         }
+      } else if (res.status === 503 && !isRetry) {
+        // Database pool saturation transient retry after 400ms delay
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        await doRefresh(true)
       }
     } catch (err) {
-      console.error('[BUSINESS-CONTEXT] Failed to load tenant businesses:', err)
+      console.error('[BUSINESS-CONTEXT] Failed to refresh tenant businesses:', err)
     } finally {
       setLoading(false)
     }
@@ -64,7 +68,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let ignore = false
-    async function loadBusinesses() {
+    async function loadBusinesses(isRetry = false) {
       try {
         const res = await fetch('/api/dashboard')
         if (res.ok && !ignore) {
@@ -86,6 +90,12 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
           } else {
             setActiveBusinessIdState(null)
           }
+        } else if (res.status === 503 && !isRetry) {
+          // Database pool saturation transient retry after 400ms delay
+          await new Promise((resolve) => setTimeout(resolve, 400))
+          if (!ignore) {
+            await loadBusinesses(true)
+          }
         }
       } catch (err) {
         if (!ignore) {
@@ -103,6 +113,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
       ignore = true
     }
   }, [])
+
 
 
   const setActiveBusinessId = useCallback((id: string) => {

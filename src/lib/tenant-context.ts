@@ -58,87 +58,110 @@ function hasMinPlan(userPlan: string | null | undefined, minPlan: string): boole
  * one Business row. Routes that need at least one business should check
  * ctx.businessIds.length === 0 and return an empty-state response.
  */
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
+
 export async function getTenantContext(
   request: NextRequest,
   minPlan?: string,
 ): Promise<TenantContext | NextResponse> {
-  // 1. Auth
-  const user = await getCurrentUser(request)
-  if (!user) {
-    return NextResponse.json(
-      { error: 'Authentication required', code: 'UNAUTHORIZED' },
-      { status: 401 },
-    )
-  }
+  const execute = async () => {
+    // 1. Auth
+    const user = await getCurrentUser(request)
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required', code: 'UNAUTHORIZED' },
+        { status: 401 },
+      )
+    }
 
-  // 2. Org membership
-  if (!user.orgId) {
-    return NextResponse.json(
-      { error: 'No organization associated with this account', code: 'NO_ORG' },
-      { status: 403 },
-    )
-  }
+    // 2. Org membership
+    if (!user.orgId) {
+      return NextResponse.json(
+        { error: 'No organization associated with this account', code: 'NO_ORG' },
+        { status: 403 },
+      )
+    }
 
-  // 3. Fetch org (for plan + trial check)
-  const org = await db.organization.findUnique({
-    where: { id: user.orgId },
-    select: { plan: true, trialEndsAt: true },
-  })
-
-  if (!org) {
-    return NextResponse.json(
-      { error: 'Organization not found', code: 'ORG_NOT_FOUND' },
-      { status: 403 },
-    )
-  }
-
-  // 4. Trial expiry — auto-downgrade to FREE (mirrors plan-enforcement.ts)
-  let effectivePlan: string = org.plan
-  if (org.trialEndsAt && org.trialEndsAt < new Date() && org.plan !== Plan.FREE) {
-    await db.organization.update({
+    // 3. Fetch org (for plan + trial check)
+    const org = await db.organization.findUnique({
       where: { id: user.orgId },
-      data: { plan: Plan.FREE },
+      select: { plan: true, trialEndsAt: true },
     })
-    effectivePlan = Plan.FREE
-    await db.auditLog.create({
-      data: {
-        actorId: user.id,
-        action: 'trial.expired_downgrade',
-        targetType: 'organization',
-        targetId: user.orgId,
-        metadata: JSON.stringify({
-          fromPlan: org.plan,
-          toPlan: Plan.FREE,
-          trialEndsAt: org.trialEndsAt.toISOString(),
-        }),
-      },
-    })
+
+    if (!org) {
+      return NextResponse.json(
+        { error: 'Organization not found', code: 'ORG_NOT_FOUND' },
+        { status: 403 },
+      )
+    }
+
+    // 4. Trial expiry — auto-downgrade to FREE (mirrors plan-enforcement.ts)
+    let effectivePlan: string = org.plan
+    if (org.trialEndsAt && org.trialEndsAt < new Date() && org.plan !== Plan.FREE) {
+      await db.organization.update({
+        where: { id: user.orgId },
+        data: { plan: Plan.FREE },
+      })
+      effectivePlan = Plan.FREE
+      await db.auditLog.create({
+        data: {
+          actorId: user.id,
+          action: 'trial.expired_downgrade',
+          targetType: 'organization',
+          targetId: user.orgId,
+          metadata: JSON.stringify({
+            fromPlan: org.plan,
+            toPlan: Plan.FREE,
+            trialEndsAt: org.trialEndsAt.toISOString(),
+          }),
+        },
+      })
+    }
+
+    // 5. Plan gating
+    if (minPlan && !hasMinPlan(effectivePlan, minPlan)) {
+      return NextResponse.json(
+        {
+          error: `This feature requires ${minPlan} plan or higher`,
+          code: 'PLAN_UPGRADE_REQUIRED',
+          currentPlan: effectivePlan,
+          requiredPlan: minPlan,
+        },
+        { status: 403 },
+      )
+    }
+
+    // 6. Resolve authoritative permitted business IDs for this user
+    const scope = await resolveEffectiveScope(user.id, user.orgId, user.role)
+
+    return {
+      user,
+      orgId: user.orgId,
+      businessIds: scope.permittedBusinessIds,
+      allOrgBusinessIds: scope.allOrgBusinessIds,
+      isOrgAdmin: scope.isOrgAdmin,
+    }
   }
 
-  // 5. Plan gating
-  if (minPlan && !hasMinPlan(effectivePlan, minPlan)) {
-    return NextResponse.json(
-      {
-        error: `This feature requires ${minPlan} plan or higher`,
-        code: 'PLAN_UPGRADE_REQUIRED',
-        currentPlan: effectivePlan,
-        requiredPlan: minPlan,
-      },
-      { status: 403 },
-    )
-  }
-
-  // 6. Resolve authoritative permitted business IDs for this user
-  const scope = await resolveEffectiveScope(user.id, user.orgId, user.role)
-
-  return {
-    user,
-    orgId: user.orgId,
-    businessIds: scope.permittedBusinessIds,
-    allOrgBusinessIds: scope.allOrgBusinessIds,
-    isOrgAdmin: scope.isOrgAdmin,
+  try {
+    return await execute()
+  } catch (err: unknown) {
+    if (isDatabasePoolError(err)) {
+      // Single bounded transient retry after 200ms delay to allow concurrent connection slots to free up
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        return await execute()
+      } catch (retryErr: unknown) {
+        if (isDatabasePoolError(retryErr)) {
+          return createDatabasePoolResponse()
+        }
+        throw retryErr
+      }
+    }
+    throw err
   }
 }
+
 
 /**
  * Verifies that a businessId belongs to the user's org.

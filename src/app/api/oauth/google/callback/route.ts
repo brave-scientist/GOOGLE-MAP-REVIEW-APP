@@ -10,6 +10,7 @@ import {
 } from '@/lib/integrations/google-business-profile'
 import { storeTokens } from '@/lib/oauth-store'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
+import { isDatabasePoolError } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,6 +65,9 @@ export async function GET(request: NextRequest) {
   // 2. SEC-01: User session validation — user must still be logged in
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) {
+    if (ctx.status === 503) {
+      return fallbackRedirect('DATABASE_POOL_SATURATED')
+    }
     return NextResponse.redirect(new URL('/login?error=session_expired', origin))
   }
 
@@ -124,9 +128,20 @@ export async function GET(request: NextRequest) {
         const loc = foundLocations[0]
 
         // SEC-COLLISION: check if location is already connected to another organization
+        const bareId = loc.id.includes('/') ? loc.id.split('/').pop()! : loc.id
+        const idVariants = [
+          loc.id,
+          loc.name,
+          bareId,
+          `locations/${bareId}`,
+        ].filter(Boolean)
+
         const conflictingBusiness = await db.business.findFirst({
           where: {
-            googleLocationId: loc.id,
+            OR: [
+              { googleLocationId: { in: idVariants } },
+              { googleLocationId: { endsWith: bareId } },
+            ],
             id: { not: businessId },
             orgId: { not: ctx.orgId },
           },
@@ -221,6 +236,9 @@ export async function GET(request: NextRequest) {
     return response
   } catch (err: any) {
     console.error('Google OAuth callback error:', err)
+    if (isDatabasePoolError(err)) {
+      return fallbackRedirect('DATABASE_POOL_SATURATED')
+    }
     return fallbackRedirect('google_callback_failed')
   }
 }

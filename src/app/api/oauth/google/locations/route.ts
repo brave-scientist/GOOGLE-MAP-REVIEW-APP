@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
 import { getTenantContext, assertBusinessOwnership } from '@/lib/tenant-context'
 import {
   getValidGoogleAccessToken,
@@ -9,6 +10,7 @@ import {
   GoogleApiError,
 } from '@/lib/integrations/google-business-profile'
 import { rateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,6 +68,7 @@ export async function GET(request: NextRequest) {
         accounts: [],
         locations: [],
         emptyReason: 'NO_ACCOUNTS',
+        autoSelected: false,
         message: 'No Google Business Profile accounts found for this Google user. Please ensure you connected the Google account that owns or manages your business listing.',
       })
     }
@@ -109,13 +112,94 @@ export async function GET(request: NextRequest) {
         accounts,
         locations: [],
         emptyReason: 'NO_LOCATIONS',
+        autoSelected: false,
         message: 'No business locations found under your Google Business Profile account. Please create or verify a location in Google Business Profile.',
       })
+    }
+
+    // Single-location automatic selection:
+    // If exactly one location is discovered for this authenticated business,
+    // verify collision against other orgs, auto-select, and persist verified state.
+    let autoSelected = false
+    let autoSelectError: string | null = null
+
+    if (allLocations.length === 1) {
+      const singleLoc = allLocations[0]
+
+      // Cross-tenant collision check: location cannot be attached to another organization
+      const bareId = singleLoc.id.includes('/') ? singleLoc.id.split('/').pop()! : singleLoc.id
+      const idVariants = [
+        singleLoc.id,
+        singleLoc.name,
+        bareId,
+        `locations/${bareId}`,
+      ].filter(Boolean)
+
+      const conflictingBusiness = await db.business.findFirst({
+        where: {
+          OR: [
+            { googleLocationId: { in: idVariants } },
+            { googleLocationId: { endsWith: bareId } },
+          ],
+          id: { not: businessId },
+          orgId: { not: ctx.orgId },
+        },
+        select: { id: true, orgId: true },
+      })
+
+      if (conflictingBusiness) {
+        return NextResponse.json(
+          {
+            error: 'This Google Business Profile location is already connected to another organization.',
+            code: 'LOCATION_ALREADY_MAPPED',
+          },
+          { status: 409 }
+        )
+      } else {
+        await db.business.update({
+          where: { id: businessId },
+          data: {
+            googleLocationId: singleLoc.id,
+            googlePlaceId: singleLoc.placeId || null,
+            googleLocationVerified: true,
+            googleSyncStatus: 'pending',
+            googleSyncError: null,
+          },
+        })
+
+        await db.auditLog.create({
+          data: {
+            actorId: ctx.user.id,
+            action: 'google.location_verified',
+            targetType: 'business',
+            targetId: businessId,
+            metadata: JSON.stringify({
+              businessId,
+              locationId: singleLoc.id,
+              locationTitle: singleLoc.title,
+              placeId: singleLoc.placeId,
+              autoSelected: true,
+              source: 'locations_discovery_single',
+            }),
+          },
+        })
+
+        autoSelected = true
+      }
     }
 
     return NextResponse.json({
       accounts,
       locations: allLocations,
+      autoSelected,
+      autoSelectError,
+      selectedLocation: autoSelected
+        ? {
+            ...allLocations[0],
+            locationId: allLocations[0].id,
+            locationTitle: allLocations[0].title,
+          }
+        : null,
     })
   } catch (error: any) {
     console.error('[GBP] Failed to discover Google locations:', error?.message || 'Unknown error')
@@ -131,27 +215,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const errorMsg = error?.message || ''
-    const isPoolOrDbError =
-      errorMsg.includes('EMAXCONNSESSION') ||
-      errorMsg.includes('max clients reached') ||
-      errorMsg.includes('PrismaClientInitializationError') ||
-      errorMsg.includes('connector')
-
-    if (isPoolOrDbError) {
-      return NextResponse.json(
-        {
-          error: 'Database connection limit reached. Please retry in a few moments.',
-          code: 'DATABASE_POOL_SATURATED',
-          message: 'The database connection pool is currently saturated. Please wait a few seconds and retry.',
-        },
-        { status: 503 }
-      )
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
     }
 
+    const errorMsg = error?.message || ''
     return NextResponse.json(
       { error: 'Failed to discover Google locations', code: 'DISCOVERY_FAILED', message: errorMsg },
       { status: 502 }
     )
   }
 }
+
