@@ -271,6 +271,65 @@ export default function SettingsPage() {
       })
       window.history.replaceState({}, '', '/settings')
     }
+
+    const errCode = params.get('error')
+    if (errCode) {
+      const msg = params.get('message')
+      const errorMap: Record<string, { title: string; desc: string }> = {
+        DATABASE_POOL_SATURATED: {
+          title: 'Database Temporarily Busy',
+          desc: msg || 'The database connection pool is currently saturated. Please wait a few moments and try connecting again.',
+        },
+        RATE_LIMITED: {
+          title: 'Rate Limit Reached',
+          desc: msg || 'Too many Google connection requests. Please wait a few minutes before trying again.',
+        },
+        GOOGLE_NOT_CONFIGURED: {
+          title: 'Google Integration Unconfigured',
+          desc: msg || 'Google Business Profile credentials are not configured in the system.',
+        },
+        BUSINESS_NOT_OWNED: {
+          title: 'Authorization Denied',
+          desc: msg || 'You do not have permission to manage this business location.',
+        },
+        MISSING_BUSINESS_ID: {
+          title: 'Location Required',
+          desc: 'Please select a valid business location before connecting Google.',
+        },
+        UNAUTHORIZED: {
+          title: 'Session Expired',
+          desc: 'Your session has expired. Please log in again to connect Google.',
+        },
+        google_oauth_denied: {
+          title: 'Google Authorization Cancelled',
+          desc: 'You did not complete the Google authorization process. Please try again when ready.',
+        },
+        google_token_failed: {
+          title: 'Token Exchange Failed',
+          desc: 'Could not complete token exchange with Google. Please try connecting again.',
+        },
+        oauth_state_missing_or_expired: {
+          title: 'Session Expired',
+          desc: 'The Google authorization session expired. Please start the connection again.',
+        },
+        oauth_state_mismatch: {
+          title: 'Security Verification Failed',
+          desc: 'OAuth state mismatch detected. Please retry the connection.',
+        },
+        OAUTH_INITIATION_FAILED: {
+          title: 'Connection Failed',
+          desc: msg || 'An unexpected error occurred while initiating Google authorization. Please try again.',
+        },
+      }
+
+      const errorInfo = errorMap[errCode] || {
+        title: 'Connection Failed',
+        desc: msg || `Failed to connect Google Business Profile (${errCode}). Please try again.`,
+      }
+
+      toast.error(errorInfo.title, { description: errorInfo.desc })
+      window.history.replaceState({}, '', '/settings')
+    }
   }, [])
 
   useEffect(() => {
@@ -521,7 +580,8 @@ export default function SettingsPage() {
     if (int.provider === 'google' && int.status !== 'connected') {
       const businessId = activeBusinessId
       if (businessId) {
-        window.location.assign(new URL(`/api/oauth/google?businessId=${businessId}`, window.location.origin).href)
+        setProcessingProvider('google')
+        window.location.assign(new URL(`/api/oauth/google?businessId=${businessId}&returnTo=/settings`, window.location.origin).href)
         return
       } else {
         toast.error('No active business selected', { description: 'Please select a business location first.' })
@@ -533,7 +593,8 @@ export default function SettingsPage() {
     if (int.provider === 'facebook' && int.status !== 'connected') {
       const businessId = activeBusinessId
       if (businessId) {
-        window.location.assign(new URL(`/api/oauth/facebook?businessId=${businessId}`, window.location.origin).href)
+        setProcessingProvider('facebook')
+        window.location.assign(new URL(`/api/oauth/facebook?businessId=${businessId}&returnTo=/settings`, window.location.origin).href)
         return
       } else {
         toast.error('No active business selected', { description: 'Please select a business location first.' })
