@@ -140,6 +140,9 @@ export default function SettingsPage() {
     error?: string | null
     emptyReason?: 'NO_ACCOUNTS' | 'NO_LOCATIONS' | null
     message?: string | null
+    subcode?: string | null
+    activationUrl?: string | null
+    projectNumber?: string | null
   } | null>(() => {
     if (typeof window === 'undefined') return null
     try {
@@ -147,7 +150,15 @@ export default function SettingsPage() {
       if (params.get('google_picker') === 'true') {
         const businessId = params.get('businessId')
         if (businessId) {
-          return { businessId, locations: [], loading: true, error: null }
+          return {
+            businessId,
+            locations: [],
+            loading: true,
+            error: null,
+            subcode: null,
+            activationUrl: null,
+            projectNumber: null,
+          }
         }
       }
     } catch {
@@ -387,6 +398,9 @@ export default function SettingsPage() {
               error: null,
               emptyReason: data.emptyReason || null,
               message: data.message || null,
+              subcode: null,
+              activationUrl: null,
+              projectNumber: null,
             })
           } else {
             const desc =
@@ -401,6 +415,9 @@ export default function SettingsPage() {
               error: desc,
               emptyReason: null,
               message: data?.message || null,
+              subcode: data?.subcode || null,
+              activationUrl: data?.activationUrl || null,
+              projectNumber: data?.projectNumber || null,
             })
           }
         }
@@ -416,6 +433,9 @@ export default function SettingsPage() {
             error: desc,
             emptyReason: null,
             message: null,
+            subcode: null,
+            activationUrl: null,
+            projectNumber: null,
           })
         }
       })
@@ -425,7 +445,17 @@ export default function SettingsPage() {
   }, [googlePicker?.loading, googlePicker?.businessId, refreshBusinesses, refreshIntegrations])
 
   const openGooglePicker = useCallback((businessId: string) => {
-    setGooglePicker({ businessId, locations: [], loading: true, error: null, emptyReason: null, message: null })
+    setGooglePicker({
+      businessId,
+      locations: [],
+      loading: true,
+      error: null,
+      emptyReason: null,
+      message: null,
+      subcode: null,
+      activationUrl: null,
+      projectNumber: null,
+    })
   }, [])
 
 
@@ -522,16 +552,29 @@ export default function SettingsPage() {
         toast.success(data.message || `Successfully synced ${provider} reviews!`)
         refreshIntegrations()
       } else {
-        const fallbackError =
-          res.status === 504
-            ? 'Sync timed out. The provider or database took too long to respond.'
-            : res.status === 503
-              ? (data?.message || data?.error || 'Database or service temporarily unavailable. Please retry in a few moments.')
-              : res.status === 401
-                ? 'Authentication required or session expired. Please refresh the page.'
-                : res.status === 403
-                  ? 'You do not have permission to sync reviews for this location.'
-                  : (data?.message || data?.error || `Server error (${res.status}). Please retry.`)
+        let fallbackError = data?.message || data?.error
+        if (!fallbackError) {
+          fallbackError =
+            res.status === 504
+              ? 'Sync timed out. The provider or database took too long to respond.'
+              : res.status === 503
+                ? 'Database or service temporarily unavailable. Please retry in a few moments.'
+                : res.status === 401
+                  ? 'Authentication required or session expired. Please refresh the page.'
+                  : res.status === 403
+                    ? (data?.code === 'BUSINESS_NOT_OWNED'
+                        ? 'Access denied: You do not have permission to manage this business.'
+                        : data?.code === 'LOCATION_FORBIDDEN'
+                          ? 'You do not have permission to sync reviews for this location.'
+                          : 'You do not have permission to sync reviews for this location.')
+                    : `Server error (${res.status}). Please retry.`
+        } else if (res.status === 403) {
+          if (data?.code === 'BUSINESS_NOT_OWNED') {
+            fallbackError = 'Access denied: You do not have permission to manage this business.'
+          } else if (data?.code === 'LOCATION_FORBIDDEN') {
+            fallbackError = 'You do not have permission to sync reviews for this location.'
+          }
+        }
 
         if (data?.code === 'NO_LOCATION_SELECTED' || data?.code === 'MULTIPLE_LOCATIONS_FOUND') {
           openGooglePicker(businessId)
@@ -625,11 +668,22 @@ export default function SettingsPage() {
     try {
       const businessId: string | undefined = activeBusinessId || activeBusiness?.id || (businesses.length === 1 ? businesses[0].id : undefined)
 
-      const res = await fetch('/api/integrations', {
+      let res = await fetch('/api/integrations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: int.provider, action, businessId }),
       })
+
+      // Transient bounded retry on 503 database pool saturation
+      if (res.status === 503) {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        res = await fetch('/api/integrations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: int.provider, action, businessId }),
+        })
+      }
+
       const data = await res.json()
       if (res.ok) {
         setIntegrations(prev => prev.map(i =>
@@ -639,7 +693,10 @@ export default function SettingsPage() {
         ))
         toast.success(data.message || `${int.name} ${action}ed`)
       } else {
-        toast.error(`Failed to ${action} ${int.name}`, { description: data.error })
+        const errorDesc = res.status === 503
+          ? 'Database connection limit reached. Please retry in a few moments.'
+          : (data?.message || data?.error || `Failed to ${action} ${int.name}`)
+        toast.error(`Failed to ${action} ${int.name}`, { description: errorDesc })
       }
     } catch {
       toast.error('Network error')
@@ -1252,17 +1309,41 @@ export default function SettingsPage() {
             ) : googlePicker.error ? (
               <div className="py-6 text-center space-y-3">
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-left">
-                  <p className="text-xs font-semibold text-destructive mb-1">Discovery Failed</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{googlePicker.error}</p>
+                  <p className="text-xs font-semibold text-destructive mb-1">
+                    {googlePicker.subcode === 'GOOGLE_ZERO_QUOTA'
+                      ? 'API Access Not Approved (Quota: 0 QPM)'
+                      : googlePicker.subcode === 'GOOGLE_API_DISABLED'
+                        ? 'Google API Disabled'
+                        : googlePicker.subcode === 'GOOGLE_RATE_LIMITED'
+                          ? 'Rate Limit Reached'
+                          : 'Discovery Failed'}
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed break-words">{googlePicker.error}</p>
                 </div>
-                <div className="flex gap-2 justify-center">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => openGooglePicker(googlePicker.businessId)}
-                  >
-                    Retry Discovery
-                  </Button>
+                <div className="flex gap-2 justify-center flex-wrap">
+                  {googlePicker.activationUrl && (
+                    <a
+                      href={googlePicker.activationUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3 py-1 transition-colors"
+                    >
+                      {googlePicker.subcode === 'GOOGLE_ZERO_QUOTA'
+                        ? 'Apply for Basic Access'
+                        : googlePicker.subcode === 'GOOGLE_API_DISABLED'
+                          ? 'Enable in Google Cloud'
+                          : 'View Documentation'}
+                    </a>
+                  )}
+                  {googlePicker.subcode !== 'GOOGLE_ZERO_QUOTA' && googlePicker.subcode !== 'GOOGLE_API_DISABLED' && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => openGooglePicker(googlePicker.businessId)}
+                    >
+                      Retry Discovery
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => setGooglePicker(null)}>
                     Close
                   </Button>

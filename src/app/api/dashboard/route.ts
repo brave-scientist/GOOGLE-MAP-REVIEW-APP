@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
-  try {
+  const execute = async () => {
     if (ctx.businessIds.length === 0) {
       return NextResponse.json({
         businesses: [],
@@ -25,6 +25,39 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const businessIdParam = searchParams.get('businessId')
+    const businessesOnly = searchParams.get('businessesOnly') === 'true'
+
+    // Lightweight path for BusinessProvider: return only business rows, skipping heavy review aggregations
+    if (businessesOnly) {
+      const businesses = await db.business.findMany({
+        where: { id: { in: ctx.businessIds } },
+        select: {
+          id: true,
+          name: true,
+          industry: true,
+          address: true,
+          phone: true,
+          timezone: true,
+          avgRating: true,
+          reviewCount: true,
+          googleLocationVerified: true,
+          googleSyncStatus: true,
+          googleSyncedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+
+      return NextResponse.json({
+        businesses: businesses.map(b => ({
+          ...b,
+          googleSyncedAt: b.googleSyncedAt?.toISOString() || null,
+        })),
+        stats: { totalReviews: 0, avgRating: 0, pendingReplies: 0, conversionRate: 0 },
+        recentReviews: [],
+        ratingDistribution: [],
+        sentimentTrend: [],
+      })
+    }
 
     let scopedBusinessIds = ctx.businessIds
     if (businessIdParam && businessIdParam !== 'all') {
@@ -145,11 +178,25 @@ export async function GET(request: NextRequest) {
       sentimentTrend: weeks,
       dashboardReadiness,
     })
+  }
+
+  try {
+    return await execute()
   } catch (error: unknown) {
-    console.error('Dashboard API error:', error)
     if (isDatabasePoolError(error)) {
-      return createDatabasePoolResponse()
+      // Single bounded transient retry after 250ms delay
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        return await execute()
+      } catch (retryErr: unknown) {
+        if (isDatabasePoolError(retryErr)) {
+          return createDatabasePoolResponse()
+        }
+        throw retryErr
+      }
     }
+
+    console.error('Dashboard API error:', error)
     return NextResponse.json(
       { error: 'Failed to fetch dashboard data' },
       { status: 500 }

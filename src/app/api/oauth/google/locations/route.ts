@@ -205,11 +205,22 @@ export async function GET(request: NextRequest) {
     console.error('[GBP] Failed to discover Google locations:', error?.message || 'Unknown error')
 
     if (error instanceof GoogleApiError || error?.name === 'GoogleApiError') {
+      const sanitizedOriginal = error.originalMessage
+        ? String(error.originalMessage)
+            .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+            .replace(/(?:key|token|secret|password)=([A-Za-z0-9._~+/-]+)/gi, '$1=[REDACTED]')
+        : error.message
+
       return NextResponse.json(
         {
           error: error.message,
           code: error.code || 'GOOGLE_API_ERROR',
+          subcode: error.subcode,
           message: error.message,
+          originalMessage: sanitizedOriginal,
+          projectNumber: error.projectNumber,
+          serviceName: error.serviceName,
+          activationUrl: error.activationUrl,
         },
         { status: error.statusCode || 502 }
       )

@@ -34,7 +34,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
 
   const refreshBusinesses = useCallback(async function doRefresh(isRetry = false): Promise<void> {
     try {
-      const res = await fetch('/api/dashboard')
+      const res = await fetch('/api/dashboard?businessesOnly=true')
       if (res.ok) {
         const data = await res.json()
         const fetched: BusinessItem[] = data.businesses || []
@@ -70,7 +70,7 @@ export function BusinessProvider({ children }: { children: React.ReactNode }) {
     let ignore = false
     async function loadBusinesses(isRetry = false) {
       try {
-        const res = await fetch('/api/dashboard')
+        const res = await fetch('/api/dashboard?businessesOnly=true')
         if (res.ok && !ignore) {
           const data = await res.json()
           const fetched: BusinessItem[] = data.businesses || []

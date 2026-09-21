@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
-  try {
+  const execute = async () => {
     const body = await request.json()
     const { provider, action, businessId } = body
 
@@ -154,11 +154,24 @@ export async function POST(request: NextRequest) {
       status: realStatus,
       message: `${providerNames[provider] || provider} ${action === 'connect' ? 'connect attempted' : 'disconnected'}. Status: ${realStatus}.`,
     })
+  }
+
+  try {
+    return await execute()
   } catch (error: unknown) {
-    console.error('Integration error:', error)
     if (isDatabasePoolError(error)) {
-      return createDatabasePoolResponse()
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        return await execute()
+      } catch (retryErr: unknown) {
+        if (isDatabasePoolError(retryErr)) {
+          return createDatabasePoolResponse()
+        }
+        throw retryErr
+      }
     }
+
+    console.error('Integration error:', error)
     return NextResponse.json({ error: 'Failed to update integration' }, { status: 500 })
   }
 
@@ -171,7 +184,7 @@ export async function GET(request: NextRequest) {
   const ctx = await getTenantContext(request)
   if (ctx instanceof NextResponse) return ctx
 
-  try {
+  const execute = async () => {
     const { searchParams } = new URL(request.url)
     const businessId = searchParams.get('businessId')
 
@@ -343,11 +356,24 @@ export async function GET(request: NextRequest) {
         },
       ],
     })
+  }
+
+  try {
+    return await execute()
   } catch (error: unknown) {
-    console.error('Integrations list error:', error)
     if (isDatabasePoolError(error)) {
-      return createDatabasePoolResponse()
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        return await execute()
+      } catch (retryErr: unknown) {
+        if (isDatabasePoolError(retryErr)) {
+          return createDatabasePoolResponse()
+        }
+        throw retryErr
+      }
     }
+
+    console.error('Integrations list error:', error)
     return NextResponse.json({ error: 'Failed to fetch integrations' }, { status: 500 })
   }
 }

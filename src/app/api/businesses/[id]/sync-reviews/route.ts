@@ -158,7 +158,11 @@ export async function POST(
           return NextResponse.json({
             error: discErr.message,
             code: discErr.code || 'LOCATION_RESOLUTION_FAILED',
+            subcode: discErr.subcode,
             message: discErr.message,
+            projectNumber: discErr.projectNumber,
+            serviceName: discErr.serviceName,
+            activationUrl: discErr.activationUrl,
           }, { status: discErr.statusCode || 400 })
         }
         return NextResponse.json({
@@ -183,11 +187,18 @@ export async function POST(
       googleReviews = await fetchGoogleReviews(accessToken, locationResource)
     } catch (apiError: any) {
       console.error('[GBP Sync] Google API call failed:', apiError)
+      const statusCode = (apiError instanceof GoogleApiError || apiError?.name === 'GoogleApiError')
+        ? (apiError.statusCode || 502)
+        : 502
       return NextResponse.json({
-        error: 'Google API call failed',
-        code: 'GOOGLE_API_ERROR',
-        message: apiError.message || 'Failed to fetch reviews from Google Business Profile API',
-      }, { status: 502 })
+        error: apiError?.message || 'Google API call failed',
+        code: apiError?.code || 'GOOGLE_API_ERROR',
+        subcode: apiError?.subcode,
+        message: apiError?.message || 'Failed to fetch reviews from Google Business Profile API',
+        projectNumber: apiError?.projectNumber,
+        serviceName: apiError?.serviceName,
+        activationUrl: apiError?.activationUrl,
+      }, { status: statusCode })
     }
 
     // 6. Normalize and upsert reviews idempotently

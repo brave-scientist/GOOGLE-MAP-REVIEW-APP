@@ -518,16 +518,95 @@ export class GoogleApiError extends Error {
   public code: string
   public originalMessage: string
   public subcode?: string
+  public projectNumber?: string
+  public serviceName?: string
+  public activationUrl?: string
 
-  constructor(message: string, statusCode: number, code: string, originalMessage?: string, subcode?: string) {
+  constructor(
+    message: string,
+    statusCode: number,
+    code: string,
+    originalMessage?: string,
+    subcode?: string,
+    metadata?: { projectNumber?: string; serviceName?: string; activationUrl?: string }
+  ) {
     super(message)
     this.name = 'GoogleApiError'
     this.statusCode = statusCode
     this.code = code
     this.originalMessage = originalMessage || message
     this.subcode = subcode
+    this.projectNumber = metadata?.projectNumber
+    this.serviceName = metadata?.serviceName
+    this.activationUrl = metadata?.activationUrl
   }
 }
+
+/**
+ * Extracts Google Cloud Project number, service name, activation/access URL,
+ * and zero-quota / basic-access-required indicator from Google error payloads.
+ */
+export function parseGoogleApiErrorDetails(googleMsg: string, errorData: any, defaultService: string) {
+  let projectNumber: string | undefined
+  let serviceName: string = defaultService
+  let activationUrl: string | undefined
+  let isZeroQuota = false
+
+  const details = Array.isArray(errorData?.error?.details) ? errorData.error.details : []
+  for (const d of details) {
+    if (d?.metadata?.consumer && typeof d.metadata.consumer === 'string') {
+      projectNumber = d.metadata.consumer.replace(/^projects\//, '')
+    }
+    if (d?.metadata?.service && typeof d.metadata.service === 'string') {
+      serviceName = d.metadata.service
+    }
+    if (d?.metadata?.quota_limit_value === '0' || d?.metadata?.quota_limit_value === 0) {
+      isZeroQuota = true
+    }
+    if (Array.isArray(d?.violations)) {
+      for (const v of d.violations) {
+        if (typeof v?.subject === 'string' && !projectNumber) {
+          const m = v.subject.match(/project[:/]([0-9a-zA-Z_-]+)/i)
+          if (m) projectNumber = m[1]
+        }
+        if (typeof v?.description === 'string') {
+          const desc = v.description.toLowerCase()
+          if (desc.includes('limit is 0') || desc.includes('limit 0') || desc.includes('quota is 0')) {
+            isZeroQuota = true
+          }
+        }
+      }
+    }
+  }
+
+  if (!projectNumber) {
+    const projMatch = googleMsg.match(/project(?:_number)?[:\s]+([0-9a-zA-Z_-]+)/i)
+    if (projMatch) {
+      projectNumber = projMatch[1]
+    }
+  }
+
+  const msgLower = (googleMsg || '').toLowerCase()
+  if (
+    msgLower.includes('limit is 0') ||
+    msgLower.includes('limit of 0') ||
+    msgLower.includes('limit: 0') ||
+    msgLower.includes("limit '0'")
+  ) {
+    isZeroQuota = true
+  }
+
+  const urlMatch = googleMsg.match(/https:\/\/(?:console\.developers\.google\.com|console\.cloud\.google\.com)\/[^\s]+/i)
+  if (urlMatch) {
+    activationUrl = urlMatch[0].replace(/[.,]+$/, '')
+  } else if (projectNumber) {
+    activationUrl = `https://console.cloud.google.com/apis/library/${serviceName}?project=${projectNumber}`
+  }
+
+  return { projectNumber, serviceName, activationUrl, isZeroQuota }
+}
+
+const parseGoogleServiceDisabledDetails = parseGoogleApiErrorDetails
 
 /**
  * Lists accounts associated with the authenticated Google user.
@@ -616,8 +695,16 @@ export async function listGoogleAccounts(accessToken: string): Promise<GoogleAcc
             ? 'GOOGLE_SCOPE_INSUFFICIENT'
             : 'GOOGLE_PERMISSION_DENIED'
 
+        const { projectNumber, serviceName, activationUrl } = parseGoogleApiErrorDetails(
+          googleMsg,
+          errorData,
+          'mybusinessaccountmanagement.googleapis.com'
+        )
+
+        const projectHint = projectNumber ? ` (Google Cloud Project: ${projectNumber})` : ''
+        const urlHint = activationUrl ? ` Enable it here: ${activationUrl}` : ''
         const message = isServiceDisabled
-          ? 'Google Business Profile API is disabled in your Google Cloud project. The required Google Cloud APIs are disabled. Please enable "My Business Account Management API" and "My Business Business Information API" in the Google Cloud Console.'
+          ? `Google Business Profile API is disabled in your Google Cloud project${projectHint}. The required Google Cloud APIs are disabled. Please enable "My Business Account Management API" and "My Business Business Information API" in the Google Cloud Console.${urlHint}`
           : isScopeInsufficient
             ? 'Google authorization lacks required permissions (missing required permissions). Please reconnect your Google account and grant all requested scopes.'
             : 'Google Business Profile permission denied. Please verify your Google account has permissions to manage this business and the required Google Cloud APIs are enabled.'
@@ -627,15 +714,36 @@ export async function listGoogleAccounts(accessToken: string): Promise<GoogleAcc
           403,
           'GOOGLE_PERMISSION_DENIED',
           googleMsg,
-          subcode
+          subcode,
+          { projectNumber, serviceName, activationUrl }
         )
       }
       if (response.status === 429) {
+        const { projectNumber, serviceName, isZeroQuota } = parseGoogleApiErrorDetails(
+          googleMsg,
+          errorData,
+          'mybusinessaccountmanagement.googleapis.com'
+        )
+
+        const subcode = isZeroQuota ? 'GOOGLE_ZERO_QUOTA' : 'GOOGLE_RATE_LIMITED'
+        const projectHint = projectNumber ? ` (Google Cloud Project: ${projectNumber})` : ''
+        const accessUrl = 'https://developers.google.com/my-business/content/get-started#request-access'
+
+        const message = isZeroQuota
+          ? `Google Business Profile API access has 0 quota in your Google Cloud project${projectHint}. Google Business Profile APIs require approval for Basic API Access before queries are permitted. Please submit an Application for Basic API Access to request quota.`
+          : 'Google API rate limit reached. Please wait a few moments before retrying.'
+
         throw new GoogleApiError(
-          'Google API quota or rate limit exceeded. Please try again later.',
+          message,
           429,
           'GOOGLE_QUOTA_EXCEEDED',
-          googleMsg
+          googleMsg,
+          subcode,
+          {
+            projectNumber,
+            serviceName,
+            activationUrl: isZeroQuota ? accessUrl : undefined,
+          }
         )
       }
 
@@ -764,8 +872,16 @@ export async function listGoogleLocations(
 
         const subcode = isServiceDisabled ? 'GOOGLE_API_DISABLED' : 'GOOGLE_PERMISSION_DENIED'
 
+        const { projectNumber, serviceName, activationUrl } = parseGoogleApiErrorDetails(
+          googleMsg,
+          errorData,
+          'mybusinessbusinessinformation.googleapis.com'
+        )
+
+        const projectHint = projectNumber ? ` (Google Cloud Project: ${projectNumber})` : ''
+        const urlHint = activationUrl ? ` Enable it here: ${activationUrl}` : ''
         const message = isServiceDisabled
-          ? 'Google Business Information API is disabled in your Google Cloud project. The required Google Cloud APIs are disabled. Please verify that "My Business Business Information API" is enabled in the Google Cloud Console.'
+          ? `Google Business Information API is disabled in your Google Cloud project${projectHint}. The required Google Cloud APIs are disabled. Please verify that "My Business Business Information API" is enabled in the Google Cloud Console.${urlHint}`
           : `Access to locations for account ${cleanAccount} was denied. Please verify your permissions in Google Business Profile.`
 
         throw new GoogleApiError(
@@ -773,15 +889,36 @@ export async function listGoogleLocations(
           403,
           'GOOGLE_PERMISSION_DENIED',
           googleMsg,
-          subcode
+          subcode,
+          { projectNumber, serviceName, activationUrl }
         )
       }
       if (response.status === 429) {
+        const { projectNumber, serviceName, isZeroQuota } = parseGoogleApiErrorDetails(
+          googleMsg,
+          errorData,
+          'mybusinessbusinessinformation.googleapis.com'
+        )
+
+        const subcode = isZeroQuota ? 'GOOGLE_ZERO_QUOTA' : 'GOOGLE_RATE_LIMITED'
+        const projectHint = projectNumber ? ` (Google Cloud Project: ${projectNumber})` : ''
+        const accessUrl = 'https://developers.google.com/my-business/content/get-started#request-access'
+
+        const message = isZeroQuota
+          ? `Google Business Information API access has 0 quota in your Google Cloud project${projectHint}. Google Business Profile APIs require approval for Basic API Access before queries are permitted. Please submit an Application for Basic API Access to request quota.`
+          : 'Google API rate limit reached. Please wait a few moments before retrying.'
+
         throw new GoogleApiError(
-          'Google API rate limit reached. Please try again later.',
+          message,
           429,
           'GOOGLE_QUOTA_EXCEEDED',
-          googleMsg
+          googleMsg,
+          subcode,
+          {
+            projectNumber,
+            serviceName,
+            activationUrl: isZeroQuota ? accessUrl : undefined,
+          }
         )
       }
 
@@ -829,7 +966,33 @@ export async function fetchGoogleReviews(
     })
 
     if (!response.ok) {
-      throw new Error(`Google API error: ${response.status}`)
+      let errorData: any = null
+      try {
+        errorData = await response.json()
+      } catch {}
+      const googleMsg = errorData?.error?.message || response.statusText || 'Google API error'
+      if (response.status === 401) {
+        throw new GoogleApiError(
+          'Google session expired or invalid. Please re-authenticate your Google account.',
+          401,
+          'GOOGLE_REAUTH_REQUIRED',
+          googleMsg
+        )
+      }
+      if (response.status === 403) {
+        throw new GoogleApiError(
+          `Google Business Profile reviews permission denied: ${googleMsg}`,
+          403,
+          'GOOGLE_PERMISSION_DENIED',
+          googleMsg
+        )
+      }
+      throw new GoogleApiError(
+        `Google API error ${response.status}: ${googleMsg}`,
+        response.status >= 500 ? 502 : response.status,
+        'GOOGLE_API_ERROR',
+        googleMsg
+      )
     }
 
     const data = await response.json().catch(() => ({}))

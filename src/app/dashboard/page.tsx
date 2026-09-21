@@ -39,8 +39,20 @@ export default function DashboardPage() {
         ? `/api/dashboard?businessId=${activeBusinessId}`
         : '/api/dashboard'
       try {
-        const r = await fetch(url)
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        let r = await fetch(url)
+        if (r.status === 503) {
+          // Bounded retry on database pool saturation
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          r = await fetch(url)
+        }
+        if (!r.ok) {
+          let errData: any = null
+          try { errData = await r.json() } catch {}
+          const msg = r.status === 503
+            ? (errData?.message || errData?.error || 'Database connection limit reached. Please retry in a few moments.')
+            : (errData?.message || errData?.error || `HTTP ${r.status}`)
+          throw new Error(msg)
+        }
         const d = await r.json()
         if (!cancelled) { setData(d); setLoading(false) }
       } catch (e: unknown) {
