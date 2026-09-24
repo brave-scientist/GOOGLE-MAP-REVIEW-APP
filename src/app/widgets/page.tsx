@@ -113,7 +113,7 @@ export default function WidgetsPage() {
   }, [activeBusiness?.id])
 
   // Generate real, deterministic embed code pointing to /widget.js using businessId or slug
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.reviewreply.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL || 'https://reviewreply.pw')
   const hasBusiness = Boolean(activeBusiness && activeBusiness.id)
   const embedIdentifier = activeBusiness?.slug ? `slug=${encodeURIComponent(activeBusiness.slug)}` : `businessId=${encodeURIComponent(activeBusiness?.id || '')}`
   const embedCode = hasBusiness

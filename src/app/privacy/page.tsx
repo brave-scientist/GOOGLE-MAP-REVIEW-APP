@@ -1,4 +1,5 @@
 import { LegalLayout } from '@/components/app/marketing-shell'
+import { SITE_CONFIG } from '@/lib/site-config'
 
 export const metadata = {
   title: 'Privacy Policy — ReviewReply Enterprise',
@@ -93,7 +94,7 @@ export default function PrivacyPage() {
           <li><strong>Objection:</strong> Object to processing based on legitimate interests.</li>
           <li><strong>Withdraw consent:</strong> Withdraw consent for consent-based processing at any time.</li>
         </ul>
-        <p className="mt-3">To exercise these rights, visit Settings → Compliance → GDPR, or email <a href="mailto:privacy@reviewreply.com" className="text-[var(--brass)] hover:underline">privacy@reviewreply.com</a>. We respond within 30 days.</p>
+        <p className="mt-3">To exercise these rights, visit Settings → Compliance → GDPR, or email <a href={`mailto:${SITE_CONFIG.supportEmail}`} className="text-[var(--brass)] hover:underline">{SITE_CONFIG.supportEmail}</a>. We respond within 30 days.</p>
       </section>
 
       <section>
@@ -142,9 +143,9 @@ export default function PrivacyPage() {
         <h2 className="text-xl font-bold text-foreground mb-3">13. Contact Us</h2>
         <p>If you have questions about this Privacy Policy or our data practices, please contact:</p>
         <ul className="list-none pl-0 mt-2 space-y-1">
-          <li><strong>Data Protection Officer:</strong> <a href="mailto:dpo@reviewreply.com" className="text-[var(--brass)] hover:underline">dpo@reviewreply.com</a></li>
-          <li><strong>General inquiries:</strong> <a href="mailto:privacy@reviewreply.com" className="text-[var(--brass)] hover:underline">privacy@reviewreply.com</a></li>
-          <li><strong>Postal address:</strong> ReviewReply Enterprise, Attn: Privacy, 100 Market Street, San Francisco, CA 94102</li>
+          <li><strong>Data Protection Officer:</strong> <a href={`mailto:${SITE_CONFIG.supportEmail}`} className="text-[var(--brass)] hover:underline">{SITE_CONFIG.supportEmail}</a></li>
+          <li><strong>General inquiries:</strong> <a href={`mailto:${SITE_CONFIG.supportEmail}`} className="text-[var(--brass)] hover:underline">{SITE_CONFIG.supportEmail}</a></li>
+          <li><strong>Postal address:</strong> ReviewReply Enterprise, Attn: Privacy, {SITE_CONFIG.address.full}</li>
         </ul>
       </section>
     </LegalLayout>

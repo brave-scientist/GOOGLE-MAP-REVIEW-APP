@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Search, MessageSquare, FileText, Mail, Phone, Book, Zap, Shield } from 'lucide-react'
+import { SITE_CONFIG } from '@/lib/site-config'
 
 export const metadata = {
   title: 'Help Center — ReviewReply Enterprise',
@@ -216,7 +217,7 @@ export default function HelpPage() {
                 <Mail className="w-4 h-4 text-[var(--brass)]" />
                 <span className="text-sm font-medium">Email Support</span>
               </div>
-              <span className="text-[10px] text-muted-foreground">support@reviewreply.com</span>
+              <span className="text-[10px] text-muted-foreground">{SITE_CONFIG.supportEmail}</span>
             </Button>
           </Link>
           <Button variant="outline" className="w-full glass-card h-12 flex-col items-start">
@@ -231,7 +232,7 @@ export default function HelpPage() {
               <Phone className="w-4 h-4 text-[var(--brass)]" />
               <span className="text-sm font-medium">Phone (Enterprise)</span>
             </div>
-            <span className="text-[10px] text-muted-foreground">+1 415-555-0100</span>
+            <span className="text-[10px] text-muted-foreground">{SITE_CONFIG.phone}</span>
           </Button>
         </div>
       </Card>

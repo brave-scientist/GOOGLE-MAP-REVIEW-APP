@@ -868,7 +868,7 @@ export default function SettingsPage() {
                       id="address"
                       value={businessForm.address}
                       onChange={e => setBusinessForm(prev => ({ ...prev, address: e.target.value }))}
-                      placeholder="100 Main Street, Suite 1, San Francisco, CA 94102"
+                      placeholder="CRYSTAL PLAZA PREMISES LTD, C 208, Andheri West, Mumbai, Maharashtra 40010"
                       className="mt-1.5 glass-card"
                     />
                   </div>
@@ -879,7 +879,7 @@ export default function SettingsPage() {
                         id="phone"
                         value={businessForm.phone}
                         onChange={e => setBusinessForm(prev => ({ ...prev, phone: e.target.value }))}
-                        placeholder="+1 (415) 555-1000"
+                        placeholder="89760 12793"
                         className="mt-1.5 glass-card"
                       />
                     </div>
@@ -887,7 +887,7 @@ export default function SettingsPage() {
                       <Label htmlFor="email">Reply-from Email</Label>
                       <Input
                         id="email"
-                        defaultValue="hello@reviewreply.com"
+                        defaultValue="support@reviewreply.pw"
                         disabled
                         title="Reply email is managed by your account email configuration"
                         className="mt-1.5 glass-card opacity-70 cursor-not-allowed"

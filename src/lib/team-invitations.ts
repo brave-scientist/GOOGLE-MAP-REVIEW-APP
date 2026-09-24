@@ -259,7 +259,7 @@ export async function createTeamInvitation(
   })
 
   // 6. Dispatch invitation email via Resend
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://reviewreply.pw'
   const inviteUrl = `${appUrl}/invite/accept?token=${rawToken}`
   const emailConfigured = isResendConfigured()
   let emailSent = false

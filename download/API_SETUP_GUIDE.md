@@ -57,14 +57,14 @@ This document explains how to obtain, configure, and integrate the third-party A
    - APIs & Services → OAuth consent screen
    - User type: External (or Internal if you have a Google Workspace)
    - App name: ReviewReply Enterprise
-   - Authorized domains: `reviewreply.com`
+   - Authorized domains: `reviewreply.pw`
    - Scopes needed:
      - `https://www.googleapis.com/auth/business.manage` (read reviews + post replies)
 4. **Create credentials:**
    - APIs & Services → Credentials → Create Credentials → OAuth client ID
    - Application type: Web application
-   - Authorized JavaScript origins: `https://app.reviewreply.com`
-   - Authorized redirect URIs: `https://app.reviewreply.com/api/oauth/google/callback`
+   - Authorized JavaScript origins: `https://reviewreply.pw`
+   - Authorized redirect URIs: `https://reviewreply.pw/api/oauth/google/callback`
 5. **Store credentials:**
    - Copy the Client ID and Client Secret
    - Add to `.env`: `GOOGLE_CLIENT_ID=...` and `GOOGLE_CLIENT_SECRET=...`
@@ -107,7 +107,7 @@ This document explains how to obtain, configure, and integrate the third-party A
    - `read_page_mailboxes`
 4. **Set OAuth redirect:**
    - Facebook Login → Settings → Valid OAuth Redirect URIs
-   - Add: `https://app.reviewreply.com/api/oauth/facebook/callback`
+   - Add: `https://reviewreply.pw/api/oauth/facebook/callback`
 5. **App Review:** Submit for review to get advanced access to permissions
 6. **Store credentials:**
    - `.env`: `FACEBOOK_APP_ID=...` and `FACEBOOK_APP_SECRET=...`
@@ -144,7 +144,7 @@ This document explains how to obtain, configure, and integrate the third-party A
    - Copy the Price IDs (`price_...`) and add to your config
 3. **Configure webhook:**
    - Stripe Dashboard → Developers → Webhooks → Add endpoint
-   - Endpoint URL: `https://app.reviewreply.com/api/webhooks/stripe`
+   - Endpoint URL: `https://reviewreply.pw/api/webhooks/stripe`
    - Events to send:
      - `checkout.session.completed`
      - `customer.subscription.updated`
@@ -194,7 +194,7 @@ This document explains how to obtain, configure, and integrate the third-party A
    - Cost: $4-$50/month depending on campaign type
 4. **Configure webhook for inbound SMS:**
    - Phone Numbers → Active numbers → Your number
-   - A MESSAGE COMES IN: Webhook → `https://app.reviewreply.com/api/webhooks/twilio`
+   - A MESSAGE COMES IN: Webhook → `https://reviewreply.pw/api/webhooks/twilio`
    - This handles STOP/UNSTOP/START keywords for TCPA compliance
 5. **WhatsApp Business (optional):**
    - Twilio Console → Messaging → WhatsApp
@@ -233,17 +233,17 @@ This document explains how to obtain, configure, and integrate the third-party A
    - `.env`: `RESEND_API_KEY=re_...`
 2. **Verify sending domain:**
    - Resend Dashboard → Domains → Add Domain
-   - Enter: `mail.reviewreply.com` (or your domain)
+   - Enter: `mail.reviewreply.pw` (or your domain)
    - Add the DNS records Resend provides (MX, SPF, DKIM)
    - Wait for verification (usually 5-30 minutes)
-   - `.env`: `RESEND_FROM_EMAIL=ReviewReply <noreply@mail.reviewreply.com>`
+   - `.env`: `RESEND_FROM_EMAIL=ReviewReply <noreply@reviewreply.pw>`
 3. **Create email templates:**
    - Resend Dashboard → Templates (optional)
    - Or use React Email for templating (recommended)
    - Templates needed: review-request, daily-digest, trial-expiring, trial-ended, welcome
 4. **Configure webhook (optional):**
    - Resend Dashboard → Webhooks → Add webhook
-   - URL: `https://app.reviewreply.com/api/webhooks/resend`
+   - URL: `https://reviewreply.pw/api/webhooks/resend`
    - Events: `email.bounced`, `email.complained`, `email.delivered`
    - `.env`: `RESEND_WEBHOOK_SECRET=...`
 
@@ -271,8 +271,8 @@ This document explains how to obtain, configure, and integrate the third-party A
 2. **Create separate OAuth credentials** (or reuse the same):
    - APIs & Services → Credentials → Create Credentials → OAuth client ID
    - Application type: Web application
-   - Authorized JavaScript origins: `https://app.reviewreply.com`
-   - Authorized redirect URIs: `https://app.reviewreply.com/api/auth/google/callback`
+   - Authorized JavaScript origins: `https://reviewreply.pw`
+   - Authorized redirect URIs: `https://reviewreply.pw/api/auth/google/callback`
 3. **Configure scopes:**
    - `openid` (required)
    - `email` (required)
@@ -437,7 +437,7 @@ TWILIO_WHATSAPP_NUMBER=whatsapp:+1...
 
 # Resend (Email)
 RESEND_API_KEY=re_...
-RESEND_FROM_EMAIL=ReviewReply <noreply@mail.reviewreply.com>
+RESEND_FROM_EMAIL=ReviewReply <noreply@reviewreply.pw>
 RESEND_WEBHOOK_SECRET=...
 
 # Slack
@@ -451,7 +451,7 @@ TRUSTPILOT_API_KEY=...
 TRUSTPILOT_API_SECRET=...
 
 # App
-NEXTAUTH_URL=https://app.reviewreply.com
+NEXTAUTH_URL=https://reviewreply.pw
 NEXTAUTH_SECRET=generate_a_random_32_char_string
 ```
 

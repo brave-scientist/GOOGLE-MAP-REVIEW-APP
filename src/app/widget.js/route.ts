@@ -1,6 +1,6 @@
 // /widget.js — Embeddable ReviewReply widget
 // This route serves a JavaScript file that renders a review widget on any website
-// Usage: <script src="https://app.reviewreply.com/widget.js?business=Bamboo+Garden&type=carousel&theme=brass&minRating=4&limit=5" async></script>
+// Usage: <script src="https://reviewreply.pw/widget.js?business=Bamboo+Garden&type=carousel&theme=brass&minRating=4&limit=5" async></script>
 //
 // Supported params:
 //   business  — business name to fetch reviews for (required, fuzzy match)

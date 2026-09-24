@@ -631,7 +631,7 @@ TARGET STATE:
     └── CHANNEL: Email (Resend) ──────► [Format HTML + Unsubscribe Link] ─► [Resend API Dispatch]
         │
         ▼
-  [Customer Receives SMS/Email with https://app.reviewreply.com/r/{token}]
+  [Customer Receives SMS/Email with https://reviewreply.pw/r/{token}]
         │
         ▼
   [GET /r/{token}] ──► [Record clickedAt Timestamp in DB] ──► [Redirect to Google Review Page]

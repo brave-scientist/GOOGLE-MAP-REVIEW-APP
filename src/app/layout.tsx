@@ -7,6 +7,7 @@ import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { CommandPalette } from "@/components/app/command-palette";
 import { BusinessProvider } from "@/lib/business-context";
+import { SITE_CONFIG } from "@/lib/site-config";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -29,6 +30,10 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_CONFIG.url),
+  alternates: {
+    canonical: '/',
+  },
   title: "ReviewReply Enterprise — Turn every customer into a five-star review",
   description:
     "ReviewReply aggregates reviews from Google Business Profile and Facebook Pages into one unified inbox. ReviewReply AI drafts on-brand replies in seconds.",
@@ -40,11 +45,36 @@ export const metadata: Metadata = {
     "local SEO",
     "SaaS",
   ],
-  authors: [{ name: "ReviewReply Enterprise" }],
+  authors: [{ name: SITE_CONFIG.legalName, url: SITE_CONFIG.url }],
   openGraph: {
     title: "ReviewReply Enterprise",
     description: "Turn every customer into a five-star review.",
+    url: SITE_CONFIG.url,
+    siteName: SITE_CONFIG.name,
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ReviewReply Enterprise",
+    description: "Turn every customer into a five-star review.",
+  },
+};
+
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: SITE_CONFIG.name,
+  legalName: SITE_CONFIG.legalName,
+  url: SITE_CONFIG.url,
+  email: SITE_CONFIG.supportEmail,
+  telephone: "+91" + SITE_CONFIG.phone.replace(/\s+/g, ""),
+  address: {
+    "@type": "PostalAddress",
+    streetAddress: SITE_CONFIG.address.line1,
+    addressLocality: SITE_CONFIG.address.locality,
+    addressRegion: SITE_CONFIG.address.region,
+    postalCode: SITE_CONFIG.address.postalCode,
+    addressCountry: "IN",
   },
 };
 
@@ -68,6 +98,10 @@ export default function RootLayout({
             gtag('config', 'G-WZ2DM9W9W3');
           `}
         </Script>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
       </head>
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased bg-background text-foreground font-sans`}

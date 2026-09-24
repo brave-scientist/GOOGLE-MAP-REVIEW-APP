@@ -1,4 +1,5 @@
 import { LegalLayout } from '@/components/app/marketing-shell'
+import { SITE_CONFIG } from '@/lib/site-config'
 
 export const metadata = {
   title: 'Terms of Service — ReviewReply Enterprise',
@@ -159,8 +160,8 @@ export default function TermsPage() {
         <h2 className="text-xl font-bold text-foreground mb-3">16. Contact</h2>
         <p>For questions about these Terms, contact:</p>
         <ul className="list-none pl-0 mt-2 space-y-1">
-          <li><strong>Email:</strong> <a href="mailto:legal@reviewreply.com" className="text-[var(--brass)] hover:underline">legal@reviewreply.com</a></li>
-          <li><strong>Address:</strong> ReviewReply Enterprise, Attn: Legal, 100 Market Street, San Francisco, CA 94102</li>
+          <li><strong>Email:</strong> <a href={`mailto:${SITE_CONFIG.supportEmail}`} className="text-[var(--brass)] hover:underline">{SITE_CONFIG.supportEmail}</a></li>
+          <li><strong>Address:</strong> ReviewReply Enterprise, Attn: Legal, {SITE_CONFIG.address.full}</li>
         </ul>
       </section>
     </LegalLayout>

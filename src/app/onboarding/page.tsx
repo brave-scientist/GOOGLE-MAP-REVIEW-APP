@@ -1454,7 +1454,7 @@ function OnboardingContent() {
 
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-mono text-muted-foreground select-none">
-                    reviewreply.com/review-us/
+                    reviewreply.pw/review-us/
                   </span>
                   <Input
                     id="slug"

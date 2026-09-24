@@ -156,7 +156,7 @@ async function runAdminTests() {
     verify('COMMAS-002', 'Invalid commas ADMIN_EMAILS returns code ADMINS_NOT_CONFIGURED', commasBody.code === 'ADMINS_NOT_CONFIGURED')
 
     // 6. Authenticated user NOT in allowlist
-    process.env.ADMIN_EMAILS = 'admin@reviewreply.com, ops@reviewreply.com'
+    process.env.ADMIN_EMAILS = 'admin@reviewreply.pw, ops@reviewreply.pw'
     activeMockUser = {
       id: 'usr_2',
       email: 'attacker@evil.com',
@@ -172,19 +172,19 @@ async function runAdminTests() {
     // 7. Authenticated user IN allowlist (exact match)
     activeMockUser = {
       id: 'usr_admin',
-      email: 'admin@reviewreply.com',
+      email: 'admin@reviewreply.pw',
       name: 'Primary Admin',
       role: Role.ADMIN,
     }
     const authReqAdmin = await createAuthenticatedRequest(activeMockUser)
     const authAdminRes = await requireAdmin(authReqAdmin)
     verify('AUTH-001', 'Allowlisted admin passes requireAdmin check', (authAdminRes as AdminCheckResult).ok === true)
-    verify('AUTH-002', 'Allowlisted admin returns matched SessionUser', (authAdminRes as AdminCheckResult).user?.email === 'admin@reviewreply.com')
+    verify('AUTH-002', 'Allowlisted admin returns matched SessionUser', (authAdminRes as AdminCheckResult).user?.email === 'admin@reviewreply.pw')
 
     // 8. Case-insensitive matching (user email uppercase, env lowercase)
     activeMockUser = {
       id: 'usr_case1',
-      email: 'ADMIN@REVIEWREPLY.COM',
+      email: 'ADMIN@REVIEWREPLY.PW',
       name: 'Upper Admin',
       role: Role.ADMIN,
     }
@@ -193,10 +193,10 @@ async function runAdminTests() {
     verify('CASE-001', 'Case-insensitive matching (UPPERCASE user email)', (caseMatchRes1 as AdminCheckResult).ok === true)
 
     // 9. Case-insensitive matching (env mixed case, user lowercase)
-    process.env.ADMIN_EMAILS = 'Ops-Lead@ReviewReply.COM, Founder@Domain.IO'
+    process.env.ADMIN_EMAILS = 'Ops-Lead@ReviewReply.PW, Founder@Domain.IO'
     activeMockUser = {
       id: 'usr_case2',
-      email: 'ops-lead@reviewreply.com',
+      email: 'ops-lead@reviewreply.pw',
       name: 'Ops Lead',
       role: Role.ADMIN,
     }

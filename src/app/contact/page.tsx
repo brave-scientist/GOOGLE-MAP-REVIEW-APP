@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Mail, MessageSquare, Phone, MapPin, Loader2, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { SITE_CONFIG } from '@/lib/site-config'
 
 function ContactForm() {
   const searchParams = useSearchParams()
@@ -75,7 +76,7 @@ function ContactForm() {
           <Mail className="w-5 h-5 text-[var(--brass)] mb-2" />
           <h3 className="font-semibold text-sm mb-1">Email</h3>
           <p className="text-xs text-muted-foreground mb-2">General inquiries and support</p>
-          <a href="mailto:support@reviewreply.com" className="text-xs text-[var(--brass)] hover:underline">support@reviewreply.com</a>
+          <a href={`mailto:${SITE_CONFIG.supportEmail}`} className="text-xs text-[var(--brass)] hover:underline">{SITE_CONFIG.supportEmail}</a>
         </div>
         <div className="p-4 rounded-lg glass-card">
           <MessageSquare className="w-5 h-5 text-[var(--brass)] mb-2" />
@@ -87,12 +88,12 @@ function ContactForm() {
           <Phone className="w-5 h-5 text-[var(--brass)] mb-2" />
           <h3 className="font-semibold text-sm mb-1">Phone</h3>
           <p className="text-xs text-muted-foreground mb-2">Enterprise customers only</p>
-          <a href="tel:+14155550100" className="text-xs text-[var(--brass)] hover:underline">+1 415-555-0100</a>
+          <a href={SITE_CONFIG.phoneHref} className="text-xs text-[var(--brass)] hover:underline">{SITE_CONFIG.phone}</a>
         </div>
         <div className="p-4 rounded-lg glass-card">
           <MapPin className="w-5 h-5 text-[var(--brass)] mb-2" />
           <h3 className="font-semibold text-sm mb-1">Office</h3>
-          <p className="text-xs text-muted-foreground">100 Market Street<br />San Francisco, CA 94102<br />United States</p>
+          <p className="text-xs text-muted-foreground">{SITE_CONFIG.address.full}</p>
         </div>
       </div>
 
