@@ -20,6 +20,15 @@ const nextConfig: NextConfig = {
         ? { exclude: ['error', 'warn'] }
         : false,
   },
+  async redirects() {
+    return [
+      {
+        source: '/settings/team',
+        destination: '/settings',
+        permanent: false,
+      },
+    ];
+  },
   // Security headers applied to all responses
   async headers() {
     return [

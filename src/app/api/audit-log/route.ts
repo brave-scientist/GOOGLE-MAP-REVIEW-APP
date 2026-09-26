@@ -43,29 +43,29 @@ export async function GET(request: NextRequest) {
         where: { businessId: { in: ctx.businessIds } },
         select: { id: true },
         take: 100,
-      }),
+      }).catch(() => []),
       db.teamInvitation.findMany({
         where: { orgId: ctx.orgId },
         select: { id: true },
         take: 100,
-      }),
+      }).catch(() => []),
       db.customDomain.findMany({
         where: { orgId: ctx.orgId },
         select: { id: true },
         take: 50,
-      }),
+      }).catch(() => []),
       db.scheduledReport.findMany({
         where: { orgId: ctx.orgId },
         select: { id: true },
         take: 100,
-      }),
+      }).catch(() => []),
       ctx.businessIds.length > 0
         ? db.review.findMany({
             where: { businessId: { in: ctx.businessIds } },
             select: { id: true },
             orderBy: { createdAt: 'desc' },
             take: 200,
-          })
+          }).catch(() => [])
         : [],
     ])
 
