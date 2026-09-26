@@ -21,7 +21,10 @@ let failed = 0
 function pass(name: string) { console.log(`  ✓ ${name}`); passed++ }
 function fail(name: string, reason: string) { console.error(`  ✗ ${name}\n    Reason: ${reason}`); failed++ }
 
-const SECRET_KEY = process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'
+import crypto from 'crypto'
+
+const SECRET_KEY = process.env.TEST_SESSION_SECRET || process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex')
+process.env.SESSION_SECRET = SECRET_KEY
 const secret = new TextEncoder().encode(SECRET_KEY)
 
 async function createTestSessionToken(user: { id: string; email: string; role: string }) {

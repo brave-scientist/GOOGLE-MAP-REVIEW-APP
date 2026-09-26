@@ -21,14 +21,12 @@ import { GET as getTeamMembersHandler } from '../src/app/api/team/members/route'
 import { GET as getAgencyHandler } from '../src/app/api/agency/route'
 import { GET as getWidgetJsHandler } from '../src/app/widget.js/route'
 
-const E2E_DB_URL = process.env.E2E_DATABASE_URL || process.env.DATABASE_URL || ''
-if (!E2E_DB_URL.includes('5433') && !E2E_DB_URL.includes('reviewreply_test')) {
-  console.error('[FATAL] Must run against isolated test DB (port 5433 / reviewreply_test).')
-  process.exit(1)
-}
+import crypto from 'crypto'
+import { validateE2EDatabaseUrl } from '../e2e/fixtures/db-guard'
 
+const E2E_DB_URL = validateE2EDatabaseUrl(process.env.E2E_DATABASE_URL || process.env.DATABASE_URL)
 process.env.DATABASE_URL = E2E_DB_URL
-process.env.SESSION_SECRET = process.env.SESSION_SECRET || '87fff5bb73e14c5a7d0c1fdcdb6244b4f39c630164c7ce9e6673ff28ca3d1cbd'
+process.env.SESSION_SECRET = process.env.TEST_SESSION_SECRET || crypto.randomBytes(32).toString('hex')
 
 const prisma = new PrismaClient({ datasources: { db: { url: E2E_DB_URL } } })
 
@@ -87,25 +85,34 @@ async function run() {
 
   const runId = `gate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 
-  // -------------------------------------------------------------
-  // SETUP TEST DATA
-  // -------------------------------------------------------------
-  console.log('-- Setting up Test Tenants A and B --')
+  let userA: any = null
+  let userB: any = null
+  let orgA: any = null
+  let orgB: any = null
+  let bizA1: any = null
+  let bizA2: any = null
+  let bizB1: any = null
 
-  // Tenant A: Org A, User A, Biz A1, Biz A2
-  const userA = await prisma.user.create({
-    data: {
-      email: `${runId}_userA@example.com`,
-      name: 'User A',
+  try {
+    // -------------------------------------------------------------
+    // SETUP TEST DATA
+    // -------------------------------------------------------------
+    console.log('-- Setting up Test Tenants A and B --')
+
+    // Tenant A: Org A, User A, Biz A1, Biz A2
+    userA = await prisma.user.create({
+      data: {
+        email: `${runId}_userA@example.com`,
+        name: 'User A',
       sessionVersion: 1,
     },
   })
-  const orgA = await prisma.organization.create({
-    data: {
-      name: `${runId} Org A`,
-      plan: Plan.AGENCY,
-    },
-  })
+    orgA = await prisma.organization.create({
+      data: {
+        name: `${runId} Org A`,
+        plan: Plan.AGENCY,
+      },
+    })
   await prisma.orgMember.create({
     data: {
       orgId: orgA.id,
@@ -113,7 +120,7 @@ async function run() {
       role: Role.OWNER,
     },
   })
-  const bizA1 = await prisma.business.create({
+    bizA1 = await prisma.business.create({
     data: {
       orgId: orgA.id,
       ownerId: userA.id,
@@ -123,7 +130,7 @@ async function run() {
       reviewCount: 3,
     },
   })
-  const bizA2 = await prisma.business.create({
+    bizA2 = await prisma.business.create({
     data: {
       orgId: orgA.id,
       ownerId: userA.id,
@@ -178,14 +185,14 @@ async function run() {
   })
 
   // Tenant B: Org B, User B, Biz B1
-  const userB = await prisma.user.create({
+  userB = await prisma.user.create({
     data: {
       email: `${runId}_userB@example.com`,
       name: 'User B',
       sessionVersion: 1,
     },
   })
-  const orgB = await prisma.organization.create({
+  orgB = await prisma.organization.create({
     data: {
       name: `${runId} Org B`,
       plan: Plan.STARTER,
@@ -198,7 +205,7 @@ async function run() {
       role: Role.OWNER,
     },
   })
-  const bizB1 = await prisma.business.create({
+  bizB1 = await prisma.business.create({
     data: {
       orgId: orgB.id,
       ownerId: userB.id,
@@ -520,18 +527,29 @@ async function run() {
     assert(jsRating5.includes('Reviewer A1'), 'minRating=5 includes 5-star review (Reviewer A1)')
     assert(!jsRating5.includes('Reviewer A2'), 'minRating=5 excludes 4-star review (Reviewer A2)')
   }
+} finally {
+    // -------------------------------------------------------------
+    // CLEANUP (Guaranteed to execute even on assertion failure)
+    // -------------------------------------------------------------
+    console.log('\n-- Cleanup --')
+    const bizIds = [bizA1?.id, bizA2?.id, bizB1?.id].filter(Boolean)
+    const userIds = [userA?.id, userB?.id].filter(Boolean)
+    const orgIds = [orgA?.id, orgB?.id].filter(Boolean)
 
-  // -------------------------------------------------------------
-  // CLEANUP
-  // -------------------------------------------------------------
-  console.log('\n-- Cleanup --')
-  await prisma.review.deleteMany({ where: { businessId: { in: [bizA1.id, bizA2.id, bizB1.id] } } })
-  await prisma.auditLog.deleteMany({ where: { actorId: { in: [userA.id, userB.id] } } })
-  await prisma.business.deleteMany({ where: { id: { in: [bizA1.id, bizA2.id, bizB1.id] } } })
-  await prisma.orgMember.deleteMany({ where: { userId: { in: [userA.id, userB.id] } } })
-  await prisma.organization.deleteMany({ where: { id: { in: [orgA.id, orgB.id] } } })
-  await prisma.user.deleteMany({ where: { id: { in: [userA.id, userB.id] } } })
-  console.log('  Cleaned up all isolated gate test data.')
+    if (bizIds.length > 0) {
+      await prisma.review.deleteMany({ where: { businessId: { in: bizIds } } }).catch(() => {})
+      await prisma.business.deleteMany({ where: { id: { in: bizIds } } }).catch(() => {})
+    }
+    if (userIds.length > 0) {
+      await prisma.auditLog.deleteMany({ where: { actorId: { in: userIds } } }).catch(() => {})
+      await prisma.orgMember.deleteMany({ where: { userId: { in: userIds } } }).catch(() => {})
+      await prisma.user.deleteMany({ where: { id: { in: userIds } } }).catch(() => {})
+    }
+    if (orgIds.length > 0) {
+      await prisma.organization.deleteMany({ where: { id: { in: orgIds } } }).catch(() => {})
+    }
+    console.log('  Cleaned up all isolated gate test data.')
+  }
 
   console.log('\n================================================================')
   console.log(` GATE VERIFICATION SUMMARY: ${passed} PASSED, ${failed} FAILED`)

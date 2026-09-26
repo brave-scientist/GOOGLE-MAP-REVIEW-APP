@@ -25,15 +25,31 @@ function getDatabaseUrl(): string | undefined {
   const rawUrl = process.env.DATABASE_URL
   if (!rawUrl) return undefined
 
-  // Only append params if the URL does not already contain them.
-  // Supabase transaction-mode Supavisor: 1 connection per serverless instance,
-  // 15 s pool timeout so saturation surfaces as a fast 503 (not a hung request).
-  if (rawUrl.includes('connection_limit')) {
-    return rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    // Serverless / Supavisor connection optimization:
+    // Only set defaults if not already explicitly provided in the connection string
+    if (!parsed.searchParams.has('connection_limit')) {
+      parsed.searchParams.set('connection_limit', '1')
+    }
+    if (!parsed.searchParams.has('pool_timeout')) {
+      parsed.searchParams.set('pool_timeout', '15')
+    }
+    if (!parsed.searchParams.has('socket_timeout')) {
+      parsed.searchParams.set('socket_timeout', '20')
+    }
+    if (!parsed.searchParams.has('pgbouncer')) {
+      parsed.searchParams.set('pgbouncer', 'true')
+    }
+    return parsed.toString()
+  } catch {
+    // If standard URL parsing fails on custom protocols, fallback to safe string manipulation
+    if (rawUrl.includes('connection_limit')) {
+      return rawUrl
+    }
+    const separator = rawUrl.includes('?') ? '&' : '?'
+    return `${rawUrl}${separator}connection_limit=1&pool_timeout=15&socket_timeout=20&pgbouncer=true`
   }
-
-  const separator = rawUrl.includes('?') ? '&' : '?'
-  return `${rawUrl}${separator}connection_limit=1&pool_timeout=15&socket_timeout=20&pgbouncer=true`
 }
 
 const dbUrl = getDatabaseUrl()

@@ -19,6 +19,11 @@ try {
   }
 } catch {}
 
+import crypto from 'crypto'
+if (!process.env.SESSION_SECRET) {
+  process.env.SESSION_SECRET = process.env.TEST_SESSION_SECRET || crypto.randomBytes(32).toString('hex')
+}
+
 import { db } from '../src/lib/db'
 import {
   getGoogleOAuthConfig,
@@ -141,7 +146,7 @@ async function runGoogleOAuthTests() {
   // GOOGLE-005 & GOOGLE-025-D: Expired state rejected
   const derivedKey = crypto
     .createHash('sha256')
-    .update('rr-oauth-state-encryption-key-v1:' + (process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'))
+    .update('rr-oauth-state-encryption-key-v1:' + process.env.SESSION_SECRET)
     .digest()
 
   const expiredToken = await new EncryptJWT({ state: state1, nonce: nonce1, codeVerifier: pkce.codeVerifier })

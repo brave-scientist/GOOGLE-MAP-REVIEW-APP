@@ -22,7 +22,8 @@ async function runE2EJourneys() {
     }
   }
 
-  const SECRET_KEY = 'reviewreply-dev-secret-change-in-production-min-32-chars'
+  const SECRET_KEY = process.env.TEST_SESSION_SECRET || process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex')
+  process.env.SESSION_SECRET = SECRET_KEY
   const secret = new TextEncoder().encode(SECRET_KEY)
 
   // ──────────────────────────────────────────────────────────

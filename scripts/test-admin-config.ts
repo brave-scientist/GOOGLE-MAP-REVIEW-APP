@@ -8,7 +8,10 @@ import { db } from '../src/lib/db'
 import { Role } from '@prisma/client'
 import { SignJWT } from 'jose'
 
-const SECRET_KEY = process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'
+import crypto from 'crypto'
+
+const SECRET_KEY = process.env.TEST_SESSION_SECRET || process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex')
+process.env.SESSION_SECRET = SECRET_KEY
 const secret = new TextEncoder().encode(SECRET_KEY)
 
 async function createTestSessionToken(user: { id: string; email: string; role: Role }) {

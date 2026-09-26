@@ -9,8 +9,6 @@ import { getRedisClient } from '@/lib/rate-limit'
 export const OAUTH_STATE_COOKIE = 'rr_oauth_google_state'
 export const OAUTH_STATE_TTL_SECONDS = 600 // 10 minutes
 
-const SECRET_KEY = process.env.SESSION_SECRET || 'reviewreply-dev-secret-change-in-production-min-32-chars'
-
 // In-memory single-use transaction store for fast atomic check & local/fallback execution
 const consumedOAuthTransactions = new Map<string, number>()
 
@@ -31,11 +29,24 @@ if (typeof setInterval !== 'undefined') {
 
 /**
  * Derives a dedicated 256-bit symmetric encryption key from SESSION_SECRET for OAuth state JWE.
+ * Fails closed in production if SESSION_SECRET is missing or < 32 chars.
  */
+let ephemeralDevSecret: string | null = null
+
 function getOAuthEncryptionKey(): Uint8Array {
+  const secret = process.env.SESSION_SECRET
+  if (process.env.NODE_ENV === 'production' && (!secret || secret.trim().length < 32)) {
+    throw new Error('FATAL: SESSION_SECRET must be configured and at least 32 characters in production')
+  }
+  if (!secret) {
+    if (!ephemeralDevSecret) {
+      ephemeralDevSecret = crypto.randomBytes(32).toString('hex')
+    }
+  }
+  const keyMaterial = secret || ephemeralDevSecret!
   return crypto
     .createHash('sha256')
-    .update('rr-oauth-state-encryption-key-v1:' + SECRET_KEY)
+    .update('rr-oauth-state-encryption-key-v1:' + keyMaterial)
     .digest()
 }
 

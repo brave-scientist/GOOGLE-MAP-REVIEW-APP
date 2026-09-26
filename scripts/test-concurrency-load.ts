@@ -22,14 +22,12 @@ import { GET as getAuditLogHandler } from '../src/app/api/audit-log/route'
 import { GET as getTeamMembersHandler } from '../src/app/api/team/members/route'
 import { GET as getAgencyHandler } from '../src/app/api/agency/route'
 
-const E2E_DB_URL = process.env.E2E_DATABASE_URL || process.env.DATABASE_URL || ''
-if (!E2E_DB_URL.includes('5433') && !E2E_DB_URL.includes('reviewreply_test')) {
-  console.error('[FATAL] Must run against isolated test DB (port 5433 / reviewreply_test).')
-  process.exit(1)
-}
+import crypto from 'crypto'
+import { validateE2EDatabaseUrl } from '../e2e/fixtures/db-guard'
 
+const E2E_DB_URL = validateE2EDatabaseUrl(process.env.E2E_DATABASE_URL || process.env.DATABASE_URL)
 process.env.DATABASE_URL = E2E_DB_URL
-process.env.SESSION_SECRET = process.env.SESSION_SECRET || '87fff5bb73e14c5a7d0c1fdcdb6244b4f39c630164c7ce9e6673ff28ca3d1cbd'
+process.env.SESSION_SECRET = process.env.TEST_SESSION_SECRET || crypto.randomBytes(32).toString('hex')
 
 const prisma = new PrismaClient({ datasources: { db: { url: E2E_DB_URL } } })
 
@@ -41,28 +39,33 @@ async function runLoadTest() {
 
   const testId = `load_${Date.now()}`
 
-  // Seed test tenant
-  const user = await prisma.user.create({
-    data: {
-      email: `${testId}@example.com`,
-      name: 'Load Tester',
-      sessionVersion: 1,
-    },
-  })
-  const org = await prisma.organization.create({
-    data: {
-      name: `${testId} Org`,
-      plan: Plan.AGENCY,
-    },
-  })
-  await prisma.orgMember.create({
-    data: {
-      orgId: org.id,
-      userId: user.id,
-      role: Role.OWNER,
-    },
-  })
-  const biz = await prisma.business.create({
+  let user: any = null
+  let org: any = null
+  let biz: any = null
+
+  try {
+    // Seed test tenant
+    user = await prisma.user.create({
+      data: {
+        email: `${testId}@example.com`,
+        name: 'Load Tester',
+        sessionVersion: 1,
+      },
+    })
+    org = await prisma.organization.create({
+      data: {
+        name: `${testId} Org`,
+        plan: Plan.AGENCY,
+      },
+    })
+    await prisma.orgMember.create({
+      data: {
+        orgId: org.id,
+        userId: user.id,
+        role: Role.OWNER,
+      },
+    })
+    biz = await prisma.business.create({
     data: {
       orgId: org.id,
       ownerId: user.id,
@@ -168,31 +171,38 @@ async function runLoadTest() {
     console.log(`  Wave ${wave}/${CONCURRENT_WAVES} completed in ${waveDuration}ms`)
   }
 
-  const avgLatency = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
-  const p95Latency = latencies.sort((a, b) => a - b)[Math.floor(latencies.length * 0.95)]
-  const maxLatency = Math.max(...latencies)
+    const avgLatency = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+    const p95Latency = latencies.sort((a, b) => a - b)[Math.floor(latencies.length * 0.95)]
+    const maxLatency = Math.max(...latencies)
 
-  console.log('\n-- LOAD TEST RESULTS --')
-  console.log(`  Total requests:     ${totalSuccessful + totalFailed}`)
-  console.log(`  Successful (200):   ${totalSuccessful}`)
-  console.log(`  Failed (non-200):   ${totalFailed}`)
-  console.log(`  Saturation (503):   ${totalSaturationErrors}`)
-  console.log(`  Average Latency:    ${avgLatency}ms`)
-  console.log(`  P95 Latency:        ${p95Latency}ms`)
-  console.log(`  Max Latency:        ${maxLatency}ms`)
+    console.log('\n-- LOAD TEST RESULTS --')
+    console.log(`  Total requests:     ${totalSuccessful + totalFailed}`)
+    console.log(`  Successful (200):   ${totalSuccessful}`)
+    console.log(`  Failed (non-200):   ${totalFailed}`)
+    console.log(`  Saturation (503):   ${totalSaturationErrors}`)
+    console.log(`  Average Latency:    ${avgLatency}ms`)
+    console.log(`  P95 Latency:        ${p95Latency}ms`)
+    console.log(`  Max Latency:        ${maxLatency}ms`)
 
-  // Cleanup
-  await prisma.review.deleteMany({ where: { businessId: biz.id } })
-  await prisma.business.deleteMany({ where: { id: biz.id } })
-  await prisma.orgMember.deleteMany({ where: { userId: user.id } })
-  await prisma.organization.deleteMany({ where: { id: org.id } })
-  await prisma.user.deleteMany({ where: { id: user.id } })
-
-  if (totalFailed > 0 || totalSaturationErrors > 0) {
-    console.error('\n[FAIL] Load test had failures or saturation errors!')
-    process.exit(1)
-  } else {
-    console.log('\n[PASS] Load test passed with ZERO errors and ZERO saturation failures!')
+    if (totalFailed > 0 || totalSaturationErrors > 0) {
+      console.error('\n[FAIL] Load test had failures or saturation errors!')
+      process.exit(1)
+    } else {
+      console.log('\n[PASS] Load test passed with ZERO errors and ZERO saturation failures!')
+    }
+  } finally {
+    // Cleanup guaranteed even on error
+    if (biz?.id) {
+      await prisma.review.deleteMany({ where: { businessId: biz.id } }).catch(() => {})
+      await prisma.business.deleteMany({ where: { id: biz.id } }).catch(() => {})
+    }
+    if (user?.id) {
+      await prisma.orgMember.deleteMany({ where: { userId: user.id } }).catch(() => {})
+      await prisma.user.deleteMany({ where: { id: user.id } }).catch(() => {})
+    }
+    if (org?.id) {
+      await prisma.organization.deleteMany({ where: { id: org.id } }).catch(() => {})
+    }
   }
 }
 

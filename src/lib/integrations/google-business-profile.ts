@@ -39,12 +39,19 @@ if (typeof setInterval !== 'undefined') {
  * Derives a dedicated 256-bit symmetric encryption key from SESSION_SECRET for GBP OAuth state JWE.
  * Fails closed in production if SESSION_SECRET is missing or < 32 chars.
  */
+let ephemeralDevSecret: string | null = null
+
 function getGBPEncryptionKey(): Uint8Array {
   const secret = process.env.SESSION_SECRET
   if (process.env.NODE_ENV === 'production' && (!secret || secret.trim().length < 32)) {
     throw new Error('FATAL: SESSION_SECRET must be configured and at least 32 characters in production')
   }
-  const keyMaterial = secret || 'reviewreply-dev-secret-change-in-production-min-32-chars'
+  if (!secret) {
+    if (!ephemeralDevSecret) {
+      ephemeralDevSecret = crypto.randomBytes(32).toString('hex')
+    }
+  }
+  const keyMaterial = secret || ephemeralDevSecret!
   return crypto
     .createHash('sha256')
     .update('rr-gbp-oauth-state-encryption-key-v1:' + keyMaterial)

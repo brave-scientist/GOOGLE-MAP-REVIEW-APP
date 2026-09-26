@@ -15,7 +15,7 @@ export interface DnsVerificationResult {
  */
 export async function verifyCnameRecord(
   domain: string,
-  expectedTarget: string = 'cname.reviewreply.com'
+  expectedTarget: string = 'cname.reviewreply.pw'
 ): Promise<DnsVerificationResult> {
   const normalizedDomain = domain.trim().toLowerCase()
   const normalizedExpected = expectedTarget.trim().toLowerCase().replace(/\.$/, '')

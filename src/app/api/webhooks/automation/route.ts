@@ -6,6 +6,10 @@ import { ReviewSource, DraftStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
+import crypto from 'crypto'
+
+let ephemeralWebhookSecret: string | null = null
+
 // POST /api/webhooks/automation — Inbound cryptographically signed webhook for review events
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +19,15 @@ export async function POST(request: NextRequest) {
     const eventIdHeader = request.headers.get('x-reviewreply-event-id') || request.headers.get('x-event-id')
 
     // Webhook signing secret (configured in environment)
-    const secret = process.env.AUTOMATION_WEBHOOK_SECRET || process.env.SESSION_SECRET || 'default_test_webhook_secret_key_2026'
+    const secret = process.env.AUTOMATION_WEBHOOK_SECRET || process.env.SESSION_SECRET
+    if (process.env.NODE_ENV === 'production' && (!secret || secret.trim().length < 32)) {
+      console.error('[Automation Webhook] FATAL: AUTOMATION_WEBHOOK_SECRET or SESSION_SECRET must be configured and at least 32 characters in production')
+      return NextResponse.json({ error: 'Webhook service configuration error' }, { status: 500 })
+    }
+    if (!secret && !ephemeralWebhookSecret) {
+      ephemeralWebhookSecret = crypto.randomBytes(32).toString('hex')
+    }
+    const effectiveSecret = secret || ephemeralWebhookSecret!
 
     // 1. Verify signature, timestamp expiration, and event deduplication
     const verification = await verifyAndDeduplicateWebhook({
@@ -23,7 +35,7 @@ export async function POST(request: NextRequest) {
       signatureHeader,
       timestampHeader,
       eventIdHeader,
-      secret,
+      secret: effectiveSecret,
       provider: 'automation_webhook',
     })
 

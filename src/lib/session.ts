@@ -6,13 +6,26 @@ import type { Role } from '@prisma/client'
 export const SESSION_COOKIE = 'rr_session'
 export const SESSION_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+import crypto from 'crypto'
+
+let ephemeralDevSecret: string | null = null
+
 // Get secret key — fails closed in production if unset or < 32 characters
 export function getSessionSecret(): Uint8Array {
   const secretKey = process.env.SESSION_SECRET
-  if (process.env.NODE_ENV === 'production' && (!secretKey || secretKey.trim().length < 32)) {
-    throw new Error('FATAL: SESSION_SECRET must be configured and at least 32 characters in production')
+  if (process.env.NODE_ENV === 'production') {
+    if (!secretKey || secretKey.trim().length < 32) {
+      throw new Error('FATAL: SESSION_SECRET must be configured and at least 32 characters in production')
+    }
+    return new TextEncoder().encode(secretKey)
   }
-  return new TextEncoder().encode(secretKey || 'reviewreply-dev-secret-change-in-production-min-32-chars')
+  if (secretKey && secretKey.trim().length >= 32) {
+    return new TextEncoder().encode(secretKey)
+  }
+  if (!ephemeralDevSecret) {
+    ephemeralDevSecret = crypto.randomBytes(32).toString('hex')
+  }
+  return new TextEncoder().encode(ephemeralDevSecret)
 }
 
 export interface SessionUser {

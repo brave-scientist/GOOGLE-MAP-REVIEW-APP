@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
           domain: raw,
           status: 'PENDING_VERIFICATION',
           verificationToken,
-          cnameTarget: 'cname.reviewreply.com',
+          cnameTarget: 'cname.reviewreply.pw',
           sslStatus: 'PENDING',
         },
       })

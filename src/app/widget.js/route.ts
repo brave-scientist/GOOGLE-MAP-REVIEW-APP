@@ -27,8 +27,12 @@ const COLOR_THEMES: Record<string, { primary: string; bg: string; text: string; 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const businessName = searchParams.get('business') || ''
-  const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '5')))
-  const minRating = Math.min(5, Math.max(1, parseInt(searchParams.get('minRating') || '1')))
+  const rawLimit = parseInt(searchParams.get('limit') || '5', 10)
+  const limit = Number.isNaN(rawLimit) ? 5 : Math.min(50, Math.max(1, rawLimit))
+
+  const rawRating = parseInt(searchParams.get('minRating') || '1', 10)
+  const minRating = Number.isNaN(rawRating) ? 1 : Math.min(5, Math.max(1, rawRating))
+
   const themeId = searchParams.get('theme') || 'brass'
   const typeId = searchParams.get('type') || 'carousel'
 

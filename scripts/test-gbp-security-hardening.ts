@@ -44,7 +44,7 @@ function fail(category: 'STATIC' | 'UNIT' | 'INTEGRATION', name: string, reason:
   failedCount++
 }
 
-const TEST_SECRET = 'reviewreply-dev-secret-change-in-production-min-32-chars'
+const TEST_SECRET = process.env.TEST_SESSION_SECRET || crypto.randomBytes(32).toString('hex')
 process.env.SESSION_SECRET = TEST_SECRET
 process.env.GOOGLE_CLIENT_ID = 'mock_google_client_id_for_tests'
 process.env.GOOGLE_CLIENT_SECRET = 'mock_google_client_secret_for_tests'

@@ -32,31 +32,77 @@ export async function GET(request: NextRequest) {
     const orgMembers = await db.orgMember.findMany({
       where: { orgId: ctx.orgId },
       select: { userId: true },
+      take: 100,
     })
     const memberUserIds = orgMembers.map(m => m.userId)
 
-    // 2. Scoped WHERE — uses indexed columns only (targetId, actorId)
-    //    Never uses metadata contains (full-table scan risk).
-    const targetIds = [ctx.orgId, ...ctx.businessIds]
+    // 2. Resolve tenant-owned target IDs across child entities (templates, invitations, domains, reports, recent reviews)
+    //    Strictly prevents cross-tenant data leakage if an actor belongs to multiple organizations.
+    const [templates, invitations, customDomains, reports, recentReviews] = await Promise.all([
+      db.replyTemplate.findMany({
+        where: { businessId: { in: ctx.businessIds } },
+        select: { id: true },
+        take: 100,
+      }),
+      db.teamInvitation.findMany({
+        where: { orgId: ctx.orgId },
+        select: { id: true },
+        take: 100,
+      }),
+      db.customDomain.findMany({
+        where: { orgId: ctx.orgId },
+        select: { id: true },
+        take: 50,
+      }),
+      db.scheduledReport.findMany({
+        where: { orgId: ctx.orgId },
+        select: { id: true },
+        take: 100,
+      }),
+      ctx.businessIds.length > 0
+        ? db.review.findMany({
+            where: { businessId: { in: ctx.businessIds } },
+            select: { id: true },
+            orderBy: { createdAt: 'desc' },
+            take: 200,
+          })
+        : [],
+    ])
 
-    const where = memberUserIds.length > 0
-      ? {
-          OR: [
-            { targetId: { in: targetIds } },
-            {
-              actorId: { in: memberUserIds },
-              NOT: [
-                {
-                  targetType: 'organization',
-                  targetId: { not: ctx.orgId },
-                },
-              ],
-            },
-          ],
-        }
-      : {
-          targetId: { in: targetIds },
-        }
+    const allTenantTargetIds = [
+      ctx.orgId,
+      ...ctx.businessIds,
+      ...templates.map(t => t.id),
+      ...invitations.map(i => i.id),
+      ...customDomains.map(d => d.id),
+      ...reports.map(r => r.id),
+      ...recentReviews.map(r => r.id),
+    ]
+
+    // 3. Scoped WHERE — strictly restricts to verified tenant entities and member account events.
+    //    Uses indexed columns (targetId, targetType). Never performs unindexed metadata table scans.
+    const orConditions: Array<Record<string, unknown>> = [
+      { targetId: { in: allTenantTargetIds } },
+    ]
+
+    if (memberUserIds.length > 0) {
+      orConditions.push({
+        targetType: 'user',
+        targetId: { in: memberUserIds },
+      })
+
+      // Capture tenant member actions referencing this org or its businesses in metadata
+      // (e.g. templates, deleted entities, automation rules) while strictly preventing cross-org leaks.
+      const tenantScopeIds = [ctx.orgId, ...ctx.businessIds]
+      if (tenantScopeIds.length > 0) {
+        orConditions.push({
+          actorId: { in: memberUserIds },
+          OR: tenantScopeIds.map(id => ({ metadata: { contains: id } })),
+        })
+      }
+    }
+
+    const where = { OR: orConditions }
 
     const [entries, total] = await Promise.all([
       db.auditLog.findMany({

@@ -13,6 +13,10 @@ export const DEFAULT_E2E_DATABASE_URL =
  * NEVER allows cloud providers, non-local hosts, non-test database names, or production markers.
  */
 export function validateE2EDatabaseUrl(rawUrl?: string): string {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[FAIL-CLOSED PRODUCTION SAFETY VIOLATION] Test scripts cannot be executed in production environment (NODE_ENV=production).')
+  }
+
   // If explicitly unset, default to the local isolated test DB
   const url = rawUrl || DEFAULT_E2E_DATABASE_URL
 
