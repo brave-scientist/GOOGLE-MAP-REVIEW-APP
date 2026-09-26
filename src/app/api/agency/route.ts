@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext } from '@/lib/tenant-context'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,24 +12,46 @@ export async function GET(request: NextRequest) {
   if (ctx instanceof NextResponse) return ctx
 
   try {
+    const weekAgo = new Date()
+    weekAgo.setDate(weekAgo.getDate() - 7)
+
+    // Fetch businesses WITHOUT loading all reviews (avoid N+1 full-table scan).
+    // Use pre-computed avgRating/reviewCount columns plus targeted aggregates.
     const businesses = await db.business.findMany({
       where: { orgId: ctx.orgId },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        industry: true,
+        avgRating: true,
+        reviewCount: true,
+        createdAt: true,
+        // Count only posted-draft reviews for response rate — bounded aggregation
         reviews: {
-          select: { rating: true, createdAt: true, draftStatus: true },
+          where: { createdAt: { gte: weekAgo } },
+          select: { rating: true, draftStatus: true, createdAt: true },
+          take: 100, // bound: only care about velocity, not full history
         },
       },
       orderBy: { avgRating: 'desc' },
     })
 
-    const weekAgo = new Date()
-    weekAgo.setDate(weekAgo.getDate() - 7)
+    // Count posted (replied) reviews per business in one query instead of loading all reviews
+    const businessIds = businesses.map(b => b.id)
+    const postedCounts = await db.review.groupBy({
+      by: ['businessId'],
+      _count: { id: true },
+      where: {
+        businessId: { in: businessIds },
+        draftStatus: 'POSTED',
+      },
+    })
+    const postedMap = new Map(postedCounts.map(r => [r.businessId, r._count.id]))
 
     const clients = businesses.map(b => {
-      const reviews = b.reviews
-      const recentReviews = reviews.filter(r => r.createdAt >= weekAgo)
-      const replied = reviews.filter(r => r.draftStatus === 'POSTED').length
-      const responseRate = reviews.length > 0 ? Math.round((replied / reviews.length) * 100) : 0
+      const recentReviews = b.reviews
+      const replied = postedMap.get(b.id) || 0
+      const responseRate = b.reviewCount > 0 ? Math.round((replied / b.reviewCount) * 100) : 0
 
       const ratingScore = (b.avgRating / 5) * 40
       const velocityScore = Math.min(recentReviews.length / 10, 1) * 30
@@ -70,12 +93,16 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('Agency API error:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
+    console.error('[Agency API] error:', {
+      route: '/api/agency',
+      errorClass: (error as Error)?.name || 'UnknownError',
+    })
     return NextResponse.json(
       { error: 'Failed to fetch agency data' },
       { status: 500 }
     )
   }
 }
-
-

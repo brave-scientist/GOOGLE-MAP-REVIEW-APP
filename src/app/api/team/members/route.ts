@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext } from '@/lib/tenant-context'
 import { Plan } from '@prisma/client'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,7 +114,13 @@ export async function GET(request: NextRequest) {
       plan,
     })
   } catch (error) {
-    console.error('Failed to fetch team members:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
+    console.error('[Team Members API] error:', {
+      route: '/api/team/members',
+      errorClass: (error as Error)?.name || 'UnknownError',
+    })
     return NextResponse.json(
       { error: 'Failed to fetch team members' },
       { status: 500 }

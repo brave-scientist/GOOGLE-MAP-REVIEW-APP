@@ -61,7 +61,12 @@ export async function GET(request: NextRequest) {
         where: { id: businessIdParam.trim() },
         include: {
           reviews: {
-            where: { rating: { gte: minRating } },
+            where: {
+              rating: { gte: minRating },
+              // Never surface demo/seed reviews or INTERNAL source on public embeds
+              source: { not: 'INTERNAL' },
+              NOT: { externalId: { startsWith: 'seed_' } },
+            },
             orderBy: { createdAt: 'desc' },
             take: limit,
           },
@@ -72,7 +77,11 @@ export async function GET(request: NextRequest) {
         where: { slug: slugParam.trim().toLowerCase() },
         include: {
           reviews: {
-            where: { rating: { gte: minRating } },
+            where: {
+              rating: { gte: minRating },
+              source: { not: 'INTERNAL' },
+              NOT: { externalId: { startsWith: 'seed_' } },
+            },
             orderBy: { createdAt: 'desc' },
             take: limit,
           },
@@ -85,7 +94,11 @@ export async function GET(request: NextRequest) {
           where: { id: businessQuery },
           include: {
             reviews: {
-              where: { rating: { gte: minRating } },
+              where: {
+                rating: { gte: minRating },
+                source: { not: 'INTERNAL' },
+                NOT: { externalId: { startsWith: 'seed_' } },
+              },
               orderBy: { createdAt: 'desc' },
               take: limit,
             },
@@ -99,7 +112,11 @@ export async function GET(request: NextRequest) {
           where: { slug: businessQuery.toLowerCase() },
           include: {
             reviews: {
-              where: { rating: { gte: minRating } },
+              where: {
+                rating: { gte: minRating },
+                source: { not: 'INTERNAL' },
+                NOT: { externalId: { startsWith: 'seed_' } },
+              },
               orderBy: { createdAt: 'desc' },
               take: limit,
             },
@@ -114,7 +131,11 @@ export async function GET(request: NextRequest) {
           take: 2,
           include: {
             reviews: {
-              where: { rating: { gte: minRating } },
+              where: {
+                rating: { gte: minRating },
+                source: { not: 'INTERNAL' },
+                NOT: { externalId: { startsWith: 'seed_' } },
+              },
               orderBy: { createdAt: 'desc' },
               take: limit,
             },
@@ -316,7 +337,10 @@ export async function GET(request: NextRequest) {
   return new NextResponse(widgetJS, {
     headers: {
       'Content-Type': 'application/javascript',
-      'Cache-Control': 'public, max-age=300',
+      // Configuration-specific: type, theme, minRating, limit, businessId all change the response.
+      // CDN cannot key on query params without explicit configuration, so caching risks cross-collisions.
+      // no-store ensures each embed request is always fresh and config-correct.
+      'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
     },
   })

@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantContext } from '@/lib/tenant-context'
+import { isDatabasePoolError, createDatabasePoolResponse } from '@/lib/db-errors'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // GET /api/analytics — Compute sentiment + topic analytics
-// If ?reanalyze=true, re-runs LLM sentiment analysis on all reviews (slow but real)
-// Otherwise, uses cached sentiment scores from DB
+// Available to all authenticated tenants (no plan gate — analytics is a core feature).
+// If ?reanalyze=true, re-runs LLM sentiment analysis on all reviews (slow but real).
+// Otherwise, uses cached sentiment scores from DB.
 export async function GET(request: NextRequest) {
+  const ctx = await getTenantContext(request)
+  if (ctx instanceof NextResponse) return ctx
+
   try {
     const { searchParams } = new URL(request.url)
     const reanalyze = searchParams.get('reanalyze') === 'true'
-
-    // SEC-01: scope every query to the user's org (also enforces PRO plan)
-    const ctx = await getTenantContext(request, 'PRO')
-    if (ctx instanceof NextResponse) return ctx
 
     if (ctx.businessIds.length === 0) {
       return NextResponse.json({
@@ -33,11 +34,35 @@ export async function GET(request: NextRequest) {
       await reanalyzeAllReviews(ctx.businessIds)
     }
 
-    // Topic frequency + average sentiment per topic
-    const allReviews = await db.review.findMany({
-      where: { businessId: { in: ctx.businessIds }, topics: { not: null } },
-      select: { id: true, topics: true, sentimentScore: true, rating: true },
-    })
+    // Run all queries in parallel — single round-trip to the pooler
+    const [allReviews, sourceBreakdown, repliedReviews, reviewsWithAiSentiment] = await Promise.all([
+      // Topic frequency + average sentiment per topic
+      // Limit to 500 most-recent reviews for topic analysis to avoid loading unbounded sets
+      db.review.findMany({
+        where: { businessId: { in: ctx.businessIds }, topics: { not: null } },
+        select: { id: true, topics: true, sentimentScore: true, rating: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      }),
+      // Source breakdown (efficient groupBy)
+      db.review.groupBy({
+        by: ['source'],
+        _count: true,
+        _avg: { rating: true },
+        where: { businessId: { in: ctx.businessIds } },
+      }),
+      // Response time stats — limit to recent 200 replied reviews
+      db.review.findMany({
+        where: { businessId: { in: ctx.businessIds }, repliedAt: { not: null } },
+        select: { createdAt: true, repliedAt: true },
+        orderBy: { repliedAt: 'desc' },
+        take: 200,
+      }),
+      // AI sentiment coverage count
+      db.review.count({
+        where: { businessId: { in: ctx.businessIds }, sentimentScore: { not: null } },
+      }),
+    ])
 
     const topicMap: Record<string, { count: number; sentimentSum: number; ratingSum: number }> = {}
     for (const r of allReviews) {
@@ -65,14 +90,6 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 12)
 
-    // Source breakdown
-    const sourceBreakdown = await db.review.groupBy({
-      by: ['source'],
-      _count: true,
-      _avg: { rating: true },
-      where: { businessId: { in: ctx.businessIds } },
-    })
-
     // Sentiment distribution (computed from real scores)
     const sentimentBuckets = { positive: 0, neutral: 0, negative: 0 }
     for (const r of allReviews) {
@@ -82,22 +99,12 @@ export async function GET(request: NextRequest) {
       else sentimentBuckets.neutral++
     }
 
-    // Response time stats
-    const repliedReviews = await db.review.findMany({
-      where: { businessId: { in: ctx.businessIds }, repliedAt: { not: null } },
-      select: { createdAt: true, repliedAt: true },
-    })
     const responseTimes = repliedReviews
       .map(r => (r.repliedAt!.getTime() - r.createdAt.getTime()) / (1000 * 60 * 60))
       .filter(h => h >= 0 && h < 24 * 30)
     const avgResponseHours = responseTimes.length > 0
       ? Math.round((responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length) * 10) / 10
       : 0
-
-    // Check if sentiment was computed by AI or is from seed
-    const reviewsWithAiSentiment = await db.review.count({
-      where: { businessId: { in: ctx.businessIds }, sentimentScore: { not: null } },
-    })
 
     return NextResponse.json({
       topicAnalysis,
@@ -113,7 +120,13 @@ export async function GET(request: NextRequest) {
       aiSentimentCount: reviewsWithAiSentiment,
     })
   } catch (error) {
-    console.error('Analytics API error:', error)
+    if (isDatabasePoolError(error)) {
+      return createDatabasePoolResponse()
+    }
+    console.error('[Analytics API] error:', {
+      route: '/api/analytics',
+      errorClass: (error as Error)?.name || 'UnknownError',
+    })
     return NextResponse.json(
       { error: 'Failed to fetch analytics' },
       { status: 500 }
@@ -126,6 +139,7 @@ async function reanalyzeAllReviews(businessIds: string[]) {
   const reviews = await db.review.findMany({
     where: { businessId: { in: businessIds } },
     select: { id: true, text: true, rating: true },
+    take: 100, // bound the operation
   })
 
   // Process in batches of 5 to avoid rate limits
@@ -143,7 +157,7 @@ async function reanalyzeAllReviews(businessIds: string[]) {
           },
         })
       } catch (e) {
-        console.error(`Failed to analyze review ${review.id}:`, e)
+        console.error(`[Analytics] Failed to analyze review ${review.id}:`, e)
       }
     })
     await Promise.all(promises)
@@ -193,7 +207,7 @@ Rules:
       }
     }
   } catch (error) {
-    console.error('LLM sentiment analysis failed:', error)
+    console.error('[Analytics] LLM sentiment analysis failed:', error)
   }
 
   // Fallback: derive sentiment from rating

@@ -68,6 +68,7 @@ export default function WidgetsPage() {
   const [selectedType, setSelectedType] = useState('carousel')
   const [selectedTheme, setSelectedTheme] = useState('brass')
   const [minRating, setMinRating] = useState(4)
+  const [maxReviews, setMaxReviews] = useState(10)
   const [copied, setCopied] = useState(false)
 
   const [analyticsData, setAnalyticsData] = useState<{
@@ -116,8 +117,9 @@ export default function WidgetsPage() {
   const origin = typeof window !== 'undefined' ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL || 'https://reviewreply.pw')
   const hasBusiness = Boolean(activeBusiness && activeBusiness.id)
   const embedIdentifier = activeBusiness?.slug ? `slug=${encodeURIComponent(activeBusiness.slug)}` : `businessId=${encodeURIComponent(activeBusiness?.id || '')}`
+  const clampedLimit = Math.min(50, Math.max(1, maxReviews || 10))
   const embedCode = hasBusiness
-    ? `<script src="${origin}/widget.js?${embedIdentifier}&type=${selectedType}&theme=${selectedTheme}&minRating=${minRating}&limit=5" async></script>`
+    ? `<script src="${origin}/widget.js?${embedIdentifier}&type=${selectedType}&theme=${selectedTheme}&minRating=${minRating}&limit=${clampedLimit}" async></script>`
     : '<!-- Please select an active business location to generate your widget embed code -->'
 
   const copyCode = () => {
@@ -243,7 +245,15 @@ export default function WidgetsPage() {
                       </div>
                       <div>
                         <Label htmlFor="count" className="text-xs">Max reviews to show</Label>
-                        <Input id="count" type="number" defaultValue={10} min={1} max={50} className="mt-1.5 glass-card" />
+                        <Input
+                          id="count"
+                          type="number"
+                          value={maxReviews}
+                          onChange={e => setMaxReviews(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
+                          min={1}
+                          max={50}
+                          className="mt-1.5 glass-card"
+                        />
                       </div>
                     </div>
                   </Card>

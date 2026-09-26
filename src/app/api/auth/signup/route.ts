@@ -150,7 +150,14 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Seed demo reviews for immediate exploration
+      // Seed INTERNAL demo reviews for immediate product exploration.
+      // Rules enforced here:
+      //   - source: INTERNAL (never GOOGLE/FACEBOOK — these are NOT real reviews)
+      //   - externalId: 'seed_{businessId}_{random}' (prevents sync collision)
+      //   - These reviews are clearly identifiable as sample data by the seed_ prefix
+      //   - They CANNOT be replied to through Google/Facebook APIs (wrong source)
+      //   - They MUST NOT appear on public-facing pages without explicit demo labelling
+      const DEMO_AUTHOR_NAMES = ['Sarah Chen', 'Marcus Webb', 'Priya Patel', 'James Rodriguez', 'Emily Watson']
       const demoReviews = [
         { rating: 5, text: 'Amazing experience! The staff was incredibly welcoming and the service was top-notch.', topics: ['service', 'staff'] },
         { rating: 4, text: 'Great food and atmosphere. Will definitely be back!', topics: ['food', 'atmosphere'] },
@@ -158,20 +165,21 @@ export async function POST(request: NextRequest) {
         { rating: 3, text: 'Decent experience. Service was a bit slow but the food made up for it.', topics: ['service', 'food'] },
         { rating: 5, text: 'Outstanding! This is what customer service should look like.', topics: ['service', 'staff'] },
       ]
-      for (const r of demoReviews) {
+      for (let idx = 0; idx < demoReviews.length; idx++) {
+        const r = demoReviews[idx]
         await tx.review.create({
           data: {
             businessId: business.id,
-            source: 'GOOGLE',
-            externalId: `seed_${business.id}_${Math.random().toString(36).slice(2)}`,
-            author: ['Sarah Chen', 'Marcus Webb', 'Priya Patel', 'James Rodriguez', 'Emily Watson'][Math.floor(Math.random() * 5)],
+            source: 'INTERNAL',  // SEC: NEVER use GOOGLE — these are demo/sample records only
+            externalId: `seed_${business.id}_${idx}`,  // deterministic for idempotency
+            author: DEMO_AUTHOR_NAMES[idx % DEMO_AUTHOR_NAMES.length],
             rating: r.rating,
             title: r.rating >= 4 ? 'Great experience!' : 'Mixed experience',
             text: r.text,
             sentimentScore: r.rating >= 4 ? 0.7 + Math.random() * 0.3 : r.rating === 3 ? 0.1 : -0.4,
             topics: JSON.stringify(r.topics),
             draftStatus: 'NONE',
-            createdAt: new Date(Date.now() - Math.floor(Math.random() * 7 * 24 * 60 * 60 * 1000)),
+            createdAt: new Date(Date.now() - (demoReviews.length - idx) * 24 * 60 * 60 * 1000),
             fetchedAt: new Date(),
           },
         })

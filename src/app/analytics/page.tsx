@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AppSidebar, AppTopbar, MobileNav } from '@/components/app/sidebar'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { BarChart3, Clock, TrendingUp, MessageSquare, Star, Sparkles, Loader2 } from 'lucide-react'
+import { BarChart3, Clock, TrendingUp, MessageSquare, Star, Sparkles, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -22,21 +22,45 @@ interface AnalyticsData {
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [reanalyzing, setReanalyzing] = useState(false)
+
+  const loadAnalytics = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const r = await fetch('/api/analytics')
+      const d = await r.json()
+      if (!r.ok) {
+        throw new Error(d?.error || d?.message || `Error ${r.status}`)
+      }
+      setData(d)
+    } catch (e: unknown) {
+      console.error('[Analytics]', e)
+      setError((e as Error).message || 'Failed to load analytics')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     let ignore = false
     fetch('/api/analytics')
-      .then(r => r.json())
-      .then(d => {
+      .then(async (r) => {
+        const d = await r.json()
+        if (!r.ok) {
+          throw new Error(d?.error || d?.message || `Error ${r.status}`)
+        }
         if (!ignore) {
           setData(d)
+          setError(null)
           setLoading(false)
         }
       })
-      .catch(e => {
+      .catch((e: unknown) => {
         if (!ignore) {
-          console.error(e)
+          console.error('[Analytics]', e)
+          setError((e as Error).message || 'Failed to load analytics')
           setLoading(false)
         }
       })
@@ -85,6 +109,18 @@ export default function AnalyticsPage() {
                 </Card>
               ))}
             </div>
+          ) : error ? (
+            <Card className="p-12 glass-card text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="font-display font-bold mb-1">Failed to load analytics</h3>
+              <p className="text-sm text-muted-foreground mb-4">{error}</p>
+              <Button variant="outline" onClick={loadAnalytics}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Retry
+              </Button>
+            </Card>
           ) : data ? (
             <>
               {/* AI sentiment banner */}
